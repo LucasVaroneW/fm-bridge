@@ -1,0 +1,250 @@
+// fm-bridge — FileMaker script clipboard bridge.
+// Core: XMSS ↔ plain text parsing, clipboard I/O, JSON protocol over stdio.
+// No UI, no HTTP, no async. Procedural and minimal.
+
+mod clipboard;
+mod steps;
+mod text_format;
+mod xmss;
+
+use serde::{Deserialize, Serialize};
+use std::io::Read;
+
+// ─── JSON protocol ───
+// Stable API for the VS Code extension.
+// New fields must be optional with skip_serializing_if.
+
+#[derive(Serialize, Deserialize)]
+struct Command {
+    command: String,
+    #[serde(default)]
+    script_text: Option<String>,
+}
+
+#[derive(Serialize)]
+struct Response {
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    script_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+}
+
+fn handle_command(cmd: &Command) -> Response {
+    match cmd.command.as_str() {
+        "version" => Response {
+            status: "ok".to_string(),
+            script_text: None,
+            error: None,
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        },
+        "read" => {
+            match clipboard::read_fm_clipboard() {
+                Ok(data) => {
+                    match xmss::decode_xmss(&data) {
+                        Ok(script) => {
+                            let text = text_format::format_script(&script);
+                            Response { status: "ok".to_string(), script_text: Some(text), error: None, version: None }
+                        }
+                        Err(e) => Response { status: "error".to_string(), script_text: None, error: Some(e), version: None }
+                    }
+                }
+                Err(e) => Response { status: "error".to_string(), script_text: None, error: Some(e), version: None }
+            }
+        }
+        "write" => {
+            let script_text = match &cmd.script_text {
+                Some(t) => t,
+                None => return Response { status: "error".to_string(), script_text: None, error: Some("No script_text provided".to_string()), version: None }
+            };
+            match xmss::encode_xmss(script_text) {
+                Ok(xmss_data) => {
+                    match clipboard::write_fm_clipboard(&xmss_data) {
+                        Ok(()) => Response { status: "ok".to_string(), script_text: None, error: None, version: None },
+                        Err(e) => Response { status: "error".to_string(), script_text: None, error: Some(e), version: None }
+                    }
+                }
+                Err(e) => Response { status: "error".to_string(), script_text: None, error: Some(e), version: None }
+            }
+        }
+        _ => Response { status: "error".to_string(), script_text: None, error: Some(format!("Unknown command: {}", cmd.command)), version: None }
+    }
+}
+
+fn run_json_mode() -> Result<(), String> {
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input)
+        .map_err(|e| format!("Cannot read stdin: {}", e))?;
+    let cmd: Command = serde_json::from_str(&input)
+        .map_err(|e| format!("Invalid JSON: {}", e))?;
+    let response = handle_command(&cmd);
+    let output = serde_json::to_string(&response)
+        .map_err(|e| format!("Cannot serialize response: {}", e))?;
+    print!("{}", output);
+    Ok(())
+}
+
+// ─── CLI commands ───
+
+fn run_cli_mode() -> Result<(), String> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.is_empty() {
+        return run_read_cli();
+    }
+    match args[0].as_str() {
+        "read" => run_read_cli(),
+        "write" => {
+            if args.len() < 2 {
+                return Err("Usage: fm-bridge write <file.fmscript>".to_string());
+            }
+            run_write_cli(&args[1])
+        }
+        "json" => run_json_mode(),
+        "debug" => run_debug_cli(),
+        "test" => run_test_cli(),
+        "passthrough" => run_passthrough_cli(),
+        "dump-ids" => run_dump_ids_cli(),
+        _ => Err(format!("Unknown command: {}. Use: read, write, json, debug, test, passthrough, dump-ids", args[0]))
+    }
+}
+
+fn run_read_cli() -> Result<(), String> {
+    let data = clipboard::read_fm_clipboard()?;
+    let script = xmss::decode_xmss(&data)?;
+    println!("{}", text_format::format_script(&script));
+    Ok(())
+}
+
+fn run_write_cli(file_path: &str) -> Result<(), String> {
+    let text = std::fs::read_to_string(file_path)
+        .map_err(|e| format!("Cannot read file {}: {}", file_path, e))?;
+    let xmss_data = xmss::encode_xmss(&text)?;
+    clipboard::write_fm_clipboard(&xmss_data)?;
+    println!("Script written to clipboard from {}", file_path);
+    Ok(())
+}
+
+fn run_debug_cli() -> Result<(), String> {
+    let formats = clipboard::list_clipboard_formats();
+    println!("=== Clipboard formats ({} total) ===", formats.len());
+    for (fmt, name, fmt_size) in &formats {
+        println!("  ID: {:5}  Name: {:30}  Size: {} bytes", fmt, name, fmt_size);
+    }
+
+    let data = clipboard::read_fm_clipboard()?;
+    println!("\n=== FM data ({} bytes) ===", data.len());
+    println!("Header: {:02x} {:02x} {:02x} {:02x}", data[0], data[1], data[2], data[3]);
+
+    let xml_str = xmss::strip_header(&data)?;
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    let output_path = manifest_dir.join("debug_raw.xml");
+    std::fs::write(&output_path, &xml_str)
+        .map_err(|e| format!("Cannot write {}: {}", output_path.display(), e))?;
+    println!("\nRaw XML saved to: {}", output_path.display());
+
+    let script = xmss::parse_fmxml_snippet(&xml_str)?;
+    let built_xml = xmss::build_xml_from_script(&script)?;
+    let built_path = manifest_dir.join("debug_built.xml");
+    std::fs::write(&built_path, &built_xml)
+        .map_err(|e| format!("Cannot write {}: {}", built_path.display(), e))?;
+    println!("Built XML saved to: {}", built_path.display());
+
+    println!("\n=== DECODED SCRIPT ===\n");
+    println!("{}", text_format::format_script(&script));
+    Ok(())
+}
+
+fn run_dump_ids_cli() -> Result<(), String> {
+    let data = clipboard::read_fm_clipboard()?;
+    let script = xmss::decode_xmss(&data)?;
+    for step in &script.steps {
+        println!("{}\t{}", step.id, step.name);
+    }
+    Ok(())
+}
+
+fn run_passthrough_cli() -> Result<(), String> {
+    let data = clipboard::read_fm_clipboard()?;
+    println!("Read {} bytes from clipboard", data.len());
+    println!("Header: {:02X} {:02X} {:02X} {:02X}", data[0], data[1], data[2], data[3]);
+
+    // Also save raw bytes for comparison
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let raw_path = manifest_dir.join("clipboard_raw.bin");
+    std::fs::write(&raw_path, &data)
+        .map_err(|e| format!("Cannot save raw data: {}", e))?;
+    println!("Raw bytes saved to: {}", raw_path.display());
+
+    clipboard::write_fm_clipboard(&data)?;
+    println!("Wrote {} bytes back to clipboard (exact copy)", data.len());
+    println!("Now try pasting in FileMaker.");
+    Ok(())
+}
+
+fn run_test_cli() -> Result<(), String> {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let test_file = manifest_dir.join("test_script.fmscript");
+
+    println!("=== ROUNDTRIP TEST ===\n");
+    println!("Input file: {}\n", test_file.display());
+
+    let input_text = std::fs::read_to_string(&test_file)
+        .map_err(|e| format!("Cannot read {}: {}", test_file.display(), e))?;
+
+    println!("--- INPUT TEXT ---");
+    println!("{}", input_text);
+
+    let xmss_data = xmss::encode_xmss(&input_text)?;
+    let xml_path = manifest_dir.join("test_roundtrip.xml");
+    let xml_str = std::str::from_utf8(&xmss_data)
+        .map_err(|e| format!("Invalid UTF-8 in generated XML: {}", e))?;
+    std::fs::write(&xml_path, xml_str)
+        .map_err(|e| format!("Cannot write {}: {}", xml_path.display(), e))?;
+
+    println!("\n--- GENERATED XML ({} bytes) ---", xmss_data.len());
+    println!("Saved to: {}", xml_path.display());
+
+    let decoded_script = xmss::decode_xmss(&xmss_data)?;
+    let output_text = text_format::format_script(&decoded_script);
+
+    println!("\n--- DECODED TEXT ---");
+    println!("{}", output_text);
+
+    let input_lines: Vec<&str> = input_text.lines().collect();
+    let output_lines: Vec<&str> = output_text.lines().collect();
+
+    println!("\n--- COMPARISON ---");
+    println!("Input lines:  {}", input_lines.len());
+    println!("Output lines: {}", output_lines.len());
+
+    let mut all_match = true;
+    let max_lines = input_lines.len().max(output_lines.len());
+    for i in 0..max_lines {
+        let inp = input_lines.get(i).unwrap_or(&"<missing>");
+        let out = output_lines.get(i).unwrap_or(&"<missing>");
+        if inp.trim() != out.trim() {
+            println!("  Line {}: INPUT  >> {}<<", i + 1, inp);
+            println!("  Line {}: OUTPUT >> {}<<", i + 1, out);
+            all_match = false;
+        }
+    }
+
+    if all_match {
+        println!("\n*** ROUNDTRIP OK - All lines match ***");
+    } else {
+        println!("\n*** ROUNDTRIP FAILED - Lines differ ***");
+    }
+
+    Ok(())
+}
+
+fn main() {
+    let result = run_cli_mode();
+    if let Err(e) = result {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}

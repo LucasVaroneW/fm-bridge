@@ -1,0 +1,1874 @@
+# Step definitions for fm-bridge
+# Single source of truth for step names, shapes, and block behavior.
+# `en` = canonical English name used in .fmscript text and XML output.
+# `es` = Spanish name FileMaker emits in Spanish locale (for ES→EN translation).
+# `id` = FileMaker global step type ID. REQUIRED for write to work. Discover via `dump-ids`.
+# `shape` = how the step's data is serialized in XML. "plain" = no parameters.
+
+# ─── Control flow ───
+
+[[steps]]
+kind = "Comment"
+id = 89
+en = "# (comment)"
+es = "# (comentario)"
+shape = "comment"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetVariable"
+id = 141
+en = "Set Variable"
+es = "Establecer variable"
+shape = "value_calc_name"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "If"
+id = 68
+en = "If"
+es = "Si"
+shape = "calculation_with_restore"
+opens_block = true
+closes_block = false
+
+[[steps]]
+kind = "ElseIf"
+id = 125
+en = "Else If"
+es = "Si no"
+shape = "calculation_with_restore"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "Else"
+id = 69
+en = "Else"
+es = "Else"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "EndIf"
+id = 70
+en = "End If"
+es = "Fin Si"
+shape = "plain"
+opens_block = false
+closes_block = true
+
+[[steps]]
+kind = "Loop"
+id = 71
+en = "Loop"
+es = "Bucle"
+shape = "plain"
+opens_block = true
+closes_block = false
+
+[[steps]]
+kind = "ExitLoopIf"
+id = 72
+en = "Exit Loop If"
+es = "Salir del bucle si"
+shape = "calculation"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "EndLoop"
+id = 73
+en = "End Loop"
+es = "Fin Bucle"
+shape = "plain"
+opens_block = false
+closes_block = true
+
+# ─── Script execution / errors ───
+
+[[steps]]
+kind = "SetErrorCapture"
+id = 86
+en = "Set Error Capture"
+es = "Establecer captura de errores"
+shape = "set_state"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "AllowUserAbort"
+id = 85
+en = "Allow User Abort"
+es = "Permitir cancelación del usuario"
+shape = "calculation"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "HaltScript"
+id = 90
+en = "Halt Script"
+es = "Detener guión"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ExitScript"
+id = 103
+en = "Exit Script"
+es = "Salir del guión"
+shape = "calculation"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PerformScript"
+id = 1
+en = "Perform Script"
+es = "Ejecutar guión"
+shape = "calculation"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PerformScriptOnServer"
+id = 164
+en = "Perform Script on Server"
+es = "Ejecutar guión en el servidor"
+shape = "calculation"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PerformScriptOnServerWithCallback"
+id = 210
+en = "Perform Script on Server with Callback"
+es = "Ejecutar guión en el servidor con devolución de llamada"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PauseResumeScript"
+id = 62
+en = "Pause/Resume Script"
+es = "Pausar/reanudar guión"
+shape = "calculation"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InstallOnTimerScript"
+id = 148
+en = "Install OnTimer Script"
+es = "Instalar guión OnTimer"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConfigureRegionMonitorScript"
+id = 185
+en = "Configure Region Monitor Script"
+es = "Configurar Guión Supervisor de Región"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Records ───
+
+[[steps]]
+kind = "NewRecord"
+id = 7
+en = "New Record/Request"
+es = "Nuevo registro/petición"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "DeleteRecord"
+id = 9
+en = "Delete Record/Request"
+es = "Eliminar registro/petición"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "DeleteAllRecords"
+id = 10
+en = "Delete All Records"
+es = "Eliminar todos los registros"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "DuplicateRecord"
+id = 8
+en = "Duplicate Record/Request"
+es = "Duplicar registro/petición"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "CopyRecord"
+id = 101
+en = "Copy Record/Request"
+es = "Copiar registro/petición"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "CopyAllRecords"
+id = 98
+en = "Copy All Records/Requests"
+es = "Copiar todos los registros/peticiones"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "RevertRecord"
+id = 51
+en = "Revert Record/Request"
+es = "Restablecer registro/petición"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "CommitRecords"
+id = 75
+en = "Commit Records/Requests"
+es = "Consignar registros/peticiones"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenRecord"
+id = 133
+en = "Open Record/Request"
+es = "Abrir registro/petición"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GoToRecord"
+id = 16
+en = "Go to Record/Request/Page"
+es = "Ir al registro/petición/página"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GoToRelatedRecord"
+id = 74
+en = "Go to Related Record"
+es = "Ir al registro relacionado"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GoToPortalRow"
+id = 99
+en = "Go to Portal Row"
+es = "Ir a la fila del portal"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "DeletePortalRow"
+id = 104
+en = "Delete Portal Row"
+es = "Eliminar fila del portal"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "TruncateTable"
+id = 182
+en = "Truncate Table"
+es = "Truncar tabla"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Find / found set ───
+
+[[steps]]
+kind = "PerformFind"
+id = 28
+en = "Perform Find"
+es = "Ejecutar búsqueda"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PerformQuickFind"
+id = 150
+en = "Perform Quick Find"
+es = "Realizar una búsqueda rápida"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PerformFindReplace"
+id = 128
+en = "Perform Find/Replace"
+es = "Ejecutar Buscar/reemplazar"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PerformSemanticFind"
+id = 218
+en = "Perform Semantic Find"
+es = "Realizar búsqueda semántica"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PerformNaturalLanguageFind"
+id = 221
+en = "Perform Natural Language Search"
+es = "Ejecutar búsqueda en lenguaje natural"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "FindMatchingRecords"
+id = 155
+en = "Find Matching Records"
+es = "Buscar registros concordantes"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConstrainFoundSet"
+id = 126
+en = "Constrain Found Set"
+es = "Restringir conjunto encontrado"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ExtendFoundSet"
+id = 127
+en = "Extend Found Set"
+es = "Ampliar conjunto encontrado"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ModifyLastFind"
+id = 24
+en = "Modify Last Find"
+es = "Cambiar búsqueda anterior"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ShowAllRecords"
+id = 23
+en = "Show All Records"
+es = "Mostrar todos los registros"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ShowOmittedOnly"
+id = 27
+en = "Show Omitted Only"
+es = "Mostrar sólo omitidos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OmitRecord"
+id = 25
+en = "Omit Record"
+es = "Omitir registro"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OmitMultipleRecords"
+id = 26
+en = "Omit Multiple Records"
+es = "Omitir múltiples registros"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenEditSavedFinds"
+id = 149
+en = "Open Edit Saved Finds"
+es = "Abrir Editar búsquedas guardadas"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Sort ───
+
+[[steps]]
+kind = "SortRecords"
+id = 39
+en = "Sort Records"
+es = "Ordenar registros"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SortRecordsByField"
+id = 154
+en = "Sort Records by Field"
+es = "Ordenar registros por campo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "UnsortRecords"
+id = 21
+en = "Unsort Records"
+es = "Desordenar registros"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Fields ───
+
+[[steps]]
+kind = "SetField"
+id = 76
+en = "Set Field"
+es = "Establecer campo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetFieldByName"
+id = 147
+en = "Set Field By Name"
+es = "Establecer campo por nombre"
+shape = "field_by_name"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GoToField"
+id = 17
+en = "Go to Field"
+es = "Ir al campo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GoToNextField"
+id = 4
+en = "Go to Next Field"
+es = "Ir al campo siguiente"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GoToPreviousField"
+id = 5
+en = "Go to Previous Field"
+es = "Ir al campo anterior"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "RelookupFieldContents"
+id = 40
+en = "Relookup Field Contents"
+es = "Volver a buscar contenido del campo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ExportFieldContents"
+id = 132
+en = "Export Field Contents"
+es = "Exportar contenido del campo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetNextSerialValue"
+id = 116
+en = "Set Next Serial Value"
+es = "Configurar siguiente valor secuencial"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Insert ───
+
+[[steps]]
+kind = "InsertText"
+id = 61
+en = "Insert Text"
+es = "Insertar texto"
+shape = "calculation"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertCalculatedResult"
+id = 77
+en = "Insert Calculated Result"
+es = "Insertar resultado calculado"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertCurrentDate"
+id = 13
+en = "Insert Current Date"
+es = "Insertar fecha actual"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertCurrentTime"
+id = 14
+en = "Insert Current Time"
+es = "Insertar hora actual"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertCurrentUserName"
+id = 60
+en = "Insert Current User Name"
+es = "Insertar nombre del usuario actual"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertFromIndex"
+id = 11
+en = "Insert from Index"
+es = "Insertar desde índice"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertFromURL"
+id = 160
+en = "Insert from URL"
+es = "Insertar desde URL"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertFromDevice"
+id = 161
+en = "Insert from Device"
+es = "Insertar desde dispositivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertPicture"
+id = 56
+en = "Insert Picture"
+es = "Insertar imagen"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertAudioVideo"
+id = 159
+en = "Insert Audio/Video"
+es = "Insertar audio/vídeo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertPDF"
+id = 158
+en = "Insert PDF"
+es = "Insertar PDF"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertFile"
+id = 131
+en = "Insert File"
+es = "Insertar archivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertEmbedded"
+id = 215
+en = "Insert Embedded"
+es = "Insertar incrustación"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InsertEmbeddedInFoundSet"
+id = 216
+en = "Insert Embedded in Found Set"
+es = "Insertar incrustación en el conjunto encontrado"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Import / export ───
+
+[[steps]]
+kind = "ImportRecords"
+id = 35
+en = "Import Records"
+es = "Importar registros"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ExportRecords"
+id = 36
+en = "Export Records"
+es = "Exportar registros"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SaveRecordsAsExcel"
+id = 143
+en = "Save Records as Excel"
+es = "Guardar registros como Excel"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SaveRecordsAsPDF"
+id = 144
+en = "Save Records as PDF"
+es = "Guardar registros como PDF"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SaveRecordsAsSnapshotLink"
+id = 152
+en = "Save Records as Snapshot Link"
+es = "Guardar registros como enlace a snapshot"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SaveACopyAs"
+id = 37
+en = "Save a Copy As"
+es = "Guardar una copia como"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SaveAsXML"
+id = 3
+en = "Save as XML"
+es = "Guardar una copia como XML"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Layout / mode / view ───
+
+[[steps]]
+kind = "GoToLayout"
+id = 6
+en = "Go to Layout"
+es = "Ir a la presentación"
+shape = "calculation"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GoToObject"
+id = 145
+en = "Go to Object"
+es = "Ir a objeto"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GoToRecordsList"
+id = 228
+en = "Go to Records List"
+es = "Ir a Lista de registros"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "EnterFindMode"
+id = 22
+en = "Enter Find Mode"
+es = "Modo Buscar"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "EnterPreviewMode"
+id = 41
+en = "Enter Preview Mode"
+es = "Modo Vista previa"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "EnterBrowseMode"
+id = 55
+en = "Enter Browse Mode"
+es = "Modo Visualizar"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ViewAs"
+id = 30
+en = "View As"
+es = "Ver como"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "RefreshObject"
+id = 167
+en = "Refresh Object"
+es = "Actualizar objeto"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "RefreshPortal"
+id = 180
+en = "Refresh Portal"
+es = "Actualizar portal"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConfigureLayoutObjectAnimation"
+id = 168
+en = "Configure Layout Object Animation"
+es = "Configurar animación de objetos de la presentación"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InstallMenuSet"
+id = 142
+en = "Install Menu Set"
+es = "Instalar juego de menús"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Windows ───
+
+[[steps]]
+kind = "NewWindow"
+id = 122
+en = "New Window"
+es = "Nueva ventana"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "CloseWindow"
+id = 121
+en = "Close Window"
+es = "Cerrar ventana"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ClosePopover"
+id = 169
+en = "Close Popover"
+es = "Cerrar panel flotante"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "AdjustWindow"
+id = 31
+en = "Adjust Window"
+es = "Ajustar ventana"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "MoveResizeWindow"
+id = 119
+en = "Move/Resize Window"
+es = "Mover/Cambiar tamaño de ventana"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ScrollWindow"
+id = 81
+en = "Scroll Window"
+es = "Desplazar ventana"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ArrangeAllWindows"
+id = 120
+en = "Arrange All Windows"
+es = "Organizar todas las ventanas"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SelectWindow"
+id = 123
+en = "Select Window"
+es = "Seleccionar ventana"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "FreezeWindow"
+id = 79
+en = "Freeze Window"
+es = "Congelar ventana"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "RefreshWindow"
+id = 80
+en = "Refresh Window"
+es = "Refrescar ventana"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetWindowTitle"
+id = 124
+en = "Set Window Title"
+es = "Establecer título de ventana"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetZoomLevel"
+id = 97
+en = "Set Zoom Level"
+es = "Establecer nivel de ampliación"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ShowHideMenubar"
+id = 166
+en = "Show/Hide Menubar"
+es = "Mostrar/Ocultar barra de menús"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ShowHideToolbars"
+id = 29
+en = "Show/Hide Toolbars"
+es = "Mostrar/Ocultar barras de herramientas"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ShowHideTextRuler"
+id = 92
+en = "Show/Hide Text Ruler"
+es = "Mostrar/Ocultar regla de texto"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "AllowFormattingBar"
+id = 115
+en = "Allow Formatting Bar"
+es = "Permitir barra de formato de texto"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Dialogs ───
+
+[[steps]]
+kind = "ShowCustomDialog"
+id = 87
+en = "Show Custom Dialog"
+es = "Mostrar cuadro de diálogo personalizado"
+shape = "dialog"
+opens_block = false
+closes_block = false
+
+# ─── Edit / clipboard ───
+
+[[steps]]
+kind = "Undo"
+id = 45
+en = "Undo/Redo"
+es = "Deshacer/rehacer"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "Cut"
+id = 46
+en = "Cut"
+es = "Cortar"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "Copy"
+id = 47
+en = "Copy"
+es = "Copiar"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "Paste"
+id = 48
+en = "Paste"
+es = "Pegar"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "Clear"
+id = 49
+en = "Clear"
+es = "Borrar"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SelectAll"
+id = 50
+en = "Select All"
+es = "Seleccionar todo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetSelection"
+id = 130
+en = "Set Selection"
+es = "Establecer selección"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Files ───
+
+[[steps]]
+kind = "NewFile"
+id = 82
+en = "New File"
+es = "Nuevo archivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenFile"
+id = 33
+en = "Open File"
+es = "Abrir archivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "CloseFile"
+id = 34
+en = "Close File"
+es = "Cerrar archivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConvertFile"
+id = 139
+en = "Convert File"
+es = "Convertir archivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "RecoverFile"
+id = 95
+en = "Recover File"
+es = "Recuperar archivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "RenameFile"
+id = 199
+en = "Rename File"
+es = "Cambiar nombre de archivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "DeleteFile"
+id = 197
+en = "Delete File"
+es = "Eliminar archivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GetFileExists"
+id = 188
+en = "Get File Exists"
+es = "Obtener archivo existente"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GetFileSize"
+id = 189
+en = "Get File Size"
+es = "Obtener tamaño de archivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GetFolderPath"
+id = 181
+en = "Get Folder Path"
+es = "Obtener ruta de carpeta"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Data files ───
+
+[[steps]]
+kind = "CreateDataFile"
+id = 190
+en = "Create Data File"
+es = "Crear archivo de datos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenDataFile"
+id = 191
+en = "Open Data File"
+es = "Abrir archivo de datos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "CloseDataFile"
+id = 196
+en = "Close Data File"
+es = "Cerrar archivo de datos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ReadFromDataFile"
+id = 193
+en = "Read from Data File"
+es = "Leer desde el archivo de datos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "WriteToDataFile"
+id = 192
+en = "Write to Data File"
+es = "Escribir en el archivo de datos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetDataFilePosition"
+id = 195
+en = "Set Data File Position"
+es = "Establecer posición del archivo de datos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GetDataFilePosition"
+id = 194
+en = "Get Data File Position"
+es = "Obtener posición del archivo de datos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Transactions ───
+
+[[steps]]
+kind = "OpenTransaction"
+id = 205
+en = "Open Transaction"
+es = "Abrir transacción"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "CommitTransaction"
+id = 206
+en = "Commit Transaction"
+es = "Confirmar transacción"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "RevertTransaction"
+id = 207
+en = "Revert Transaction"
+es = "Revertir transacción"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "RevertTransactionOnError"
+id = 223
+en = "Revert Transaction on Error"
+es = "Revertir transacción en caso de error"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Accounts ───
+
+[[steps]]
+kind = "AddAccount"
+id = 134
+en = "Add Account"
+es = "Añadir cuenta"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "DeleteAccount"
+id = 135
+en = "Delete Account"
+es = "Eliminar cuenta"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "EnableAccount"
+id = 137
+en = "Enable Account"
+es = "Activar cuenta"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ResetAccountPassword"
+id = 136
+en = "Reset Account Password"
+es = "Restablecer contraseña de cuenta"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ChangePassword"
+id = 83
+en = "Change Password"
+es = "Cambiar contraseña"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ReLogin"
+id = 138
+en = "Re-Login"
+es = "Volver a iniciar sesión"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetSessionIdentifier"
+id = 208
+en = "Set Session Identifier"
+es = "Establecer identificador de sesión"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Printing ───
+
+[[steps]]
+kind = "Print"
+id = 43
+en = "Print"
+es = "Imprimir"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PrintSetup"
+id = 42
+en = "Print Setup"
+es = "Configurar impresión"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Spelling ───
+
+[[steps]]
+kind = "CheckSelection"
+id = 18
+en = "Check Selection"
+es = "Comprobar selección"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "CheckRecord"
+id = 19
+en = "Check Record"
+es = "Comprobar registro"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "CheckFoundSet"
+id = 20
+en = "Check Found Set"
+es = "Comprobar conjunto hallado"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "CorrectWord"
+id = 106
+en = "Correct Word"
+es = "Corregir palabra"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SpellingOptions"
+id = 107
+en = "Spelling Options"
+es = "Opciones de ortografía"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SelectDictionaries"
+id = 108
+en = "Select Dictionaries"
+es = "Seleccionar diccionarios"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "EditUserDictionary"
+id = 109
+en = "Edit User Dictionary"
+es = "Editar diccionario del usuario"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetDictionary"
+id = 209
+en = "Set Dictionary"
+es = "Establecer diccionario"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Web viewer ───
+
+[[steps]]
+kind = "PerformJSInWebViewer"
+id = 175
+en = "Perform JavaScript in Web Viewer"
+es = "Ejecutar JavaScript en el visualizador Web"
+shape = "web_viewer_js"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetWebViewer"
+id = 146
+en = "Set Web Viewer"
+es = "Configurar visualizador Web"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Misc / system ───
+
+[[steps]]
+kind = "Beep"
+id = 93
+en = "Beep"
+es = "Pitar"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "DialPhone"
+id = 65
+en = "Dial Phone"
+es = "Marcar"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SendMail"
+id = 63
+en = "Send Mail"
+es = "Enviar correo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SendEvent"
+id = 57
+en = "Send Event"
+es = "Enviar evento"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SendDDEExecute"
+id = 64
+en = "Send DDE Execute"
+es = "Enviar ejecución DDE"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PerformAppleScript"
+id = 67
+en = "Perform AppleScript"
+es = "Ejecutar AppleScript"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenURL"
+id = 111
+en = "Open URL"
+es = "Abrir URL"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ExitApplication"
+id = 44
+en = "Exit Application"
+es = "Salir de la aplicación"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "FlushCacheToDisk"
+id = 102
+en = "Flush Cache to Disk"
+es = "Vaciar caché a disco"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetMultiUser"
+id = 84
+en = "Set Multi-User"
+es = "Establecer multiusuario"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "SetUseSystemFormats"
+id = 94
+en = "Set Use System Formats"
+es = "Establecer uso de formatos del sistema"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ExecuteSQL"
+id = 117
+en = "Execute SQL"
+es = "Ejecutar SQL"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ExecuteFileMakerDataAPI"
+id = 203
+en = "Execute FileMaker Data API"
+es = "Ejecutar FileMaker Data API"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "PerformFindReplaceOpen"
+id = 129
+en = "Open Find/Replace"
+es = "Abrir Buscar/reemplazar"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "InstallPlugInFile"
+id = 157
+en = "Install Plug-In File"
+es = "Instalar archivo plug-in"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "MBS"
+id = 186
+en = "MBS"
+es = "MBS"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Open Manage / file dialogs ───
+
+[[steps]]
+kind = "OpenPreferences"
+id = 105
+en = "Open Preferences"
+es = "Abrir ajustes"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenHosts"
+id = 118
+en = "Open Hosts"
+es = "Abrir anfitriones"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenHelp"
+id = 32
+en = "Open Help"
+es = "Abrir Ayuda"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenSharing"
+id = 113
+en = "Open Sharing"
+es = "Abrir Compartir"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenScriptWorkspace"
+id = 88
+en = "Open Script Workspace"
+es = "Abrir espacio de trabajo de guiones"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenFavorites"
+id = 183
+en = "Open Favorites"
+es = "Abrir favoritos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenManageDatabase"
+id = 38
+en = "Open Manage Database"
+es = "Abrir Gestionar base de datos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenManageContainers"
+id = 156
+en = "Open Manage Containers"
+es = "Abrir Gestionar contenedores"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenManageDataSources"
+id = 140
+en = "Open Manage Data Sources"
+es = "Abrir Gestionar fuentes de datos"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenManageValueLists"
+id = 112
+en = "Open Manage Value Lists"
+es = "Abrir Gestionar listas de valores"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenManageLayouts"
+id = 151
+en = "Open Manage Layouts"
+es = "Abrir Gestionar presentaciones"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenManageThemes"
+id = 165
+en = "Open Manage Themes"
+es = "Abrir Gestionar temas"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenFileOptions"
+id = 114
+en = "Open File Options"
+es = "Abrir Opciones de archivo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenUploadToHost"
+id = 172
+en = "Open Upload to Host"
+es = "Abrir Subir al anfitrión"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "OpenTouchKeyboard"
+id = 174
+en = "Open Touch Keyboard"
+es = "Activar teclado táctil"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Mobile / device ───
+
+[[steps]]
+kind = "ConfigureNFCReading"
+id = 201
+en = "Configure NFC Reading"
+es = "Configurar lectura de NFC"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConfigureLocalNotification"
+id = 187
+en = "Configure Local Notification"
+es = "Configurar notificación local"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConfigureErrorLog"
+id = 200
+en = "Configure Error Log"
+es = "Configurar registro de errores"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── AVPlayer ───
+
+[[steps]]
+kind = "AVPlayerPlay"
+id = 177
+en = "AVPlayer Play"
+es = "Reproducción de AVPlayer"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "AVPlayerSetPlaybackState"
+id = 178
+en = "AVPlayer Set Playback State"
+es = "Estado de configuración de la reproducción de AVPlayer"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "AVPlayerSetOptions"
+id = 179
+en = "AVPlayer Set Options"
+es = "Opciones de configuración de AVPlayer"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── AI / ML (FM 2024+) ───
+
+[[steps]]
+kind = "ConfigureAIAccount"
+id = 212
+en = "Configure AI Account"
+es = "Configurar cuenta de IA"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConfigureAICallLog"
+id = 217
+en = "Configure AI Call Log"
+es = "Configurar el registro de llamadas de IA"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConfigureRAGAccount"
+id = 227
+en = "Configure RAG Account"
+es = "Configurar cuenta RAG"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConfigurePromptTemplate"
+id = 226
+en = "Configure Prompt Template"
+es = "Configurar plantilla de indicaciones"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConfigureMachineLearningModel"
+id = 202
+en = "Configure Machine Learning Model"
+es = "Configurar modelo de Machine Learning"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConfigureRegressionModel"
+id = 222
+en = "Configure Regression Model"
+es = "Configurar modelo de regresión"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ConfigureModel"
+id = 213
+en = "Configure Model"
+es = "Ajustar modelo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "GenerateResponseFromModel"
+id = 220
+en = "Generate Response from Model"
+es = "Generar respuesta a partir del modelo"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ExecuteRAGAction"
+id = 219
+en = "Execute RAG Action"
+es = "Ejecutar acción RAG"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+[[steps]]
+kind = "ExecuteNaturalLanguageSQL"
+id = 214
+en = "Execute Natural Language SQL"
+es = "Ejecuta una consulta SQL mediante lenguaje natural"
+shape = "plain"
+opens_block = false
+closes_block = false
+
+# ─── Claris Connect ───
+
+[[steps]]
+kind = "RunClarisConnectFlow"
+id = 211
+en = "Run Claris Connect Flow"
+es = "Activar flujo de Claris Connect"
+shape = "plain"
+opens_block = false
+closes_block = false

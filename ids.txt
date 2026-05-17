@@ -1,0 +1,219 @@
+89      # (comment)
+105     Abrir ajustes
+118     Abrir anfitriones
+33      Abrir archivo
+191     Abrir archivo de datos
+32      Abrir Ayuda
+129     Abrir Buscar/reemplazar
+113     Abrir Compartir
+149     Abrir Editar búsquedas guardadas
+88      Abrir espacio de trabajo de guiones
+183     Abrir favoritos
+183     Abrir favoritos
+38      Abrir Gestionar base de datos
+156     Abrir Gestionar contenedores
+140     Abrir Gestionar fuentes de datos
+112     Abrir Gestionar listas de valores
+151     Abrir Gestionar presentaciones
+165     Abrir Gestionar temas
+114     Abrir Opciones de archivo
+133     Abrir registro/petición
+172     Abrir Subir al anfitrión
+205     Abrir transacción
+206     Confirmar transacción
+111     Abrir URL
+137     Activar cuenta
+211     Activar flujo de Claris Connect
+174     Activar teclado táctil
+167     Actualizar objeto
+180     Actualizar portal
+213     Ajustar modelo
+31      Adjust Window
+127     Extend Found Set
+134     Añadir cuenta
+49      Borrar
+155     Buscar registros concordantes 
+24      Cambiar búsqueda anterior
+24      Cambiar búsqueda anterior
+47      Copiar
+139     Convertir archivo
+83      Cambiar contraseña
+199     Cambiar nombre de archivo
+34      Cerrar archivo
+196     Cerrar archivo de datos
+169     Cerrar panel flotante
+20      Comprobar conjunto hallado
+121     Close Window
+20      Comprobar conjunto hallado
+19      Comprobar registro
+18      Comprobar selección
+168     Configurar animación de objetos de la presentación
+212     Configurar cuenta de IA
+227     Configurar cuenta RAG
+217     Configurar el registro de llamadas de IA
+185     Configurar Guión Supervisor de Región
+42      Configurar impresión
+201     Configurar lectura de NFC
+202     Configurar modelo de Machine Learning
+222     Configurar modelo de regresión
+187     Configurar notificación local
+226     Configurar plantilla de indicaciones
+226     Configurar plantilla de indicaciones
+200     Configurar registro de errores
+116     Configurar siguiente valor secuencial
+146     Configurar visualizador Web
+206     Confirmar transacción
+79      Congelar ventana
+75      Commit Records/Requests
+139     Convertir archivo
+47      Copiar
+101     Copiar registro/petición
+98      Copy All Records/Requests
+106     Corregir palabra
+46      Cortar
+190     Crear archivo de datos
+45      Deshacer/rehacer
+21      Desordenar registros
+81      Desplazar ventana
+90      Halt Script
+8       Duplicar registro/petición
+109     Editar diccionario del usuario
+214     Ejecuta una consulta SQL mediante lenguaje natural
+219     Ejecutar acción RAG
+67      Ejecutar AppleScript
+128     Ejecutar Buscar/reemplazar
+28      Perform Find
+221     Ejecutar búsqueda en lenguaje natural
+203     Ejecutar FileMaker Data API
+1       Perform Script
+164     Perform Script on Server
+210     Ejecutar guión en el servidor con devolución de llamada
+175     Perform JavaScript in Web Viewer
+117     Ejecutar SQL
+197     Eliminar archivo
+197     Eliminar archivo
+135     Eliminar cuenta
+104     Eliminar fila del portal
+9       Delete Record/Request
+9       Delete Record/Request
+10      Delete All Records
+68      If
+69      Else
+125     Else If
+70      End If
+71      Loop
+72      Exit Loop If
+73      End Loop
+63      Enviar correo
+64      Enviar ejecución DDE
+57      Enviar evento
+192     Escribir en el archivo de datos
+76      Set Field
+147     Set Field By Name
+86      Set Error Capture
+209     Establecer diccionario
+208     Establecer identificador de sesión
+84      Establecer multiusuario
+97      Establecer nivel de ampliación
+195     Establecer posición del archivo de datos
+130     Establecer selección
+124     Establecer título de ventana
+94      Establecer uso de formatos del sistema
+141     Set Variable
+178     Estado de configuración de la reproducción de AVPlayer
+132     Exportar contenido del campo
+36      Exportar registros
+220     Generar respuesta a partir del modelo
+152     Guardar registros como enlace a snapshot
+143     Guardar registros como Excel
+144     Guardar registros como PDF
+37      Guardar una copia como
+3       Guardar una copia como XML
+35      Import Records
+56      Insertar imagen
+68      If
+70      End If
+35      Import Records
+43      Imprimir
+131     Insertar archivo
+159     Insertar audio/vídeo
+161     Insertar desde dispositivo
+11      Insertar desde índice
+160     Insert from URL
+160     Insert from URL
+13      Insertar fecha actual
+14      Insertar hora actual
+56      Insertar imagen
+215     Insertar incrustación
+216     Insertar incrustación en el conjunto encontrado
+60      Insertar nombre del usuario actual
+158     Insertar PDF
+77      Insertar resultado calculado
+61      Insert Text
+157     Instalar archivo plug-in
+148     Instalar guión OnTimer
+142     Instalar juego de menús
+99      Ir a la fila del portal
+6       Ir a la presentación
+228     Ir a Lista de registros
+145     Ir a objeto
+17      Go to Field
+5       Ir al campo anterior
+4       Ir al campo siguiente
+74      Go to Related Record
+16      Go to Record/Request/Page
+193     Leer desde el archivo de datos
+65      Marcar
+22      Modo Buscar
+41      Modo Vista previa
+55      Modo Visualizar
+186     MBS
+87      Show Custom Dialog
+27      Show Omitted Only
+23      Show All Records
+166     Mostrar/Ocultar barra de menús
+29      Mostrar/Ocultar barras de herramientas
+92      Mostrar/Ocultar regla de texto
+119     Mover/Cambiar tamaño de ventana
+119     Mover/Cambiar tamaño de ventana
+189     Obtener tamaño de archivo
+26      Omitir múltiples registros
+194     Obtener posición del archivo de datos
+188     Obtener archivo existente
+181     Obtener ruta de carpeta
+189     Obtener tamaño de archivo
+189     Obtener tamaño de archivo
+26      Omitir múltiples registros
+25      Omitir registro
+120     Organizar todas las ventanas
+179     Opciones de configuración de AVPlayer
+107     Opciones de ortografía
+39      Sort Records
+154     Ordenar registros por campo
+120     Organizar todas las ventanas
+115     Permitir barra de formato de texto
+62      Pause/Resume Script
+48      Pegar
+115     Permitir barra de formato de texto
+85      Allow User Abort
+93      Pitar
+150     Realizar una búsqueda rápida
+218     Realizar búsqueda semántica
+150     Realizar una búsqueda rápida
+95      Recuperar archivo
+80      Refrescar ventana
+177     Reproducción de AVPlayer
+136     Restablecer contraseña de cuenta
+51      Restablecer registro/petición
+126     Constrain Found Set
+207     Revertir transacción
+223     Revertir transacción en caso de error
+44      Salir de la aplicación
+103     Exit Script
+108     Seleccionar diccionarios
+50      Seleccionar todo
+123     Seleccionar ventana
+102     Vaciar caché a disco
+30      Ver como
+40      Volver a buscar contenido del campo
+138     Volver a iniciar sesión

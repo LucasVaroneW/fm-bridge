@@ -129,6 +129,10 @@ fn strip_bom(s: &str) -> &str {
 pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
     let xml_clean = strip_bom(xml);
     let mut reader = Reader::from_reader(Cursor::new(xml_clean));
+    // FM emits some elements as self-closing (<Field .../>) and others as
+    // explicit pairs (<Field ...></Field>) inconsistently. Normalize both
+    // into Start+End pairs so we only need one handler per element.
+    reader.config_mut().expand_empty_elements = true;
     let mut buf = Vec::new();
     let mut steps: Vec<ScriptStep> = Vec::new();
     let mut parser = StepParser::default();
@@ -184,6 +188,17 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             }
                         }
                     }
+                    b"Field" => {
+                        for attr in e.attributes().flatten() {
+                            let val = String::from_utf8_lossy(&attr.value).to_string();
+                            match attr.key.as_ref() {
+                                b"table" => parser.field_table = val,
+                                b"id" => parser.field_numeric_id = val,
+                                b"name" => parser.field_target = val,
+                                _ => {}
+                            }
+                        }
+                    }
                     b"Set" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
@@ -214,31 +229,6 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"Button" => { parser.push_target(TextTarget::DialogButton); }
                     b"Result" => { parser.push_target(TextTarget::FieldResult); }
                     b"TargetName" => { parser.push_target(TextTarget::FieldTarget); }
-                    _ => {}
-                }
-            }
-            Ok(Event::Empty(ref e)) => {
-                // Self-closing elements like <Field table="..." id="..." name="..."/>
-                // and <Restore state="..."/>. quick_xml emits these as Empty, not Start.
-                match e.name().as_ref() {
-                    b"Field" => {
-                        for attr in e.attributes().flatten() {
-                            let val = String::from_utf8_lossy(&attr.value).to_string();
-                            match attr.key.as_ref() {
-                                b"table" => parser.field_table = val,
-                                b"id" => parser.field_numeric_id = val,
-                                b"name" => parser.field_target = val,
-                                _ => {}
-                            }
-                        }
-                    }
-                    b"Restore" => {
-                        for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"state" {
-                                parser.restore_state = Some(String::from_utf8_lossy(&attr.value).to_string());
-                            }
-                        }
-                    }
                     _ => {}
                 }
             }

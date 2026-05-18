@@ -159,9 +159,13 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"Calculation" => {
                         let parent = parser.current_target().clone();
                         match parent {
-                            TextTarget::RepetitionCalc | TextTarget::ValueCalc => {
-                                // Already in the right context, don't push another target
-                            }
+                            // Calc is just a wrapper here — keep capturing into the parent field
+                            // (FM nests <Title><Calculation>"text"</Calculation></Title> etc.)
+                            TextTarget::RepetitionCalc
+                            | TextTarget::ValueCalc
+                            | TextTarget::DialogTitle
+                            | TextTarget::DialogMessage
+                            | TextTarget::DialogButton => {}
                             _ => {
                                 parser.push_target(TextTarget::Calculation);
                             }
@@ -226,7 +230,10 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     }
                     b"Title" => { parser.push_target(TextTarget::DialogTitle); }
                     b"Message" => { parser.push_target(TextTarget::DialogMessage); }
-                    b"Button" => { parser.push_target(TextTarget::DialogButton); }
+                    b"Button" => {
+                        parser.current_button.clear();
+                        parser.push_target(TextTarget::DialogButton);
+                    }
                     b"Result" => { parser.push_target(TextTarget::FieldResult); }
                     b"TargetName" => { parser.push_target(TextTarget::FieldTarget); }
                     _ => {}
@@ -279,7 +286,13 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"Set" => { parser.pop_target(TextTarget::SetState); }
                     b"Title" => { parser.pop_target(TextTarget::DialogTitle); }
                     b"Message" => { parser.pop_target(TextTarget::DialogMessage); }
-                    b"Button" => { parser.pop_target(TextTarget::DialogButton); }
+                    b"Button" => {
+                        parser.pop_target(TextTarget::DialogButton);
+                        if !parser.current_button.is_empty() {
+                            parser.dialog_buttons.push(parser.current_button.clone());
+                            parser.current_button.clear();
+                        }
+                    }
                     b"Result" => { parser.pop_target(TextTarget::FieldResult); }
                     b"TargetName" => { parser.pop_target(TextTarget::FieldTarget); }
                     _ => {}
@@ -341,6 +354,7 @@ struct StepParser {
     dialog_title: String,
     dialog_message: String,
     dialog_buttons: Vec<String>,
+    current_button: String,
     field_result: String,
     field_target: String,
     field_table: String,
@@ -377,7 +391,7 @@ impl StepParser {
             TextTarget::Param => self.current_param.push_str(text),
             TextTarget::DialogTitle => self.dialog_title.push_str(text),
             TextTarget::DialogMessage => self.dialog_message.push_str(text),
-            TextTarget::DialogButton => self.dialog_buttons.push(text.to_string()),
+            TextTarget::DialogButton => self.current_button.push_str(text),
             TextTarget::FieldResult => self.field_result.push_str(text),
             TextTarget::FieldTarget => self.field_target.push_str(text),
             TextTarget::SetState | TextTarget::None => {}

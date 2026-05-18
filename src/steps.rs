@@ -39,6 +39,10 @@ pub enum StepShape {
     /// Used by Execute FileMaker Data API. The Field element here carries a variable
     /// name as text content (not as a name attribute like Set Field).
     DataApi,
+    /// <LimitToWindowsOfCurrentFile/> + <Window value="ByName|Current|First|.../> + <Name><Calculation>...</Calculation></Name>
+    SelectWindow,
+    /// <WindowState value="ResizeToFit|Maximize|Minimize|Restore|Hide"/>
+    AdjustWindow,
 }
 
 /// Internal step kind identifier from steps.toml.

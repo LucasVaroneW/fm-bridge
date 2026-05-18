@@ -49,6 +49,10 @@ pub struct ScriptStep {
     pub goto_location: Option<String>,
     pub goto_exit_after_last: Option<String>,
     pub goto_no_interact: Option<String>,
+    // For Select Window and Adjust Window.
+    pub window_mode: Option<String>,       // SelectWindow: ByName/Current/First/Last/Next/Previous
+    pub window_limit_current_file: Option<String>,  // SelectWindow: True/False
+    pub window_state: Option<String>,      // AdjustWindow: ResizeToFit/Maximize/...
     pub indent_level: u32,
 }
 
@@ -169,7 +173,11 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             | TextTarget::ValueCalc
                             | TextTarget::DialogTitle
                             | TextTarget::DialogMessage
-                            | TextTarget::DialogButton => {}
+                            | TextTarget::DialogButton
+                            | TextTarget::ObjectName
+                            | TextTarget::FunctionName
+                            | TextTarget::Param
+                            | TextTarget::VarName => {}
                             _ => {
                                 parser.push_target(TextTarget::Calculation);
                             }
@@ -253,6 +261,27 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
                                 parser.goto_exit_after_last = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"Window" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"value" {
+                                parser.window_mode = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"LimitToWindowsOfCurrentFile" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.window_limit_current_file = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"WindowState" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"value" {
+                                parser.window_state = String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
@@ -402,6 +431,9 @@ struct StepParser {
     goto_location: String,
     goto_exit_after_last: String,
     goto_no_interact: String,
+    window_mode: String,
+    window_limit_current_file: String,
+    window_state: String,
     context_stack: Vec<TextTarget>,
 }
 
@@ -466,6 +498,9 @@ impl StepParser {
             goto_location: if self.goto_location.is_empty() { None } else { Some(self.goto_location.clone()) },
             goto_exit_after_last: if self.goto_exit_after_last.is_empty() { None } else { Some(self.goto_exit_after_last.clone()) },
             goto_no_interact: if self.goto_no_interact.is_empty() { None } else { Some(self.goto_no_interact.clone()) },
+            window_mode: if self.window_mode.is_empty() { None } else { Some(self.window_mode.clone()) },
+            window_limit_current_file: if self.window_limit_current_file.is_empty() { None } else { Some(self.window_limit_current_file.clone()) },
+            window_state: if self.window_state.is_empty() { None } else { Some(self.window_state.clone()) },
             indent_level,
         }
     }
@@ -626,14 +661,36 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             }
         }
         Some(StepShape::WebViewerJs) => {
+            // FM nests text inside <Calculation><![CDATA[...]]></Calculation>
             if let Some(obj) = &step.object_name {
-                xml.push_str(&format!("<ObjectName>{}</ObjectName>", xml_escape(obj)));
+                xml.push_str(&format!("<ObjectName><Calculation><![CDATA[{}]]></Calculation></ObjectName>", obj));
             }
             if let Some(func) = &step.function_name {
-                xml.push_str(&format!("<FunctionName>{}</FunctionName>", xml_escape(func)));
+                xml.push_str(&format!("<FunctionName><Calculation><![CDATA[{}]]></Calculation></FunctionName>", func));
             }
-            for p in &step.parameters {
-                xml.push_str(&format!("<P><![CDATA[{}]]></P>", p));
+            if !step.parameters.is_empty() {
+                xml.push_str(&format!("<Parameters Count=\"{}\">", step.parameters.len()));
+                for p in &step.parameters {
+                    xml.push_str(&format!("<P><Calculation><![CDATA[{}]]></Calculation></P>", p));
+                }
+                xml.push_str("</Parameters>");
+            }
+        }
+        Some(StepShape::SelectWindow) => {
+            // <LimitToWindowsOfCurrentFile/> + <Window value/> + <Name><Calculation>name</Calculation></Name>
+            let limit = step.window_limit_current_file.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<LimitToWindowsOfCurrentFile state=\"{}\"></LimitToWindowsOfCurrentFile>", xml_escape(limit)));
+            // Mode default: ByName if a name is present, Current otherwise.
+            let default_mode = if step.var_name.is_some() { "ByName" } else { "Current" };
+            let mode = step.window_mode.as_deref().unwrap_or(default_mode);
+            xml.push_str(&format!("<Window value=\"{}\"></Window>", xml_escape(mode)));
+            if let Some(name) = &step.var_name {
+                xml.push_str(&format!("<Name><Calculation><![CDATA[{}]]></Calculation></Name>", name));
+            }
+        }
+        Some(StepShape::AdjustWindow) => {
+            if let Some(state) = &step.window_state {
+                xml.push_str(&format!("<WindowState value=\"{}\"></WindowState>", xml_escape(state)));
             }
         }
         Some(StepShape::Plain) | None => {

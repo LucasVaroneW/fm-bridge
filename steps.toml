@@ -867,7 +867,7 @@ kind = "AdjustWindow"
 id = 31
 en = "Adjust Window"
 es = "Ajustar ventana"
-shape = "plain"
+shape = "adjust_window"
 opens_block = false
 closes_block = false
 
@@ -903,7 +903,7 @@ kind = "SelectWindow"
 id = 123
 en = "Select Window"
 es = "Seleccionar ventana"
-shape = "plain"
+shape = "select_window"
 opens_block = false
 closes_block = false
 

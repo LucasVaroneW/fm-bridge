@@ -124,6 +124,20 @@ pub fn format_step(step: &ScriptStep) -> String {
                 line.push_str(&format!(" [{}]", parts.join("; ")));
             }
         }
+        Some(StepShape::SelectWindow) => {
+            // The name is a FM calc expression (literal "X" or any expr like $var),
+            // so show it verbatim. Mode keyword (Current/First/...) shown when no name.
+            if let Some(name) = &step.var_name {
+                line.push_str(&format!(" [{}]", name));
+            } else if let Some(mode) = &step.window_mode {
+                line.push_str(&format!(" [{}]", mode));
+            }
+        }
+        Some(StepShape::AdjustWindow) => {
+            if let Some(state) = &step.window_state {
+                line.push_str(&format!(" [{}]", state));
+            }
+        }
         Some(StepShape::DataApi) => {
             // Execute FileMaker Data API: [$target; query_calc]
             let calc = step.calculation.as_deref().map(|c| c.trim()).unwrap_or("");
@@ -247,6 +261,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
                 indent_level: indent,
             });
             i += 1;
@@ -319,6 +334,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
             indent_level: indent,
         },
         Some(StepShape::ValueCalcName) => {
@@ -332,6 +348,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
                 indent_level: indent,
             }
         }
@@ -345,6 +362,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
             indent_level: indent,
         },
         Some(StepShape::SetState) => ScriptStep {
@@ -357,6 +375,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
             indent_level: indent,
         },
         Some(StepShape::Dialog) => {
@@ -371,6 +390,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
                 indent_level: indent,
             }
         }
@@ -386,6 +406,45 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 field_result: result, field_target: target, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::SelectWindow) => {
+            // Mode keywords are bare unquoted words. Anything else is a name calc.
+            let modes = ["Current", "First", "Last", "Next", "Previous"];
+            let (window_name, mode) = match content.map(|c| c.trim()) {
+                Some(c) if modes.contains(&c) => (None, Some(c.to_string())),
+                Some(c) if !c.is_empty()      => (Some(c.to_string()), Some("ByName".to_string())),
+                _                             => (None, None),
+            };
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: None,
+                var_name: window_name, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: mode, window_limit_current_file: None, window_state: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::AdjustWindow) => {
+            let state = content.map(|c| c.trim().to_string()).filter(|s| !s.is_empty());
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: None,
+                var_name: None, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: state,
                 indent_level: indent,
             }
         }
@@ -401,6 +460,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 field_result: None, field_target: target, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
                 indent_level: indent,
             }
         }
@@ -416,6 +476,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: loc, goto_exit_after_last: exit, goto_no_interact: no_int,
+                window_mode: None, window_limit_current_file: None, window_state: None,
                 indent_level: indent,
             }
         }
@@ -431,6 +492,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: script_name, script_target_id: script_id, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
                 indent_level: indent,
             }
         }
@@ -446,6 +508,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 field_result: None, field_target: target, field_table: table, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
                 indent_level: indent,
             }
         }
@@ -461,6 +524,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
                 indent_level: indent,
             }
         }
@@ -475,6 +539,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
             indent_level: indent,
         },
     }

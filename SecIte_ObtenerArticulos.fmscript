@@ -1,0 +1,70 @@
+# ******************************************************************************************
+# ******************************************************************************************
+# -
+# Se usa para generar la variable global con el json mediante Data API
+# -
+# ******************************************************************************************
+# ******************************************************************************************
+# Parametros:&#13;&#13;1.- Comprobar (0/1).&#13;2.- Parte de la oferta
+# ******************************************************************************************
+# ******************************************************************************************
+# -
+# No permite que el sistema muestre mensajes de error.
+Set Error Capture [True]
+# -
+# No permite que el usuario cancele el guión.
+Allow User Abort
+# -
+# Variables locales.
+Set Variable [$PG = Get ( ScriptParameter )]
+Set Variable [$url = "https://teseo.bytech.net/fmi/data/vLatest/databases/By_12_Productos/"]
+# -
+# Comprobaciones.
+Perform Script ["Gen_Comprobar" #836; GetValue( $PG ; 1 )]
+# -
+# ******************************************************************************************
+# -
+# - Se comenta porque no es compatible en los filemaker 18
+// Execute FileMaker Data API [JSONFormatElements(	JSONSetElement(		"{}";        [ "layouts"; "Ta_Productos_DataApi"; JSONString];        [ "limit" ; 1000 ; JSONNumber];        [ "query[0].Pro_Del"; 0 ; JSONNumber ];        [ "query[0].Pro_TK"; 10 ; JSONNumber ]	))]
+# -
+Set Variable [$urlSession = $url & "sessions"]
+# -
+Perform Script ["SecIte_GetToken_API" #2022; JSONSetElement ( "{}" ;    ["url" ; $urlSession ; 1];    ["usuario" ; "producto" ; 1])]
+Set Variable [$token = Get ( ScriptResult )]
+# -
+Set Variable [$urlArticulos = $url & "layouts/Ta_Productos_DataApi/_find"]
+# -
+// Set Variable [$payload = "{  \"query\":[        {            \"Pro_Del\": 0,            \"Pro_TK\": 10        }    ],    \"limit\": 1000}"/*SOLO LISTA DE PRECIO"{  \"query\":[        {            \"Pro_Del\": 0,            \"Pro_TK\": 10,            \"Pro_Tipo_6\": \"Sí\"        }    ],    \"limit\": 1000}"*/]
+# Aplicamos el listado de artículos dependiendo del rol que posee el usuario
+If [tienePermiso ( "PriSegIte_53" )]
+  Set Variable [$payload = "{  \"query\":[	{            \"Pro_Del\": 0,            \"Pro_TK\": 10,            \"Pro_OrdenPrecioEnListas\": \"*\"	},	{            \"Pro_Del\": 0,            \"Pro_TK\": 10,            \"Pro_cTipo_6\": 1	}    ],    \"limit\": 1000}"]
+  Else
+  Set Variable [$payload = "{  \"query\":[	{            \"Pro_Del\": 0,            \"Pro_TK\": 10	},	{		\"Pro_Tipo_2\": \"BAUSSA\",		\"omit\": \"true\"	},	{		\"Pro_Tipo_1\": \"No Comercial\",		\"omit\": \"true\"	}    ],    \"limit\": 1000}"]
+End If
+Insert from URL ["--location --header \"Content-Type: application/json\" --header \"Authorization: Bearer " & $token & " \" --data @$payload -D $header"$urlArticulos]
+# -
+// Set Field [Ta_d_Preferencias::Prf_gHTML_Articulos; Let (    [        tmpl = Ta_d_Preferencias::Prf_gHTML_Articulos ;        inj  = $respuesta    ];    // 3) arma un data-URI con el raw JSON listo para parsear    Substitute ( tmpl ; "\"__PRODUCTS__\"" ; inj ))]
+# -
+// Go to Object ["gestionArticulos"]
+# Comprobamos si ya existe la ventana
+Select Window ["AñadirArticulos"]
+If [Get ( LastError ) = 112]
+  New Window ["AñadirArticulos"]
+  Adjust Window
+End If
+# -
+Perform JavaScript in Web Viewer [Param[0]: ]
+# -
+If [not IsEmpty ( $$VentanaOfertasOriginal )]
+  Else
+  # -
+  # Esto se cierra al cerrar la ventana
+  Set Variable [$$VentanaOfertasOriginal = Get ( WindowName )]
+  New Window ["AñadirArticulos"]
+  Adjust Window
+  # -
+End If
+# ******************************************************************************************
+# -
+# -
+# ******************************************************************************************

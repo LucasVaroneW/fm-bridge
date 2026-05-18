@@ -197,15 +197,25 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                         }
                     }
                     b"Field" => {
+                        let mut has_name_attr = false;
                         for attr in e.attributes().flatten() {
                             let val = String::from_utf8_lossy(&attr.value).to_string();
                             match attr.key.as_ref() {
                                 b"table" => parser.field_table = val,
                                 b"id" => parser.field_numeric_id = val,
-                                b"name" => parser.field_target = val,
+                                b"name" => { parser.field_target = val; has_name_attr = true; }
                                 _ => {}
                             }
                         }
+                        if !has_name_attr {
+                            // No name attr — element carries the target as text content
+                            // (Execute FileMaker Data API uses <Field>$var</Field>).
+                            parser.push_target(TextTarget::FieldTextContent);
+                        }
+                    }
+                    b"SelectAll" => {
+                        // FM emits this on Execute FileMaker Data API; we preserve only
+                        // the calc + target, defaulting SelectAll to True on encode.
                     }
                     b"Set" => {
                         for attr in e.attributes().flatten() {
@@ -320,6 +330,7 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     }
                     b"Result" => { parser.pop_target(TextTarget::FieldResult); }
                     b"TargetName" => { parser.pop_target(TextTarget::FieldTarget); }
+                    b"Field" => { parser.pop_target(TextTarget::FieldTextContent); }
                     _ => {}
                 }
             }
@@ -358,6 +369,7 @@ enum TextTarget {
     DialogButton,
     FieldResult,
     FieldTarget,
+    FieldTextContent,  // <Field>$var</Field> form used by Execute FileMaker Data API
     SetState,
 }
 
@@ -422,6 +434,7 @@ impl StepParser {
             TextTarget::DialogButton => self.current_button.push_str(text),
             TextTarget::FieldResult => self.field_result.push_str(text),
             TextTarget::FieldTarget => self.field_target.push_str(text),
+            TextTarget::FieldTextContent => self.field_target.push_str(text),
             TextTarget::SetState | TextTarget::None => {}
         }
     }
@@ -546,6 +559,18 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             }
             if let Some(target) = &step.field_target {
                 xml.push_str(&format!("<TargetName>{}</TargetName>", xml_escape(target)));
+            }
+        }
+        Some(StepShape::DataApi) => {
+            // Execute FileMaker Data API. Always emit SelectAll=True (the common case);
+            // the user can flip it manually in FM if they need otherwise.
+            xml.push_str("<SelectAll state=\"True\"></SelectAll>");
+            if let Some(calc) = &step.calculation {
+                xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+            }
+            xml.push_str("<Text></Text>");
+            if let Some(target) = &step.field_target {
+                xml.push_str(&format!("<Field>{}</Field>", xml_escape(target)));
             }
         }
         Some(StepShape::GoToRecord) => {

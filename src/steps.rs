@@ -35,6 +35,10 @@ pub enum StepShape {
     /// <NoInteract state="..."/> + optional <Exit state="..."/> + <RowPageLocation value="..."/>
     /// + optional <Calculation> (for byCalculation). Used by Go to Record/Request/Page.
     GoToRecord,
+    /// <SelectAll state="..."/> + <Calculation> + <Text/> + <Field>$varName</Field>
+    /// Used by Execute FileMaker Data API. The Field element here carries a variable
+    /// name as text content (not as a name attribute like Set Field).
+    DataApi,
 }
 
 /// Internal step kind identifier from steps.toml.

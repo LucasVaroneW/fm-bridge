@@ -124,6 +124,16 @@ pub fn format_step(step: &ScriptStep) -> String {
                 line.push_str(&format!(" [{}]", parts.join("; ")));
             }
         }
+        Some(StepShape::DataApi) => {
+            // Execute FileMaker Data API: [$target; query_calc]
+            let calc = step.calculation.as_deref().map(|c| c.trim()).unwrap_or("");
+            match (&step.field_target, calc.is_empty()) {
+                (Some(t), false) => line.push_str(&format!(" [{}; {}]", t, calc)),
+                (Some(t), true)  => line.push_str(&format!(" [{};]", t)),
+                (None, false)    => line.push_str(&format!(" [{}]", calc)),
+                (None, true)     => {}
+            }
+        }
         Some(StepShape::GoToRecord) => {
             // Format: [Location; Exit; NoInteract] — only includes flags that are True.
             // For byCalculation: [Calc: <expr>; ...flags...].
@@ -379,6 +389,21 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 indent_level: indent,
             }
         }
+        Some(StepShape::DataApi) => {
+            let (target, calc) = parse_data_api_content(content);
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: calc,
+                var_name: None, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: target, field_table: None, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                indent_level: indent,
+            }
+        }
         Some(StepShape::GoToRecord) => {
             let (loc, exit, no_int, calc) = parse_goto_record_content(content);
             ScriptStep {
@@ -495,6 +520,40 @@ fn parse_dialog_content(content: Option<&str>) -> (Option<String>, Option<String
     }
 
     (title, message, buttons)
+}
+
+/// Parse Execute FileMaker Data API content: `$target; query_calc` or just `query_calc`.
+/// Splits on the first `;` at bracket depth 0 (so semicolons inside the JSON don't trigger).
+fn parse_data_api_content(content: Option<&str>) -> (Option<String>, Option<String>) {
+    let content = match content {
+        Some(c) => c.trim(),
+        None => return (None, None),
+    };
+
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut split_at: Option<usize> = None;
+    for (byte_pos, ch) in content.char_indices() {
+        match ch {
+            '"' => in_string = !in_string,
+            '[' | '(' if !in_string => depth += 1,
+            ']' | ')' if !in_string => depth -= 1,
+            ';' if !in_string && depth == 0 => { split_at = Some(byte_pos); break; }
+            _ => {}
+        }
+    }
+
+    match split_at {
+        Some(pos) => {
+            let target = content[..pos].trim().to_string();
+            let calc = content[pos + 1..].trim().to_string();
+            (
+                if target.is_empty() { None } else { Some(target) },
+                if calc.is_empty() { None } else { Some(calc) },
+            )
+        }
+        None => (None, Some(content.to_string())),
+    }
 }
 
 /// Parse Go to Record/Request/Page content: `[First|Last|Next|Previous|Calc: expr]; [Exit]; [NoInteract]`

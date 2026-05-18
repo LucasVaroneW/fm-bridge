@@ -1,0 +1,72 @@
+# ******************************************************************************************
+# SecIte_ObtenerArticulos v2 — usa Execute FileMaker Data API (FM 19+)
+# Reemplaza el patron token + Insert from URL por el step nativo.
+# Sin token, sin HTTP, sin parseo manual.
+# Cada vez que se abre, se obtienen los datos y se inyectan al web viewer.
+# ******************************************************************************************
+# Parametros: 1.- Comprobar (0/1)  /  2.- Parte de la oferta
+# ******************************************************************************************
+
+# No permite que el sistema muestre mensajes de error
+Set Error Capture [True]
+# No permite que el usuario cancele el guion
+Allow User Abort
+
+# Parametros del script
+Set Variable [$PG = Get ( ScriptParameter )]
+
+# Comprobaciones previas
+Perform Script ["Gen_Comprobar" #836; GetValue( $PG ; 1 )]
+
+# ******************************************************************************************
+# Construir el query JSON segun permiso del usuario
+# ******************************************************************************************
+
+If [tienePermiso ( "PriSegIte_53" )]
+  # Usuarios con permiso 53: ven productos con orden de precio + tipo 6
+  Set Variable [$payload = JSONSetElement ( "{}" ;
+    [ "layouts" ; "Ta_Productos_DataApi" ; JSONString ] ;
+    [ "limit" ; 1000 ; JSONNumber ] ;
+    [ "query[0].Pro_Del" ; 0 ; JSONNumber ] ;
+    [ "query[0].Pro_TK" ; 10 ; JSONNumber ] ;
+    [ "query[0].Pro_OrdenPrecioEnListas" ; "*" ; JSONString ] ;
+    [ "query[1].Pro_Del" ; 0 ; JSONNumber ] ;
+    [ "query[1].Pro_TK" ; 10 ; JSONNumber ] ;
+    [ "query[1].Pro_cTipo_6" ; 1 ; JSONNumber ]
+  )]
+Else
+  # Resto: excluye BAUSSA y No Comercial
+  Set Variable [$payload = JSONSetElement ( "{}" ;
+    [ "layouts" ; "Ta_Productos_DataApi" ; JSONString ] ;
+    [ "limit" ; 1000 ; JSONNumber ] ;
+    [ "query[0].Pro_Del" ; 0 ; JSONNumber ] ;
+    [ "query[0].Pro_TK" ; 10 ; JSONNumber ] ;
+    [ "query[1].Pro_Tipo_2" ; "BAUSSA" ; JSONString ] ;
+    [ "query[1].omit" ; "true" ; JSONString ] ;
+    [ "query[2].Pro_Tipo_1" ; "No Comercial" ; JSONString ] ;
+    [ "query[2].omit" ; "true" ; JSONString ]
+  )]
+End If
+
+# ******************************************************************************************
+# Ejecutar el query — el resultado va a $respuesta
+# IMPORTANTE: tras pegar en FM, configurar "Target" del paso a: $respuesta
+# ******************************************************************************************
+Execute FileMaker Data API [$payload]
+
+# ******************************************************************************************
+# Abrir / seleccionar la ventana del web viewer y siempre inyectar los datos frescos
+# ******************************************************************************************
+
+Select Window ["AñadirArticulos"]
+If [Get ( LastError ) = 112]
+  # La ventana no existe — crearla
+  New Window ["AñadirArticulos"]
+  Adjust Window
+End If
+
+# Inyectar la respuesta al web viewer
+# IMPORTANTE: tras pegar en FM, configurar Object="gestionArticulos" y el parametro JSON
+Perform JavaScript in Web Viewer [Param[0]: $respuesta]
+
+# ******************************************************************************************

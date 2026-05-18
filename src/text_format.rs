@@ -125,13 +125,19 @@ pub fn format_step(step: &ScriptStep) -> String {
             }
         }
         Some(StepShape::PerformScript) => {
-            // Perform Script: shows ["ScriptName"; param] or ["ScriptName"] or [param].
+            // Perform Script: shows ["Name" #id; param]. The #id suffix is what
+            // lets FM resolve the link on paste — name alone is just display.
             let calc = step.calculation.as_deref().map(|c| c.trim()).unwrap_or("");
-            match (&step.script_target_name, calc.is_empty()) {
-                (Some(s), false) => line.push_str(&format!(" [\"{}\"; {}]", s, calc)),
-                (Some(s), true)  => line.push_str(&format!(" [\"{}\"]", s)),
-                (None, false)    => line.push_str(&format!(" [{}]", calc)),
-                (None, true)     => {}
+            let name_part = match (&step.script_target_name, &step.script_target_id) {
+                (Some(n), Some(id)) => format!("\"{}\" #{}", n, id),
+                (Some(n), None)     => format!("\"{}\"", n),
+                (None, _)           => String::new(),
+            };
+            match (name_part.is_empty(), calc.is_empty()) {
+                (false, false) => line.push_str(&format!(" [{}; {}]", name_part, calc)),
+                (false, true)  => line.push_str(&format!(" [{}]", name_part)),
+                (true, false)  => line.push_str(&format!(" [{}]", calc)),
+                (true, true)   => {}
             }
         }
         Some(StepShape::FieldAndCalc) => {
@@ -345,7 +351,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             }
         }
         Some(StepShape::PerformScript) => {
-            let (script_name, calc) = parse_perform_script_content(content);
+            let (script_name, script_id, calc) = parse_perform_script_content(content);
             ScriptStep {
                 name: name.to_string(), enable: enabled, id,
                 text: None, calculation: calc,
@@ -354,7 +360,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 restore_state: None, set_state: None,
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
-                script_target_name: script_name, script_target_id: None, current_script_mode: None,
+                script_target_name: script_name, script_target_id: script_id, current_script_mode: None,
                 indent_level: indent,
             }
         }
@@ -448,25 +454,37 @@ fn parse_dialog_content(content: Option<&str>) -> (Option<String>, Option<String
 ///   `"ScriptName"; param`    → script + param
 ///   `param`                  → param only (legacy, when no script target was set)
 /// The script name is detected by a leading `"` and closes at the matching `"`.
-fn parse_perform_script_content(content: Option<&str>) -> (Option<String>, Option<String>) {
+fn parse_perform_script_content(content: Option<&str>) -> (Option<String>, Option<String>, Option<String>) {
     let content = match content {
         Some(c) => c.trim(),
-        None => return (None, None),
+        None => return (None, None, None),
     };
 
     if !content.starts_with('"') {
         // No script target — entire content is the parameter calc.
-        return (None, Some(content.to_string()));
+        return (None, None, Some(content.to_string()));
     }
 
-    // Find the matching closing quote (no escape handling — script names with `"` are rare).
     let after_open = &content[1..];
     let close_pos = match after_open.find('"') {
         Some(p) => p,
-        None => return (None, Some(content.to_string())),  // malformed, treat as calc
+        None => return (None, None, Some(content.to_string())),
     };
     let script_name = after_open[..close_pos].to_string();
     let rest = after_open[close_pos + 1..].trim_start();
+
+    // Optional `#N` id suffix — required by FM to resolve the script link on paste.
+    let (script_id, rest) = if let Some(after_hash) = rest.strip_prefix('#') {
+        let after_hash = after_hash.trim_start();
+        let end = after_hash.find(|c: char| !c.is_ascii_digit()).unwrap_or(after_hash.len());
+        if end > 0 {
+            (Some(after_hash[..end].to_string()), after_hash[end..].trim_start())
+        } else {
+            (None, rest)
+        }
+    } else {
+        (None, rest)
+    };
 
     let calc = if let Some(stripped) = rest.strip_prefix(';') {
         let s = stripped.trim();
@@ -477,7 +495,7 @@ fn parse_perform_script_content(content: Option<&str>) -> (Option<String>, Optio
         Some(rest.to_string())
     };
 
-    (Some(script_name), calc)
+    (Some(script_name), script_id, calc)
 }
 
 /// Parse Set Field content: `Table::Field; calc` or `Field; calc` or `calc` or `Table::Field;`.

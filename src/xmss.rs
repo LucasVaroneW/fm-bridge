@@ -518,14 +518,26 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             xml.push_str(&format!("<Set state=\"{}\"></Set>", state));
         }
         Some(StepShape::Dialog) => {
+            // FM wraps each dialog text in <Calculation><![CDATA[...]]></Calculation>.
+            // The bracket content the user typed is the literal calc expression
+            // (so "prueba" with quotes is a string literal in FM-calc terms).
             if let Some(title) = &step.dialog_title {
-                xml.push_str(&format!("<Title>{}</Title>", xml_escape(title)));
+                xml.push_str(&format!("<Title><Calculation><![CDATA[{}]]></Calculation></Title>", title));
             }
             if let Some(msg) = &step.dialog_message {
-                xml.push_str(&format!("<Message><![CDATA[{}]]></Message>", msg));
+                xml.push_str(&format!("<Message><Calculation><![CDATA[{}]]></Calculation></Message>", msg));
             }
-            for btn in &step.dialog_buttons {
-                xml.push_str(&format!("<Button>{}</Button>", xml_escape(btn)));
+            if !step.dialog_buttons.is_empty() {
+                xml.push_str("<Buttons>");
+                for (i, btn) in step.dialog_buttons.iter().enumerate() {
+                    // First button defaults to CommitState=True (the OK button), rest False.
+                    let commit = if i == 0 { "True" } else { "False" };
+                    xml.push_str(&format!(
+                        "<Button CommitState=\"{}\"><Calculation><![CDATA[{}]]></Calculation></Button>",
+                        commit, btn
+                    ));
+                }
+                xml.push_str("</Buttons>");
             }
         }
         Some(StepShape::FieldByName) => {

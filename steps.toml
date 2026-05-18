@@ -472,7 +472,7 @@ kind = "SetField"
 id = 76
 en = "Set Field"
 es = "Establecer campo"
-shape = "plain"
+shape = "field_and_calc"
 opens_block = false
 closes_block = false
 

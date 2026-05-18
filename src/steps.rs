@@ -27,6 +27,8 @@ pub enum StepShape {
     FieldByName,
     /// <ObjectName> + <FunctionName> + <P> (Perform JavaScript in Web Viewer)
     WebViewerJs,
+    /// <Calculation> + <Field table="..." id="..." name="..."/> (Set Field)
+    FieldAndCalc,
 }
 
 /// Internal step kind identifier from steps.toml.

@@ -1,0 +1,219 @@
+# ******************************************************************************************
+# ******************************************************************************************
+# -
+# Selectores conectores ofertas
+# -
+# ******************************************************************************************
+# ******************************************************************************************
+# Parametros:&#13;&#13;1.- Comprobar (0/1).&#13;2.- Parte de la oferta
+# ******************************************************************************************
+# ******************************************************************************************
+# -
+# No permite que el sistema muestre mensajes de error.
+Set Error Capture [True]
+# -
+# No permite que el usuario cancele el guión.
+Allow User Abort
+# -
+# Variables locales.
+Set Variable [$PG = Get ( ScriptParameter )]
+# -
+# Comprobaciones.
+Perform Script [GetValue( $PG ; 1 )]
+# -
+# ******************************************************************************************
+# O F E R TA S
+# ******************************************************************************************
+# -
+# Desde Ofertas Versiones
+# **********************************
+# Mostrar las secciones de la oferta versión seleccionada
+If [GetValue( $PG ; 2 ) = "OfeVer"]
+  # Guardamos el pk que queremos seleccionar
+  Set Variable [$pk_OfeVer = GetValue ( $PG ; 3 )]
+  Set Variable [$pk_Ofe = SecIte_d_SeccionesItems::SecIte_RK_Ofe]
+  # Determinamos el PK del Selector:
+  Set Field [$pk_OfeVer]
+  Set Field [$pk_OfeVer]
+  Set Field [$pk_Ofe]
+  # -
+  # Seleccionamos la sección
+  # -
+  # Guardamos el valor de la primera seccion asociada
+  Set Variable [$pk_Sec = SecIte_f_Secciones_OFEVER__SEL::Sec_PK]
+  # Establecemos los campos
+  Set Field [$pk_Sec]
+  Set Field [$pk_Sec]
+  Set Field [$pk_OfeVer]
+  Set Field [$pk_OfeVer]
+  Set Field [$pk_Sec]
+  Set Field [$pk_Sec]
+  Set Field [$pk_Sec]
+  Set Field [SecIte_f_Secciones_OFEVER__SEL::Sec_NomSeccion]
+  If [ValueCount ( List ( SecIte_f_OfertasVersionesContactosJT_SEC_OFEVER__POR::OfeVerConJT_PK ) ) > 0]
+    # Nota, antes teniamos mas cuidado ya que cada oferta version podia tener mas de un cliente, ahora que no es así directamente buscamos el primer registros de la relacion
+    Set Variable [$pk_OfeVerConJT = SecIte_f_OfertasVersionesContactosJT_SEC_OFEVER__POR::OfeVerConJT_PK]
+    # Determinamos el PK del Selector:
+    Set Field [$pk_OfeVerConJT]
+    Set Field [$pk_OfeVerConJT]
+    Set Field [$pk_OfeVerConJT]
+    Set Field [$pk_OfeVerConJT]
+    # Una vez seleccionada la version obtenemos las demás variables
+    Set Variable [$pk_Cli = SecIte_f_OfertasVersionesContactosJT_SEC_OFEVER__SEL::OfeVerConJT_RK_Con]
+    Set Variable [$pk_PryVenSecVer = SecIte_f_OfertasVersionesContactosJT_SEC_OFEVER__SEL::OfeVerConJT_RK_PryVenSecVer]
+    Set Variable [$TipDes = SecIte_f_OfertasVersionesContactosJT_SEC_OFEVER__SEL::OfeVerConJT_TipoDesCli]
+    // Set Variable [$TipDes = SecIte_f_Contactos_OFEVERCONJT__SEL::Con_DescuentoTipo]
+    # -
+    Set Field [$pk_Cli]
+    Set Field [$pk_Cli]
+    Set Field [$pk_Cli]
+    Set Field [$TipDes]
+    Set Field [$pk_PryVenSecVer]
+    Set Field [$pk_OfeVerConJT]
+    Set Field [$pk_OfeVer]
+    Else
+    # Globales de selección para los precios estándar se identifica con un cero en el campo OferVerConJTSel
+    Set Field [0]
+    Set Field [0]
+  End If
+  # Reiniciamos las variable de titulos para evitar que se agreguén artículos con titulos de otra seccion
+  Set Field [""]
+  Set Field [""]
+  Set Field [""]
+  # -
+  # Buscamos los item de la versión y seleccionamos la seccion correspondiente
+  Set Variable [$$Buscar = 1]
+  Perform Find [0$pk_OfeVer$pk_Sec]
+  Perform Script
+  # Vaciamos los globales y ponemos a todos los filtros
+  # -
+  # Desde Ofertas Versiones Clientes
+  # **********************************
+  # Mostrar los datos asociados por cliente
+  Else If [GetValue( $PG ; 2 ) = "CliOfeVer"]
+  # Guardamos el pk que queremos seleccionar
+  Set Variable [$pk_Cli = GetValue ( $PG ; 3 )]
+  Set Variable [$pk_OfeVerConJT = GetValue ( $PG ; 4 )]
+  Set Variable [$pk_PryVenSecVer = GetValue ( $PG ; 5 )]
+  Set Variable [$pk_OfeVer = GetValue ( $PG ; 6 )]
+  Set Variable [$TipDes = GetValue ( $PG ; 7 )]
+  # Determinamos el PK del Selector:
+  Set Field [$pk_OfeVerConJT]
+  Set Field [$pk_Cli]
+  Set Field [$pk_Cli]
+  Set Field [$pk_Cli]
+  Set Field [$TipDes]
+  Set Field [$pk_OfeVerConJT]
+  Set Field [$pk_PryVenSecVer]
+  Set Field [$TipDes]
+  Set Field [$pk_OfeVerConJT]
+  Set Field [$pk_OfeVer]
+  Set Field [$pk_OfeVerConJT]
+  # -
+  # Buscamos los item de la versión y seleccionamos la seccion correspondiente
+  # NOTA: No se ejecuta la busqueda ya que el trigger que tiene la presentacion dispara otra busqueda. Para evitar doble búsqueda ejecutamos directamente el trigger
+  Perform Script ["¶1"]
+  # -
+  # Ahora ya no son portales así que optamos por comentar los filtros e ir descomentando según se requiera
+  # Guardamos el pk de la oferta versión
+  If [Ofe_f_OfertasVersiones__POR::OfeVer_gOfeVerSel ≠ $pk_OfeVer]
+    Set Field [$pk_OfeVer]
+  End If
+  # -
+  # Secciones-ítems
+  # **********************************
+  # Mostrar los ítems de la sección seleccionada
+  Else If [GetValue( $PG ; 2 ) = "Sec"]
+  # Guardamos el pk que queremos seleccionar
+  Set Variable [$pk_Sec = GetValue ( $PG ; 3 )]
+  Set Variable [$pk_OfeVer = GetValue ( $PG ; 4 )]
+  # Determinamos el PK del Selector:
+  Set Field [$pk_Sec]
+  Set Field [$pk_OfeVer]
+  Set Field [$pk_Sec]
+  Set Field [$pk_Sec]
+  Set Field [$pk_Sec]
+  Set Field [SecIte_f_Secciones_OFEVER__SEL::Sec_NomSeccion]
+  # -
+  # Buscamos los item de la versión y seleccionamos la seccion correspondiente
+  Set Variable [$$Buscar = 1]
+  Perform Find [0$pk_OfeVer$pk_Sec]
+  Perform Script
+  # -
+  # Reiniciamos las variable de titulos para evitar que se agreguén artículos con titulos de otra seccion
+  Set Field [""]
+  Set Field [""]
+  Set Field [""]
+  # -
+  # Secciones-Título
+  # **********************************
+  # Mostrar las notas asociadas a la sección
+  Else If [GetValue( $PG ; 2 ) = "SecTit"]
+  # Guardamos el pk que queremos seleccionar
+  Set Variable [$pk_SecTit = GetValue ( $PG ; 3 )]
+  Set Variable [$pk_Tit = GetValue ( $PG ; 4 )]
+  # Determinamos el PK del Selector:
+  Set Field [$pk_SecTit]
+  Set Field [$pk_Tit]
+  Set Field [""]
+  Set Field ["Seleccionar"]
+  # -
+  # Secciones-subtítulo
+  # **********************************
+  # Mostrar las notas asociadas a la sección
+  Else If [GetValue( $PG ; 2 ) = "SecSub"]
+  # Guardamos el pk que queremos seleccionar
+  Set Variable [$pk_SecSub = GetValue ( $PG ; 3 )]
+  Set Variable [$pk_Sub = GetValue ( $PG ; 4 )]
+  # Determinamos el PK del Selector:
+  Set Field [$pk_SecSub]
+  Set Field [$pk_Sub]
+  # -
+  # Secciones-Ítems título y subtítulo
+  # **********************************
+  # Se usa en el desplegable título en la pantalla de edición de la sección
+  Else If [GetValue ( $PG ; 2 ) = "SecTitFil"]
+  Set Field [Ofe_f_Secciones_OFEVER__SEL::Sec_gSecTitSel]
+  Set Field [""]
+  # -
+  # Se usa en el desplegable título en la pantalla de edición de la sección en el portal
+  Else If [GetValue ( $PG ; 2 ) = "SecTitSel"]
+  Set Field [Ofe_f_Secciones_OFEVER__SEL::Sec_gSecTitSel]
+  Set Field [""]
+  # -
+  # Se usa en el desplegable título en el filtro del portal por título o subtítulo
+  Else If [GetValue ( $PG ; 2 ) = "OfeIteFil"]
+  Set Field [Ofe_f_SeccionesTitulos_SEC_OFEVER__SEL::SecTit_gPKOfeTitFil]
+  Set Field [""]
+  Set Field [""]
+  # -
+  # -Para crear los subtítulos en castellano
+  Else If [GetValue ( $PG ; 2 ) = "TitCas"]
+  # Variables locales
+  Set Variable [$pk_TitCas = GetValue ( $PG ; 3 )]
+  # -Guardamos el pk en un global
+  Set Field [$pk_TitCas]
+  Set Field [$pk_TitCas]
+  Set Field [""]
+  # -
+  # -Para crear los subtítulos en los diferentes idiomas
+  Else If [GetValue ( $PG ; 2 ) = "SubCas"]
+  # Variables locales
+  Set Variable [$pk_SubCas = GetValue ( $PG ; 3 )]
+  # -Guardamos el pk en un global
+  Set Field [$pk_SubCas]
+  # -
+  # -Para crear los textos de los documentos en los diferentes idiomas
+  Else If [GetValue ( $PG ; 2 ) = "TxtCas"]
+  # Variables locales
+  Set Variable [$pk_TxtCas = GetValue ( $PG ; 3 )]
+  # -Guardamos el pk en un global
+  Set Field [$pk_TxtCas]
+End If
+# -
+# Consignar y refrescar ventana
+Commit Records/Requests
+Refresh Window
+# Vaciamos las variables globales
+# -
+# ******************************************************************************************

@@ -124,6 +124,21 @@ pub fn format_step(step: &ScriptStep) -> String {
                 line.push_str(&format!(" [{}]", parts.join("; ")));
             }
         }
+        Some(StepShape::FieldAndCalc) => {
+            // Set Field: shows "[Table::Name; calc]" or just "[calc]" if no target.
+            let target_display: Option<String> = match (&step.field_table, &step.field_target) {
+                (Some(t), Some(n)) => Some(format!("{}::{}", t, n)),
+                (None, Some(n)) => Some(n.clone()),
+                _ => None,
+            };
+            let calc = step.calculation.as_deref().map(|c| c.trim()).unwrap_or("");
+            match (target_display, calc.is_empty()) {
+                (Some(tgt), false) => line.push_str(&format!(" [{}; {}]", tgt, calc)),
+                (Some(tgt), true)  => line.push_str(&format!(" [{};]", tgt)),
+                (None, false)      => line.push_str(&format!(" [{}]", calc)),
+                (None, true)       => {}
+            }
+        }
         Some(StepShape::Comment) | Some(StepShape::Plain) | None => {
             // Fallback: show any calc or text we have
             if let Some(calc) = &step.calculation {
@@ -181,7 +196,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
                 object_name: None, function_name: None, parameters: Vec::new(),
                 restore_state: None, set_state: None,
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
-                field_result: None, field_target: None,
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 indent_level: indent,
             });
             i += 1;
@@ -251,7 +266,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             object_name: None, function_name: None, parameters: Vec::new(),
             restore_state: None, set_state: None,
             dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
-            field_result: None, field_target: None,
+            field_result: None, field_target: None, field_table: None, field_numeric_id: None,
             indent_level: indent,
         },
         Some(StepShape::ValueCalcName) => {
@@ -262,7 +277,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 object_name: None, function_name: None, parameters: Vec::new(),
                 restore_state: None, set_state: None,
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
-                field_result: None, field_target: None,
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 indent_level: indent,
             }
         }
@@ -273,7 +288,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             object_name: None, function_name: None, parameters: Vec::new(),
             restore_state: Some("False".to_string()), set_state: None,
             dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
-            field_result: None, field_target: None,
+            field_result: None, field_target: None, field_table: None, field_numeric_id: None,
             indent_level: indent,
         },
         Some(StepShape::SetState) => ScriptStep {
@@ -283,7 +298,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             object_name: None, function_name: None, parameters: Vec::new(),
             restore_state: None, set_state: content.map(|c| c.to_string()),
             dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
-            field_result: None, field_target: None,
+            field_result: None, field_target: None, field_table: None, field_numeric_id: None,
             indent_level: indent,
         },
         Some(StepShape::Dialog) => {
@@ -295,7 +310,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 object_name: None, function_name: None, parameters: Vec::new(),
                 restore_state: None, set_state: None,
                 dialog_title: title, dialog_message: message, dialog_buttons: buttons,
-                field_result: None, field_target: None,
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 indent_level: indent,
             }
         }
@@ -308,7 +323,20 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 object_name: None, function_name: None, parameters: Vec::new(),
                 restore_state: None, set_state: None,
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
-                field_result: result, field_target: target,
+                field_result: result, field_target: target, field_table: None, field_numeric_id: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::FieldAndCalc) => {
+            let (table, target, calc) = parse_field_and_calc_content(content);
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: calc,
+                var_name: None, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: target, field_table: table, field_numeric_id: None,
                 indent_level: indent,
             }
         }
@@ -321,7 +349,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 object_name: obj, function_name: func, parameters: params,
                 restore_state: None, set_state: None,
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
-                field_result: None, field_target: None,
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 indent_level: indent,
             }
         }
@@ -333,7 +361,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             object_name: None, function_name: None, parameters: Vec::new(),
             restore_state: None, set_state: None,
             dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
-            field_result: None, field_target: None,
+            field_result: None, field_target: None, field_table: None, field_numeric_id: None,
             indent_level: indent,
         },
     }
@@ -379,6 +407,45 @@ fn parse_dialog_content(content: Option<&str>) -> (Option<String>, Option<String
     }
 
     (title, message, buttons)
+}
+
+/// Parse Set Field content: `Table::Field; calc` or `Field; calc` or `calc` or `Table::Field;`.
+/// Split on the first `;` at bracket depth 0 (so semicolons inside calcs don't trigger).
+fn parse_field_and_calc_content(content: Option<&str>) -> (Option<String>, Option<String>, Option<String>) {
+    let content = match content {
+        Some(c) => c,
+        None => return (None, None, None),
+    };
+
+    // Find the first ';' at depth 0 (outside any [ ] or "..." pair).
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut split_at: Option<usize> = None;
+    for (byte_pos, ch) in content.char_indices() {
+        match ch {
+            '"' => in_string = !in_string,
+            '[' | '(' if !in_string => depth += 1,
+            ']' | ')' if !in_string => depth -= 1,
+            ';' if !in_string && depth == 0 => { split_at = Some(byte_pos); break; }
+            _ => {}
+        }
+    }
+
+    let (target_str, calc_str) = match split_at {
+        Some(pos) => (content[..pos].trim().to_string(), content[pos + 1..].trim().to_string()),
+        None => return (None, None, Some(content.trim().to_string())),
+    };
+
+    let (table, name) = if let Some(idx) = target_str.find("::") {
+        (Some(target_str[..idx].to_string()), Some(target_str[idx + 2..].to_string()))
+    } else if target_str.is_empty() {
+        (None, None)
+    } else {
+        (None, Some(target_str))
+    };
+
+    let calc = if calc_str.is_empty() { None } else { Some(calc_str) };
+    (table, name, calc)
 }
 
 /// Parse "Set Field By Name" bracket content: `Result: ...; Target: ...`

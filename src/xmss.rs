@@ -38,6 +38,9 @@ pub struct ScriptStep {
     pub dialog_buttons: Vec<String>,
     pub field_result: Option<String>,
     pub field_target: Option<String>,
+    // For Set Field (FieldAndCalc shape): preserves the full <Field> attributes.
+    pub field_table: Option<String>,
+    pub field_numeric_id: Option<String>,
     pub indent_level: u32,
 }
 
@@ -193,6 +196,31 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     _ => {}
                 }
             }
+            Ok(Event::Empty(ref e)) => {
+                // Self-closing elements like <Field table="..." id="..." name="..."/>
+                // and <Restore state="..."/>. quick_xml emits these as Empty, not Start.
+                match e.name().as_ref() {
+                    b"Field" => {
+                        for attr in e.attributes().flatten() {
+                            let val = String::from_utf8_lossy(&attr.value).to_string();
+                            match attr.key.as_ref() {
+                                b"table" => parser.field_table = val,
+                                b"id" => parser.field_numeric_id = val,
+                                b"name" => parser.field_target = val,
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"Restore" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.restore_state = Some(String::from_utf8_lossy(&attr.value).to_string());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
             Ok(Event::Text(ref e)) => {
                 let text = String::from_utf8_lossy(e.as_ref()).to_string();
                 let text = strip_bom(&text).to_string();
@@ -304,6 +332,8 @@ struct StepParser {
     dialog_buttons: Vec<String>,
     field_result: String,
     field_target: String,
+    field_table: String,
+    field_numeric_id: String,
     context_stack: Vec<TextTarget>,
 }
 
@@ -359,6 +389,8 @@ impl StepParser {
             dialog_buttons: self.dialog_buttons.clone(),
             field_result: if self.field_result.is_empty() { None } else { Some(self.field_result.clone()) },
             field_target: if self.field_target.is_empty() { None } else { Some(self.field_target.clone()) },
+            field_table: if self.field_table.is_empty() { None } else { Some(self.field_table.clone()) },
+            field_numeric_id: if self.field_numeric_id.is_empty() { None } else { Some(self.field_numeric_id.clone()) },
             indent_level,
         }
     }
@@ -440,6 +472,24 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             }
             if let Some(target) = &step.field_target {
                 xml.push_str(&format!("<TargetName>{}</TargetName>", xml_escape(target)));
+            }
+        }
+        Some(StepShape::FieldAndCalc) => {
+            if let Some(calc) = &step.calculation {
+                xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+            }
+            if step.field_target.is_some() || step.field_table.is_some() || step.field_numeric_id.is_some() {
+                xml.push_str("<Field");
+                if let Some(t) = &step.field_table {
+                    xml.push_str(&format!(" table=\"{}\"", xml_escape(t)));
+                }
+                if let Some(id) = &step.field_numeric_id {
+                    xml.push_str(&format!(" id=\"{}\"", xml_escape(id)));
+                }
+                if let Some(name) = &step.field_target {
+                    xml.push_str(&format!(" name=\"{}\"", xml_escape(name)));
+                }
+                xml.push_str("/>");
             }
         }
         Some(StepShape::WebViewerJs) => {

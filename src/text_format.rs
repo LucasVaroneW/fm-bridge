@@ -188,38 +188,45 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
             continue;
         }
 
-        // Check for bracket content (single or multiline)
+        // Check for bracket content (single or multiline).
+        // Depth-aware scan: brackets inside string literals (`"..."`) and balanced
+        // `[...]` pairs (JSONSetElement rows, List() literals, etc.) don't terminate
+        // the step's bracket. We close only when an unmatched `]` is found.
         if let Some(idx) = content.find(" [") {
             let step_name = &content[..idx];
-            let after_bracket = &content[idx + 2..];
+            let first_chunk = &content[idx + 2..];
 
-            if after_bracket.ends_with(']') {
-                // Single line bracket content
-                let bracket_content = &after_bracket[..after_bracket.len() - 1];
-                let step = build_step_from_name(step_name, Some(bracket_content), enabled, resolve_id(step_name)?, indent);
-                steps.push(step);
-                i += 1;
-            } else {
-                // Multiline bracket content — collect until line ending with ]
-                let mut bracket_content = after_bracket.to_string();
-                i += 1;
-                while i < lines.len() {
-                    let next_line = lines[i];
-                    if next_line.trim().ends_with(']') {
-                        bracket_content.push('\n');
-                        let trimmed = next_line.trim();
-                        bracket_content.push_str(&trimmed[..trimmed.len() - 1]);
-                        i += 1;
-                        break;
-                    } else {
-                        bracket_content.push('\n');
-                        bracket_content.push_str(next_line);
-                        i += 1;
+            let mut bracket_content = String::new();
+            let mut depth: i32 = 0;
+            let mut in_string = false;
+            let mut terminated = false;
+            let mut current_text: &str = first_chunk;
+
+            loop {
+                for ch in current_text.chars() {
+                    match ch {
+                        '"' => { in_string = !in_string; bracket_content.push(ch); }
+                        '[' if !in_string => { depth += 1; bracket_content.push(ch); }
+                        ']' if !in_string => {
+                            if depth == 0 { terminated = true; break; }
+                            depth -= 1;
+                            bracket_content.push(ch);
+                        }
+                        _ => bracket_content.push(ch),
                     }
                 }
-                let step = build_step_from_name(step_name, Some(&bracket_content), enabled, resolve_id(step_name)?, indent);
-                steps.push(step);
+                if terminated { break; }
+                i += 1;
+                if i >= lines.len() {
+                    return Err(format!("Unclosed `[` in step '{}'", step_name));
+                }
+                bracket_content.push('\n');
+                current_text = lines[i];
             }
+            i += 1;
+
+            let step = build_step_from_name(step_name, Some(&bracket_content), enabled, resolve_id(step_name)?, indent);
+            steps.push(step);
         } else {
             // No bracket content
             let step = build_step_from_name(content, None, enabled, resolve_id(content)?, indent);

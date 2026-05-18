@@ -268,7 +268,7 @@ kind = "GoToRecord"
 id = 16
 en = "Go to Record/Request/Page"
 es = "Ir al registro/petición/página"
-shape = "plain"
+shape = "goto_record"
 opens_block = false
 closes_block = false
 

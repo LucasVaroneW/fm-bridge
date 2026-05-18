@@ -1,0 +1,126 @@
+# ******************************************************************************************
+# ******************************************************************************************
+# -
+# Se utiliza para seleccionar una parte especifica del proyecto en la presentación de edición
+# -
+# ******************************************************************************************
+# ******************************************************************************************
+# Parametros:&amp;#13;1.- Comprobar (0/1).&amp;#13;2.- Parte/Todos
+# ******************************************************************************************
+# ******************************************************************************************
+# -
+# No permite que el sistema muestre mensajes de error.
+Set Error Capture [True]
+# -
+# No permite que el usuario cancele el guión.
+Allow User Abort
+# -
+# Parámetros de guion
+Set Variable [$PG = Get ( ScriptParameter )]
+# -
+# Variables locales.
+Set Variable [$pk_Ofe = SecIte_f_Ofertas__POR::Ofe_PK]
+Set Variable [$pk_OfeVer = SecIte_f_OfertasVersiones__SEL::OfeVer_PK]
+Set Variable [$pk_OfeVerConJT = SecIte_f_OfertasVersionesContactosJT_SEC_OFEVER__POR::OfeVerConJT_gOfeVerConJTSel]
+# -
+# Comprobaciones.
+Perform Script ["Gen_Comprobar" #836; GetValue( $PG ; 1 )]
+# –
+Show Custom Dialog [Title: &quot;¡Atención!&quot;; Message: "¿Está seguro que desea validar la oferta?"; Buttons: &quot;Aceptar&quot;, &quot;Cancelar&quot;]
+# –
+If [Get ( LastMessageChoice ) = 2]
+  Halt Script
+End If
+# –
+If [IsEmpty ( SecIte_f_OfertasVersionesContactosJT_SEC_OFEVER__POR::OfeVerConJT_gOfeVerConJTSel )]
+  # –
+  Show Custom Dialog [Title: &quot;¡Atención!&quot;; Message: "Debes seleccionar un cliente para poder validar la oferta."; Buttons: &quot;Aceptar&quot;]
+  # –
+  Halt Script
+  # –
+End If
+# Comprobamos que no haya nada vacío
+# –
+Set Variable [$$Buscar = 1]
+# –
+Perform Find [0$pk_OfeVer]
+# -
+If [Get ( FoundCount ) = 0]
+  Show Custom Dialog [Title: &quot;¡Atención!&quot;; Message: "Hubo un error validando la oferta.¶Contacte con un administrador."; Buttons: &quot;Aceptar&quot;]
+  Halt Script
+End If
+# –
+# Comprobamos que todos los registros tengan todos los campos asignados
+Go to Record/Request/Page
+Loop
+  # -
+  If [not IsEmpty ( SecIte_d_SeccionesItems::SecIte_RK_Pro )and (	IsEmpty ( SecIte_d_SeccionesItems::SecIte_Cantidad )	or	IsEmpty ( SecIte_f_SeccionesItemsPrecios__SEL::SecItePre_PrecioEur )	or	IsEmpty ( SecIte_f_SeccionesItemsPrecios__SEL::SecItePre_Coste ))]
+    # -
+    # Obtenemos los datos de la referencia erronea y la buscamos
+    Set Variable [$pk_Sec_Err = SecIte_d_SeccionesItems::SecIte_RK_Sec]
+    Set Variable [$pk_SecIte_Err = SecIte_d_SeccionesItems::SecIte_PK]
+    # -
+    Show Custom Dialog [Title: &quot;¡Atención!&quot;; Message: "El artículo con referencia "& SecIte_d_SeccionesItems::SecIte_Ref_Pro &" le falta información para poder validar la oferta.Comprobar y volver a intentarlo."; Buttons: &quot;Aceptar&quot;]
+    # Seleccionamos la version
+    Perform Script ["SecIte_Selec_Conectores" #2020; "¶Sec¶" & $pk_Sec_Err & "¶" & $pk_OfeVer]
+    # -
+    Set Variable [$$Buscar = 1]
+    Perform Find [0$pk_SecIte_Err]
+    If [Get ( FoundCount ) = 0]
+      # -
+      Perform Script ["SecIte_Selec_Conectores" #2020; "¶OfeVer¶" & $pk_OfeVer & "¶" & $pk_Ofe]
+      # -
+      Show Custom Dialog [Title: &quot;No se encontraron registros con ese título.&quot;; Message: "Por favor, agregue ítems relacionados y vuelva a intentarlo."; Buttons: &quot;Aceptar&quot;]
+      # -
+      Halt Script
+      # -
+    End If
+    Perform Script ["SecIte_Ordenar_Items" #2035]
+    # -
+    Halt Script
+    # -
+    Go to Record/Request/Page
+    # -
+    Else If [IsEmpty ( SecIte_d_SeccionesItems::SecIte_RK_Pro )andIsEmpty ( SecIte_d_SeccionesItems::SecIte_Denominacion )andIsEmpty ( SecIte_d_SeccionesItems::SecIte_Cantidad )andIsEmpty ( SecIte_f_SeccionesItemsPrecios__SEL::SecItePre_PrecioEur )andIsEmpty ( SecIte_f_SeccionesItemsPrecios__SEL::SecItePre_Coste )]
+    # -
+    Delete Record/Request
+    If [Get ( RecordNumber ) =  Get ( FoundCount )]
+      Go to Record/Request/Page
+    End If
+    # -
+    Else
+    # -
+    Go to Record/Request/Page
+    # -
+  End If
+  # -
+End Loop
+# –
+# ******************************************************************************************
+# –
+If [GetValue ( $PG ; 2 ) = "validacionTecnica"andIsEmpty ( SecIte_f_OfertasVersiones__SEL::OfeVer_FechaValTec )]
+  # –
+  Set Field [SecIte_f_OfertasVersionesContactosJT__SEL::OfeVerConJT_FechaValTec; Get ( CurrentDate )]
+  Set Field [SecIte_f_OfertasVersiones__SEL::OfeVer_FechaValTec; Get ( CurrentDate )]
+  Set Field [SecIte_f_Ofertas__POR::Ofe_FechaValTec; Get ( CurrentDate )]
+  # –
+  Set Field [SecIte_f_OfertasVersionesContactosJT__SEL::OfeVerConJT_ResponsaTec; Ta_d_Sesiones::Ses_gCuentaTeseo_Nombres & " " & Ta_d_Sesiones::Ses_gCuentaTeseo_Apellidos]
+  Set Field [SecIte_f_OfertasVersiones__SEL::OfeVer_ResponsaTec; Ta_d_Sesiones::Ses_gCuentaTeseo_Nombres & " " & Ta_d_Sesiones::Ses_gCuentaTeseo_Apellidos]
+  Set Field [SecIte_f_Ofertas__POR::Ofe_ResponsaTec; Ta_d_Sesiones::Ses_gCuentaTeseo_Nombres & " " & Ta_d_Sesiones::Ses_gCuentaTeseo_Apellidos]
+  # –
+  Else If [GetValue ( $PG ; 2 ) = "validacionEjecucion"andIsEmpty ( SecIte_f_OfertasVersiones__SEL::OfeVer_FechaValTec )]
+  # –
+  Set Field [SecIte_f_OfertasVersionesContactosJT__SEL::OfeVerConJT_FechaValEje; Get ( CurrentDate )]
+  Set Field [SecIte_f_Ofertas__POR::Ofe_FechaValEje; Get ( CurrentDate )]
+  # –
+  Set Field [SecIte_f_OfertasVersionesContactosJT__SEL::OfeVerConJT_ResponsaEje; Ta_d_Sesiones::Ses_gCuentaTeseo_Nombres & " " & Ta_d_Sesiones::Ses_gCuentaTeseo_Apellidos]
+  Set Field [SecIte_f_Ofertas__POR::Ofe_ResponsaEje; Ta_d_Sesiones::Ses_gCuentaTeseo_Nombres & " " & Ta_d_Sesiones::Ses_gCuentaTeseo_Apellidos]
+  # –
+End If
+# –
+Perform Script ["SecIte_Selec_Conectores" #2020; "¶OfeVer¶" & $pk_OfeVer & "¶" & $pk_Ofe]
+# Refrescamos la ventana y consignar:
+Refresh Window
+Commit Records/Requests
+# -
+# ******************************************************************************************

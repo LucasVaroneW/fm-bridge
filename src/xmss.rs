@@ -45,6 +45,10 @@ pub struct ScriptStep {
     pub script_target_name: Option<String>,
     pub script_target_id: Option<String>,
     pub current_script_mode: Option<String>,
+    // For Go to Record/Request/Page (GoToRecord shape).
+    pub goto_location: Option<String>,
+    pub goto_exit_after_last: Option<String>,
+    pub goto_no_interact: Option<String>,
     pub indent_level: u32,
 }
 
@@ -228,6 +232,27 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             }
                         }
                     }
+                    b"RowPageLocation" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"value" {
+                                parser.goto_location = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"Exit" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.goto_exit_after_last = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"NoInteract" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.goto_no_interact = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
                     b"Title" => { parser.push_target(TextTarget::DialogTitle); }
                     b"Message" => { parser.push_target(TextTarget::DialogMessage); }
                     b"Button" => {
@@ -362,6 +387,9 @@ struct StepParser {
     script_target_name: String,
     script_target_id: String,
     current_script_mode: String,
+    goto_location: String,
+    goto_exit_after_last: String,
+    goto_no_interact: String,
     context_stack: Vec<TextTarget>,
 }
 
@@ -422,6 +450,9 @@ impl StepParser {
             script_target_name: if self.script_target_name.is_empty() { None } else { Some(self.script_target_name.clone()) },
             script_target_id: if self.script_target_id.is_empty() { None } else { Some(self.script_target_id.clone()) },
             current_script_mode: if self.current_script_mode.is_empty() { None } else { Some(self.current_script_mode.clone()) },
+            goto_location: if self.goto_location.is_empty() { None } else { Some(self.goto_location.clone()) },
+            goto_exit_after_last: if self.goto_exit_after_last.is_empty() { None } else { Some(self.goto_exit_after_last.clone()) },
+            goto_no_interact: if self.goto_no_interact.is_empty() { None } else { Some(self.goto_no_interact.clone()) },
             indent_level,
         }
     }
@@ -503,6 +534,22 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             }
             if let Some(target) = &step.field_target {
                 xml.push_str(&format!("<TargetName>{}</TargetName>", xml_escape(target)));
+            }
+        }
+        Some(StepShape::GoToRecord) => {
+            // FM emits the elements in this order; preserve it.
+            let no_interact = step.goto_no_interact.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<NoInteract state=\"{}\"></NoInteract>", xml_escape(no_interact)));
+            if let Some(exit) = &step.goto_exit_after_last {
+                xml.push_str(&format!("<Exit state=\"{}\"></Exit>", xml_escape(exit)));
+            }
+            if let Some(loc) = &step.goto_location {
+                xml.push_str(&format!("<RowPageLocation value=\"{}\"></RowPageLocation>", xml_escape(loc)));
+                if loc == "byCalculation" {
+                    if let Some(calc) = &step.calculation {
+                        xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+                    }
+                }
             }
         }
         Some(StepShape::PerformScript) => {

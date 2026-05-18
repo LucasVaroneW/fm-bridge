@@ -124,6 +124,28 @@ pub fn format_step(step: &ScriptStep) -> String {
                 line.push_str(&format!(" [{}]", parts.join("; ")));
             }
         }
+        Some(StepShape::GoToRecord) => {
+            // Format: [Location; Exit; NoInteract] — only includes flags that are True.
+            // For byCalculation: [Calc: <expr>; ...flags...].
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(loc) = &step.goto_location {
+                if loc == "byCalculation" {
+                    let calc = step.calculation.as_deref().map(|c| c.trim()).unwrap_or("");
+                    parts.push(format!("Calc: {}", calc));
+                } else {
+                    parts.push(loc.clone());
+                }
+            }
+            if step.goto_exit_after_last.as_deref() == Some("True") {
+                parts.push("Exit".to_string());
+            }
+            if step.goto_no_interact.as_deref() == Some("True") {
+                parts.push("NoInteract".to_string());
+            }
+            if !parts.is_empty() {
+                line.push_str(&format!(" [{}]", parts.join("; ")));
+            }
+        }
         Some(StepShape::PerformScript) => {
             // Perform Script: shows ["Name" #id; param]. The #id suffix is what
             // lets FM resolve the link on paste — name alone is just display.
@@ -214,6 +236,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 indent_level: indent,
             });
             i += 1;
@@ -285,6 +308,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
             field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
             indent_level: indent,
         },
         Some(StepShape::ValueCalcName) => {
@@ -297,6 +321,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 indent_level: indent,
             }
         }
@@ -309,6 +334,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
             field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
             indent_level: indent,
         },
         Some(StepShape::SetState) => ScriptStep {
@@ -320,6 +346,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
             field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
             indent_level: indent,
         },
         Some(StepShape::Dialog) => {
@@ -333,6 +360,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 dialog_title: title, dialog_message: message, dialog_buttons: buttons,
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 indent_level: indent,
             }
         }
@@ -347,6 +375,22 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
                 field_result: result, field_target: target, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::GoToRecord) => {
+            let (loc, exit, no_int, calc) = parse_goto_record_content(content);
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: calc,
+                var_name: None, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: loc, goto_exit_after_last: exit, goto_no_interact: no_int,
                 indent_level: indent,
             }
         }
@@ -361,6 +405,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: script_name, script_target_id: script_id, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 indent_level: indent,
             }
         }
@@ -375,6 +420,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
                 field_result: None, field_target: target, field_table: table, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 indent_level: indent,
             }
         }
@@ -389,6 +435,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
                 field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 indent_level: indent,
             }
         }
@@ -402,6 +449,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
             field_result: None, field_target: None, field_table: None, field_numeric_id: None,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
             indent_level: indent,
         },
     }
@@ -447,6 +495,39 @@ fn parse_dialog_content(content: Option<&str>) -> (Option<String>, Option<String
     }
 
     (title, message, buttons)
+}
+
+/// Parse Go to Record/Request/Page content: `[First|Last|Next|Previous|Calc: expr]; [Exit]; [NoInteract]`
+/// Returns (location, exit_after_last, no_interact, calculation).
+fn parse_goto_record_content(content: Option<&str>) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+    let content = match content {
+        Some(c) => c.trim(),
+        None => return (None, None, None, None),
+    };
+    if content.is_empty() {
+        return (None, None, None, None);
+    }
+
+    let mut location: Option<String> = None;
+    let mut exit_flag: Option<String> = None;
+    let mut no_interact: Option<String> = None;
+    let mut calc: Option<String> = None;
+
+    for part in split_smart(content) {
+        let token = part.trim();
+        match token {
+            "First" | "Last" | "Next" | "Previous" => location = Some(token.to_string()),
+            "Exit" => exit_flag = Some("True".to_string()),
+            "NoInteract" => no_interact = Some("True".to_string()),
+            _ if token.starts_with("Calc:") => {
+                location = Some("byCalculation".to_string());
+                calc = Some(token[5..].trim().to_string());
+            }
+            _ => {}
+        }
+    }
+
+    (location, exit_flag, no_interact, calc)
 }
 
 /// Parse Perform Script content. Recognized forms:

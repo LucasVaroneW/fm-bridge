@@ -32,6 +32,9 @@ pub enum StepShape {
     /// <Script id="..." name="..."/> + optional <Calculation> + <CurrentScript value="..."/>
     /// Used by Perform Script and Perform Script on Server.
     PerformScript,
+    /// <NoInteract state="..."/> + optional <Exit state="..."/> + <RowPageLocation value="..."/>
+    /// + optional <Calculation> (for byCalculation). Used by Go to Record/Request/Page.
+    GoToRecord,
 }
 
 /// Internal step kind identifier from steps.toml.

@@ -1,0 +1,127 @@
+# ******************************************************************************************
+# SecIte_Asignar_Validacion v2 — collect-then-show
+# Recorre TODOS los items, acumula PKs de errores, al final muestra el found set de errores.
+# Si hay errores: Halt Script sin asignar fecha de validación.
+# Si no hay errores: continua con la asignacion de fechas y refresca como antes.
+# ******************************************************************************************
+# Parametros: 1.- Comprobar (0/1)  /  2.- validacionTecnica | validacionEjecucion
+# ******************************************************************************************
+# -
+# No permite que el sistema muestre mensajes de error
+Set Error Capture [True]
+# No permite que el usuario cancele el guion
+Allow User Abort
+# -
+# Parametros del script
+Set Variable [$PG = Get ( ScriptParameter )]
+# -
+# Variables locales
+Set Variable [$pk_Ofe = SecIte_f_Ofertas__POR::Ofe_PK]
+Set Variable [$pk_OfeVer = SecIte_f_OfertasVersiones__SEL::OfeVer_PK]
+Set Variable [$pk_OfeVerConJT = SecIte_f_OfertasVersionesContactosJT_SEC_OFEVER__POR::OfeVerConJT_gOfeVerConJTSel]
+# -
+# Comprobaciones previas
+Perform Script ["Gen_Comprobar" #836; GetValue( $PG ; 1 )]
+# -
+# Confirmacion del usuario
+Show Custom Dialog [Title: "¡Atención!"; Message: "¿Está seguro que desea validar la oferta?"; Buttons: "Aceptar", "Cancelar"]
+If [Get ( LastMessageChoice ) = 2]
+  Halt Script
+End If
+# -
+# Validar que haya cliente seleccionado
+If [IsEmpty ( SecIte_f_OfertasVersionesContactosJT_SEC_OFEVER__POR::OfeVerConJT_gOfeVerConJTSel )]
+  Show Custom Dialog [Title: "¡Atención!"; Message: "Debes seleccionar un cliente para poder validar la oferta."; Buttons: "Aceptar"]
+  Halt Script
+End If
+# -
+# Buscar los items de la oferta version
+Set Variable [$$Buscar = 1]
+Perform Find [0$pk_OfeVer]
+If [Get ( FoundCount ) = 0]
+  Show Custom Dialog [Title: "¡Atención!"; Message: "No se encontraron items para validar."; Buttons: "Aceptar"]
+  Halt Script
+End If
+# -
+# ******************************************************************************************
+# LOOP DE VALIDACION — recorre TODO, no frena, acumula errores
+# ******************************************************************************************
+# Regla de error: tiene RK_Pro pero le falta Cantidad / Precio / Coste.
+# Excepcion: registros sin RK_Pro pero CON Denominacion son items de texto (NO son error).
+# Registros completamente vacios (sin RK_Pro, sin Denominacion, sin Cantidad, sin Precio, sin Coste): se borran.
+# -
+Set Variable [$errorPKs = ""]
+Go to Record/Request/Page [First]
+Loop
+  # -
+  If [not IsEmpty ( SecIte_d_SeccionesItems::SecIte_RK_Pro ) and ( IsEmpty ( SecIte_d_SeccionesItems::SecIte_Cantidad ) or IsEmpty ( SecIte_f_SeccionesItemsPrecios__SEL::SecItePre_PrecioEur ) or IsEmpty ( SecIte_f_SeccionesItemsPrecios__SEL::SecItePre_Coste ) )]
+    # Error: producto con datos incompletos — guardar PK y seguir
+    Set Variable [$errorPKs = $errorPKs & SecIte_d_SeccionesItems::SecIte_PK & "¶"]
+    Go to Record/Request/Page
+    # -
+  Else If [IsEmpty ( SecIte_d_SeccionesItems::SecIte_RK_Pro ) and IsEmpty ( SecIte_d_SeccionesItems::SecIte_Denominacion ) and IsEmpty ( SecIte_d_SeccionesItems::SecIte_Cantidad ) and IsEmpty ( SecIte_f_SeccionesItemsPrecios__SEL::SecItePre_PrecioEur ) and IsEmpty ( SecIte_f_SeccionesItemsPrecios__SEL::SecItePre_Coste )]
+    # Registro vacio entero — borrar
+    Delete Record/Request
+    Exit Loop If [Get ( FoundCount ) = 0]
+    If [Get ( RecordNumber ) > Get ( FoundCount )]
+      Exit Loop If [1]
+    End If
+    # -
+  Else
+    # OK (incluye items de texto sin RK_Pro pero con Denominacion)
+    Go to Record/Request/Page
+    # -
+  End If
+  # Salir si ya estamos en el ultimo
+  Exit Loop If [Get ( RecordNumber ) = Get ( FoundCount )]
+End Loop
+# -
+# ******************************************************************************************
+# SI HAY ERRORES: mostrar found set de errores y halt
+# ******************************************************************************************
+If [not IsEmpty ( $errorPKs )]
+  Show Custom Dialog [Title: "Validación"; Message: "Se encontraron " & ValueCount ( $errorPKs ) & " errores. Mostrando los registros."; Buttons: "Aceptar"]
+  # -
+  Enter Find Mode
+  Set Variable [$i = 1]
+  Loop
+    Exit Loop If [$i > ValueCount ( $errorPKs )]
+    If [$i > 1]
+      New Record/Request
+    End If
+    Set Field [SecIte_d_SeccionesItems::SecIte_PK; GetValue ( $errorPKs ; $i )]
+    Set Variable [$i = $i + 1]
+  End Loop
+  Perform Find
+  Halt Script
+End If
+# -
+# ******************************************************************************************
+# NO HAY ERRORES: asignar fecha de validacion y continuar
+# ******************************************************************************************
+If [GetValue ( $PG ; 2 ) = "validacionTecnica" and IsEmpty ( SecIte_f_OfertasVersiones__SEL::OfeVer_FechaValTec )]
+  # -
+  Set Field [SecIte_f_OfertasVersionesContactosJT__SEL::OfeVerConJT_FechaValTec; Get ( CurrentDate )]
+  Set Field [SecIte_f_OfertasVersiones__SEL::OfeVer_FechaValTec; Get ( CurrentDate )]
+  Set Field [SecIte_f_Ofertas__POR::Ofe_FechaValTec; Get ( CurrentDate )]
+  # -
+  Set Field [SecIte_f_OfertasVersionesContactosJT__SEL::OfeVerConJT_ResponsaTec; Ta_d_Sesiones::Ses_gCuentaTeseo_Nombres & " " & Ta_d_Sesiones::Ses_gCuentaTeseo_Apellidos]
+  Set Field [SecIte_f_OfertasVersiones__SEL::OfeVer_ResponsaTec; Ta_d_Sesiones::Ses_gCuentaTeseo_Nombres & " " & Ta_d_Sesiones::Ses_gCuentaTeseo_Apellidos]
+  Set Field [SecIte_f_Ofertas__POR::Ofe_ResponsaTec; Ta_d_Sesiones::Ses_gCuentaTeseo_Nombres & " " & Ta_d_Sesiones::Ses_gCuentaTeseo_Apellidos]
+  # -
+Else If [GetValue ( $PG ; 2 ) = "validacionEjecucion" and IsEmpty ( SecIte_f_OfertasVersiones__SEL::OfeVer_FechaValTec )]
+  # -
+  Set Field [SecIte_f_OfertasVersionesContactosJT__SEL::OfeVerConJT_FechaValEje; Get ( CurrentDate )]
+  Set Field [SecIte_f_Ofertas__POR::Ofe_FechaValEje; Get ( CurrentDate )]
+  # -
+  Set Field [SecIte_f_OfertasVersionesContactosJT__SEL::OfeVerConJT_ResponsaEje; Ta_d_Sesiones::Ses_gCuentaTeseo_Nombres & " " & Ta_d_Sesiones::Ses_gCuentaTeseo_Apellidos]
+  Set Field [SecIte_f_Ofertas__POR::Ofe_ResponsaEje; Ta_d_Sesiones::Ses_gCuentaTeseo_Nombres & " " & Ta_d_Sesiones::Ses_gCuentaTeseo_Apellidos]
+  # -
+End If
+# -
+# Refresco final
+Perform Script ["SecIte_Selec_Conectores" #2020; "¶OfeVer¶" & $pk_OfeVer & "¶" & $pk_Ofe]
+Refresh Window
+Commit Records/Requests
+# -
+# ******************************************************************************************

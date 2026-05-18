@@ -29,6 +29,9 @@ pub enum StepShape {
     WebViewerJs,
     /// <Calculation> + <Field table="..." id="..." name="..."/> (Set Field)
     FieldAndCalc,
+    /// <Script id="..." name="..."/> + optional <Calculation> + <CurrentScript value="..."/>
+    /// Used by Perform Script and Perform Script on Server.
+    PerformScript,
 }
 
 /// Internal step kind identifier from steps.toml.

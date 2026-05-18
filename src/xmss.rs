@@ -41,6 +41,10 @@ pub struct ScriptStep {
     // For Set Field (FieldAndCalc shape): preserves the full <Field> attributes.
     pub field_table: Option<String>,
     pub field_numeric_id: Option<String>,
+    // For Perform Script (PerformScript shape): target script + parent mode.
+    pub script_target_name: Option<String>,
+    pub script_target_id: Option<String>,
+    pub current_script_mode: Option<String>,
     pub indent_level: u32,
 }
 
@@ -188,6 +192,23 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                         }
                         parser.push_target(TextTarget::SetState);
                     }
+                    b"Script" => {
+                        for attr in e.attributes().flatten() {
+                            let val = String::from_utf8_lossy(&attr.value).to_string();
+                            match attr.key.as_ref() {
+                                b"id" => parser.script_target_id = val,
+                                b"name" => parser.script_target_name = val,
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"CurrentScript" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"value" {
+                                parser.current_script_mode = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
                     b"Title" => { parser.push_target(TextTarget::DialogTitle); }
                     b"Message" => { parser.push_target(TextTarget::DialogMessage); }
                     b"Button" => { parser.push_target(TextTarget::DialogButton); }
@@ -334,6 +355,9 @@ struct StepParser {
     field_target: String,
     field_table: String,
     field_numeric_id: String,
+    script_target_name: String,
+    script_target_id: String,
+    current_script_mode: String,
     context_stack: Vec<TextTarget>,
 }
 
@@ -391,6 +415,9 @@ impl StepParser {
             field_target: if self.field_target.is_empty() { None } else { Some(self.field_target.clone()) },
             field_table: if self.field_table.is_empty() { None } else { Some(self.field_table.clone()) },
             field_numeric_id: if self.field_numeric_id.is_empty() { None } else { Some(self.field_numeric_id.clone()) },
+            script_target_name: if self.script_target_name.is_empty() { None } else { Some(self.script_target_name.clone()) },
+            script_target_id: if self.script_target_id.is_empty() { None } else { Some(self.script_target_id.clone()) },
+            current_script_mode: if self.current_script_mode.is_empty() { None } else { Some(self.current_script_mode.clone()) },
             indent_level,
         }
     }
@@ -472,6 +499,24 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             }
             if let Some(target) = &step.field_target {
                 xml.push_str(&format!("<TargetName>{}</TargetName>", xml_escape(target)));
+            }
+        }
+        Some(StepShape::PerformScript) => {
+            if let Some(mode) = &step.current_script_mode {
+                xml.push_str(&format!("<CurrentScript value=\"{}\"></CurrentScript>", xml_escape(mode)));
+            }
+            if let Some(calc) = &step.calculation {
+                xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+            }
+            if step.script_target_name.is_some() || step.script_target_id.is_some() {
+                xml.push_str("<Script");
+                if let Some(id) = &step.script_target_id {
+                    xml.push_str(&format!(" id=\"{}\"", xml_escape(id)));
+                }
+                if let Some(name) = &step.script_target_name {
+                    xml.push_str(&format!(" name=\"{}\"", xml_escape(name)));
+                }
+                xml.push_str("></Script>");
             }
         }
         Some(StepShape::FieldAndCalc) => {

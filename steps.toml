@@ -131,7 +131,7 @@ kind = "PerformScript"
 id = 1
 en = "Perform Script"
 es = "Ejecutar guión"
-shape = "calculation"
+shape = "perform_script"
 opens_block = false
 closes_block = false
 
@@ -140,7 +140,7 @@ kind = "PerformScriptOnServer"
 id = 164
 en = "Perform Script on Server"
 es = "Ejecutar guión en el servidor"
-shape = "calculation"
+shape = "perform_script"
 opens_block = false
 closes_block = false
 

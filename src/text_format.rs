@@ -248,12 +248,13 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
         let content = if line.trim().starts_with("// ") { &line.trim()[3..] } else { line.trim() };
 
         // Comment lines
-        if content.starts_with("# ") {
+        if content.starts_with('#') {
+            let comment_text = content.strip_prefix("# ").unwrap_or("").to_string();
             steps.push(ScriptStep {
                 name: steps::COMMENT_NAME.to_string(),
                 enable: true,
                 id: resolve_id(steps::COMMENT_NAME)?,
-                text: Some(content[2..].to_string()),
+                text: if comment_text.is_empty() { None } else { Some(comment_text) },
                 calculation: None, var_name: None, repetition: None,
                 object_name: None, function_name: None, parameters: Vec::new(),
                 restore_state: None, set_state: None,

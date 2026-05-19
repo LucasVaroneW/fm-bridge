@@ -1,0 +1,343 @@
+# ******************************************************************************************
+# MIG_Poblar_TrazabilidadEdge
+# -
+# Migración one-time: genera Ta_d_TrazabilidadEdge desde Ta_d_RegistroRegistroJT.
+# -
+# ARQUITECTURA (export/import por chunks — mucho más rápido que New Record loop):
+#   1. Loop sobre JT records acumulando filas TSV en $chunkText
+#   2. Al llegar al chunk_size: Set Field en campo global → Export Field Contents →
+#      Import Records bulk → vaciar chunk
+#   3. Repetir hasta procesar todos los JT
+#   4. Flush del último chunk parcial al final
+#
+# VENTAJA vs New Record loop:
+#   · Elimina 650k commits individuales (el cuello de botella principal)
+#   · Import Records es una operación bulk optimizada del motor de FM
+#   · Estimado: 5-15 minutos para 650k edges en servidor local
+#
+# PRERREQUISITOS (leer antes de ejecutar):
+#
+#   A) CAMPO GLOBAL DE TEXTO — crear si no existe:
+#      Cualquier tabla → agregar campo: tipo Texto, global, llamado "g_MigTempExport"
+#      Este campo actúa de buffer temporal para Export Field Contents.
+#      Ejemplo: Ta_d_Equipos_MTA::g_MigTempExport  o  AppConf::g_MigTempExport
+#      Ajustar las líneas "Set Field" e "Export Field Contents" con el nombre real.
+#
+#   B) LAYOUT DE Ta_d_TrazabilidadEdge:
+#      El script debe ejecutarse estando en un layout de Ta_d_TrazabilidadEdge.
+#      Este layout es necesario para el paso Import Records.
+#      Agregar "Go to Layout [layout_de_TraEdge]" al inicio si es necesario.
+#
+#   C) IMPORT RECORDS — CONFIGURAR EN SCRIPT EDITOR:
+#      El paso "Import Records" necesita el mapeo de columnas configurado una vez
+#      en FileMaker Script Editor. El archivo TSV tendrá ESTAS columnas en orden:
+#
+#        Col  1 → TraEdge_PK
+#        Col  2 → TraEdge_FK_JT
+#        Col  3 → TraEdge_RK_FabComIteSte
+#        Col  4 → TraEdge_TipoAsoc
+#        Col  5 → TraEdge_RK_Padre
+#        Col  6 → TraEdge_NS_Padre
+#        Col  7 → TraEdge_TK_Padre
+#        Col  8 → TraEdge_RK_Hijo
+#        Col  9 → TraEdge_NS_Hijo
+#        Col 10 → TraEdge_TK_Hijo
+#        Col 11 → TraEdge_RK_ProVer
+#        Col 12 → TraEdge_Del
+#
+#      Source: variable $filePath | Format: Tab-Separated | No dialog
+#      Sin fila de encabezado (el TSV no tiene header).
+#
+#   D) CAMPO Reg_TK_ProVer — numérico almacenado en Ta_d_Registros.
+#      El script asume que el campo existe con ese nombre.
+#      Si tiene otro nombre, ajustar las queries SQL.
+#
+# ESTRUCTURA DE RegRegJT_RK_ListRegistros:
+#   Línea 1 = Reg_PK del PADRE
+#   Líneas 2..N = Reg_PK de los HIJOS
+#
+# MONITOREO:
+#   $$MIG_TE_Log se actualiza cada chunk procesado → verlo desde otro cliente.
+#
+# Lucas Varone 05/2026
+# ******************************************************************************************
+
+Set Error Capture [ On ]
+Allow User Abort [ Off ]
+
+# ------------------------------------------------------------------------------------------
+# GUARDIA: Verificar estado inicial
+# ------------------------------------------------------------------------------------------
+
+Set Variable [$existentes[1]; Value:ExecuteSQL ( "SELECT COUNT(TraEdge_PK) FROM Ta_d_TrazabilidadEdge WHERE TraEdge_Del = 0" ; "" ; "" ) ]
+
+If [ GetAsNumber ( $existentes ) > 0 ]
+Show Custom Dialog [ "ATENCIÓN" ; "Ta_d_TrazabilidadEdge ya tiene " & GetAsNumber ( $existentes ) & " registros activos.¶¿Continuar de todas formas y agregar más?" ]
+If [ Get ( LastMessageChoice ) ≠ 1 ]
+Exit Script [ ]
+End If
+End If
+
+# ------------------------------------------------------------------------------------------
+# CONFIGURACIÓN
+# ------------------------------------------------------------------------------------------
+
+Set Variable [$SEP_C[1]; Value:"<C>" ]
+Set Variable [$SEP_R[1]; Value:"<R>" ]
+Set Variable [$TAB[1]; Value:Char ( 9 ) ]
+Set Variable [$CR[1]; Value:Char ( 13 ) ]
+
+# Tamaño de chunk (edges por archivo de importación)
+# 5000 es buen balance: string build rápido, no demasiados archivos
+Set Variable [$CHUNK_SIZE[1]; Value:5000 ]
+
+# Ruta del archivo temporal (en servidor con PSoS, en desktop para prueba local)
+# Get(DocumentsPath) devuelve la carpeta Documents del contexto de ejecución
+Set Variable [$filePath[1]; Value:Get ( DocumentsPath ) & "mig_temp_edges.tab" ]
+
+# Contadores
+Set Variable [$totalJT[1]; Value:0 ]
+Set Variable [$totalCreados[1]; Value:0 ]
+Set Variable [$skipsJT[1]; Value:0 ]
+Set Variable [$skipsHijo[1]; Value:0 ]
+Set Variable [$logErrores[1]; Value:"" ]
+Set Variable [$tsInicio[1]; Value:Get ( CurrentTimestamp ) ]
+Set Variable [$chunkNum[1]; Value:0 ]
+
+# Variables del chunk actual
+Set Variable [$chunkText[1]; Value:"" ]
+Set Variable [$edgesEnChunk[1]; Value:0 ]
+
+Set Variable [$$MIG_TE_Log[1]; Value:"[" & Get ( CurrentTimestamp ) & "] Iniciando migración Export/Import..." ]
+
+# ------------------------------------------------------------------------------------------
+# FASE 1 — Obtener lista completa de JT PKs (1 columna, sin campos multi-valor)
+# ------------------------------------------------------------------------------------------
+
+Set Variable [$jtPKs[1]; Value:ExecuteSQL (
+    "SELECT RegRegJT_PK
+     FROM Ta_d_RegistroRegistroJT
+     WHERE RegRegJT_Del = 0
+     ORDER BY RegRegJT_PK"
+    ; "" ; "¶"
+) ]
+
+Set Variable [$jtCount[1]; Value:ValueCount ( $jtPKs ) ]
+
+If [ IsEmpty ( $jtPKs ) or $jtCount < 1 ]
+Show Custom Dialog [ "Sin datos" ; "Ta_d_RegistroRegistroJT no tiene registros activos. Cancelado." ]
+Exit Script [ ]
+End If
+
+Set Variable [$$MIG_TE_Log[1]; Value:$$MIG_TE_Log & "¶[" & Get ( CurrentTimestamp ) & "] " & $jtCount & " registros JT a procesar." ]
+
+# ------------------------------------------------------------------------------------------
+# FASE 2 — Loop principal: construir chunks y exportar/importar
+# ------------------------------------------------------------------------------------------
+
+Set Variable [$jtIdx[1]; Value:1 ]
+
+Loop
+
+    Exit Loop If [$jtIdx > $jtCount ]
+
+    Set Variable [$jtPK[1]; Value:GetValue ( $jtPKs ; $jtIdx ) ]
+
+    # ── SQL 1: Metadata del JT (sin el campo multi-valor) ─────────────────────
+    Set Variable [$jtMeta[1]; Value:ExecuteSQL (
+        "SELECT RegRegJT_BooEmbalaje, RegRegJT_RK_FabComIteSte
+         FROM Ta_d_RegistroRegistroJT
+         WHERE RegRegJT_PK = ?"
+        ; $SEP_C ; "" ; $jtPK
+    ) ]
+    Set Variable [$metaCols[1]; Value:Substitute ( $jtMeta ; $SEP_C ; ¶ ) ]
+    Set Variable [$tipoAsoc[1]; Value:GetAsNumber ( GetValue ( $metaCols ; 1 ) ) ]
+    Set Variable [$fabComIteSte[1]; Value:GetValue ( $metaCols ; 2 ) ]
+
+    # ── SQL 2: Lista de PKs (1 columna → result ES el campo multi-valor) ──────
+    Set Variable [$listaPKs[1]; Value:ExecuteSQL (
+        "SELECT RegRegJT_RK_ListRegistros
+         FROM Ta_d_RegistroRegistroJT
+         WHERE RegRegJT_PK = ?"
+        ; "" ; "" ; $jtPK
+    ) ]
+    Set Variable [$listaCnt[1]; Value:ValueCount ( $listaPKs ) ]
+
+    If [$listaCnt < 2 ]
+
+        # JT sin hijos → skip
+        Set Variable [$skipsJT[1]; Value:$skipsJT + 1 ]
+        Set Variable [$logErrores[1]; Value:$logErrores & "¶SKIP_SIN_HIJOS: JT=" & $jtPK ]
+
+    Else
+
+        # ── SQL 3: Datos del PADRE (primera línea de la lista) ─────────────────
+        Set Variable [$padreRK[1]; Value:GetValue ( $listaPKs ; 1 ) ]
+        Set Variable [$padreSQL[1]; Value:ExecuteSQL (
+            "SELECT Reg_Lectura, Reg_TK_ProVer
+             FROM Ta_d_Registros
+             WHERE Reg_PK = ?"
+            ; $SEP_C ; "" ; $padreRK
+        ) ]
+        Set Variable [$padreCols[1]; Value:Substitute ( $padreSQL ; $SEP_C ; ¶ ) ]
+        Set Variable [$padreNS[1]; Value:GetValue ( $padreCols ; 1 ) ]
+        Set Variable [$padreTK[1]; Value:GetAsNumber ( GetValue ( $padreCols ; 2 ) ) ]
+
+        If [ IsEmpty ( $padreNS ) ]
+
+            Set Variable [$skipsJT[1]; Value:$skipsJT + 1 ]
+            Set Variable [$logErrores[1]; Value:$logErrores & "¶SKIP_PADRE_NF: JT=" & $jtPK & " PadreRK=" & $padreRK ]
+
+        Else
+
+            # ── SQL 4: Todos los hijos en UNA sola query (IN clause) ───────────
+            Set Variable [$inList[1]; Value:Let ( [
+                ~lista = $listaPKs ;
+                ~cnt   = ValueCount ( ~lista ) ;
+                ~raw   = While (
+                    [ j = 2 ; acc = "" ] ;
+                    j ≤ ~cnt ;
+                    [
+                        ~pk = GetValue ( ~lista ; j ) ;
+                        acc = acc & If ( j > 2 ; "','" ; "" ) & ~pk ;
+                        j   = j + 1
+                    ] ;
+                    acc
+                )
+            ] ;
+                "'" & ~raw & "'"
+            ) ]
+
+            Set Variable [$hijosRaw[1]; Value:ExecuteSQL (
+                "SELECT Reg_PK, Reg_Lectura, Reg_TK_ProVer, Reg_RK_ProVer
+                 FROM Ta_d_Registros
+                 WHERE Reg_PK IN (" & $inList & ")"
+                ; $SEP_C ; $SEP_R
+            ) ]
+
+            # ── Construir una fila TSV por cada hijo ───────────────────────────
+            Set Variable [$hijosRows[1]; Value:Substitute ( $hijosRaw ; $SEP_R ; ¶ ) ]
+            Set Variable [$hijosRowCnt[1]; Value:ValueCount ( $hijosRows ) ]
+            Set Variable [$k[1]; Value:1 ]
+
+            Loop
+
+                Exit Loop If [$k > $hijosRowCnt ]
+
+                Set Variable [$hijoRow[1]; Value:GetValue ( $hijosRows ; $k ) ]
+                Set Variable [$hijoCols[1]; Value:Substitute ( $hijoRow ; $SEP_C ; ¶ ) ]
+                Set Variable [$hijoRK[1]; Value:GetValue ( $hijoCols ; 1 ) ]
+                Set Variable [$hijoNS[1]; Value:GetValue ( $hijoCols ; 2 ) ]
+                Set Variable [$hijoTK[1]; Value:GetAsNumber ( GetValue ( $hijoCols ; 3 ) ) ]
+                Set Variable [$hijoProVer[1]; Value:GetValue ( $hijoCols ; 4 ) ]
+
+                If [ not IsEmpty ( $hijoRK ) and not IsEmpty ( $hijoNS ) ]
+
+                    # Construir fila TSV (columnas en el orden documentado arriba)
+                    Set Variable [$uuid[1]; Value:Get ( UUID ) ]
+                    Set Variable [$row[1]; Value:
+                        $uuid           & $TAB &
+                        $jtPK           & $TAB &
+                        $fabComIteSte   & $TAB &
+                        $tipoAsoc       & $TAB &
+                        $padreRK        & $TAB &
+                        $padreNS        & $TAB &
+                        $padreTK        & $TAB &
+                        $hijoRK         & $TAB &
+                        $hijoNS         & $TAB &
+                        $hijoTK         & $TAB &
+                        $hijoProVer     & $TAB &
+                        0               & $CR
+                    ]
+
+                    Set Variable [$chunkText[1]; Value:$chunkText & $row ]
+                    Set Variable [$edgesEnChunk[1]; Value:$edgesEnChunk + 1 ]
+
+                    # ── FLUSH si el chunk llegó al límite ──────────────────────
+                    If [$edgesEnChunk ≥ $CHUNK_SIZE ]
+
+                        Set Variable [$chunkNum[1]; Value:$chunkNum + 1 ]
+
+                        # Escribir chunk al campo global y exportar a archivo
+                        # AJUSTAR: reemplazar "Ta_d_Equipos_MTA::g_MigTempExport" con el campo real
+                        Set Field [ Ta_d_Equipos_MTA::g_MigTempExport ; $chunkText ]
+                        Export Field Contents [ Ta_d_Equipos_MTA::g_MigTempExport ; $filePath ][ No dialog ]
+
+                        # Import bulk al layout actual (Ta_d_TrazabilidadEdge)
+                        # CONFIGURAR mapeo en Script Editor según columnas documentadas
+                        Import Records [ No dialog; Source: $filePath; Tab-Separated ]
+
+                        Set Variable [$totalCreados[1]; Value:$totalCreados + $edgesEnChunk ]
+                        Set Variable [$$MIG_TE_Log[1]; Value:"[" & Get ( CurrentTimestamp ) & "]  Chunk #" & $chunkNum & " importado | JT " & $totalJT & "/" & $jtCount & " | Total edges: " & $totalCreados ]
+
+                        # Resetear chunk
+                        Set Variable [$chunkText[1]; Value:"" ]
+                        Set Variable [$edgesEnChunk[1]; Value:0 ]
+
+                    End If
+
+                Else
+
+                    Set Variable [$skipsHijo[1]; Value:$skipsHijo + 1 ]
+                    Set Variable [$logErrores[1]; Value:$logErrores & "¶SKIP_HIJO_VACIO: JT=" & $jtPK & " Fila=" & $k ]
+
+                End If
+
+                Set Variable [$k[1]; Value:$k + 1 ]
+
+            End Loop
+
+        End If
+
+    End If
+
+    Set Variable [$totalJT[1]; Value:$totalJT + 1 ]
+    Set Variable [$jtIdx[1]; Value:$jtIdx + 1 ]
+
+End Loop
+
+# ------------------------------------------------------------------------------------------
+# FASE 3 — Flush del último chunk (puede ser parcial)
+# ------------------------------------------------------------------------------------------
+
+If [$edgesEnChunk > 0 ]
+
+    Set Variable [$chunkNum[1]; Value:$chunkNum + 1 ]
+
+    Set Field [ Ta_d_Equipos_MTA::g_MigTempExport ; $chunkText ]
+    Export Field Contents [ Ta_d_Equipos_MTA::g_MigTempExport ; $filePath ][ No dialog ]
+    Import Records [ No dialog; Source: $filePath; Tab-Separated ]
+
+    Set Variable [$totalCreados[1]; Value:$totalCreados + $edgesEnChunk ]
+    Set Variable [$$MIG_TE_Log[1]; Value:"[" & Get ( CurrentTimestamp ) & "]  Chunk final #" & $chunkNum & " importado | Total edges: " & $totalCreados ]
+
+    # Limpiar campo global
+    Set Field [ Ta_d_Equipos_MTA::g_MigTempExport ; "" ]
+
+End If
+
+# ------------------------------------------------------------------------------------------
+# RESULTADO FINAL
+# ------------------------------------------------------------------------------------------
+
+Set Variable [$tsFin[1]; Value:Get ( CurrentTimestamp ) ]
+Set Variable [$duracion[1]; Value:GetAsNumber ( $tsFin ) - GetAsNumber ( $tsInicio ) ]
+
+Set Variable [$resumen[1]; Value:
+    "=== MIGRACIÓN COMPLETADA ===" & "¶" &
+    "Inicio:          " & $tsInicio & "¶" &
+    "Fin:             " & $tsFin & "¶" &
+    "Duración:        " & $duracion & " segundos" & "¶" &
+    "Chunks (import): " & $chunkNum & "¶" &
+    "JT procesados:   " & $totalJT & " / " & $jtCount & "¶" &
+    "Edges creados:   " & $totalCreados & "¶" &
+    "JT skipped:      " & $skipsJT & "¶" &
+    "Hijos skip:      " & $skipsHijo & "¶" &
+    If ( not IsEmpty ( $logErrores ) ; "ERRORES:" & $logErrores ; "Sin errores." )
+]
+
+Set Variable [$$MIG_TE_Log[1]; Value:$resumen ]
+
+Show Custom Dialog [ "Migración finalizada" ; $resumen ]
+
+# ******************************************************************************************

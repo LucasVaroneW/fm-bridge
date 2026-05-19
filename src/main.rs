@@ -297,7 +297,21 @@ fn run_test_cli() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn set_console_utf8() {
+    // Without this, PowerShell decodes our stdout via the legacy OEM code page
+    // (CP850 on Spanish Windows), turning ó → ├│ when captured with `>`.
+    // Idempotent and harmless if stdout is already a file or pipe.
+    unsafe {
+        windows_sys::Win32::System::Console::SetConsoleOutputCP(65001);
+    }
+}
+
+#[cfg(not(windows))]
+fn set_console_utf8() {}
+
 fn main() {
+    set_console_utf8();
     let result = run_cli_mode();
     if let Err(e) = result {
         eprintln!("Error: {}", e);

@@ -82,15 +82,18 @@ pub fn strip_header(data: &[u8]) -> Result<String, String> {
     }
 
     // Fallback: decode as Windows-1252 (covers Latin-1 accented chars)
-    // Each byte 0x80-0xFF maps to a specific Unicode code point.
-    // Bytes 0x00-0x7F are identical in both encodings.
-    let decoded: String = xml_bytes.iter().map(|&b| {
+    Ok(decode_windows1252(xml_bytes))
+}
+
+/// Decode bytes as Windows-1252 (also covers Latin-1 / ISO-8859-1).
+/// Bytes 0x00-0x7F → ASCII (same as UTF-8)
+/// Bytes 0x80-0x9F → Windows-1252 specific characters
+/// Bytes 0xA0-0xFF → Latin-1 direct Unicode mapping
+pub fn decode_windows1252(data: &[u8]) -> String {
+    data.iter().map(|&b| {
         if b < 0x80 {
-            // ASCII — same in UTF-8 and Windows-1252
             b as char
         } else {
-            // Windows-1252 specific mappings for 0x80-0x9F range
-            // 0xA0-0xFF are Latin-1 supplement (direct Unicode mapping)
             match b {
                 0x80 => '\u{20AC}', // €
                 0x82 => '\u{201A}', // ‚
@@ -122,9 +125,7 @@ pub fn strip_header(data: &[u8]) -> Result<String, String> {
                 _ => b as char, // 0xA0-0xFF: Latin-1 direct mapping
             }
         }
-    }).collect();
-
-    Ok(decoded)
+    }).collect()
 }
 
 /// Strip BOM (U+FEFF) from a string, commonly found in FM clipboard data.

@@ -91,10 +91,10 @@ fn run_json_mode() -> Result<(), String> {
 fn run_cli_mode() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
-        return run_read_cli();
+        return run_read_cli(None);
     }
     match args[0].as_str() {
-        "read" => run_read_cli(),
+        "read" => run_read_cli(args.get(1).map(|s| s.as_str())),
         "write" => {
             if args.len() < 2 {
                 return Err("Usage: fm-bridge write <file.fmscript>".to_string());
@@ -110,16 +110,61 @@ fn run_cli_mode() -> Result<(), String> {
     }
 }
 
-fn run_read_cli() -> Result<(), String> {
+/// Read a text file with encoding detection.
+/// Tries: UTF-8 (with/without BOM), UTF-16 LE (PowerShell >), UTF-16 BE, then Windows-1252.
+fn read_file_to_string(path: &str) -> Result<String, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("Cannot read file {}: {}", path, e))?;
+
+    if bytes.is_empty() {
+        return Ok(String::new());
+    }
+
+    // UTF-16 LE BOM (FF FE) — PowerShell's > operator produces this
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        let u16s: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        return String::from_utf16(&u16s)
+            .map_err(|e| format!("Invalid UTF-16 LE in {}: {}", path, e));
+    }
+
+    // UTF-16 BE BOM (FE FF)
+    if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+        let u16s: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
+        return String::from_utf16(&u16s)
+            .map_err(|e| format!("Invalid UTF-16 BE in {}: {}", path, e));
+    }
+
+    // Try UTF-8 (handles both with and without BOM)
+    if let Ok(s) = std::str::from_utf8(&bytes) {
+        return Ok(s.strip_prefix('\u{FEFF}').unwrap_or(s).to_string());
+    }
+
+    // Fallback: Windows-1252 (covers Latin-1 accented characters)
+    Ok(crate::xmss::decode_windows1252(&bytes))
+}
+
+fn run_read_cli(output_path: Option<&str>) -> Result<(), String> {
     let data = clipboard::read_fm_clipboard()?;
     let script = xmss::decode_xmss(&data)?;
-    println!("{}", text_format::format_script(&script));
+    let text = text_format::format_script(&script);
+    if let Some(path) = output_path {
+        std::fs::write(path, &text)
+            .map_err(|e| format!("Cannot write file {}: {}", path, e))?;
+        println!("Script written to {}", path);
+    } else {
+        println!("{}", text);
+    }
     Ok(())
 }
 
 fn run_write_cli(file_path: &str) -> Result<(), String> {
-    let text = std::fs::read_to_string(file_path)
-        .map_err(|e| format!("Cannot read file {}: {}", file_path, e))?;
+    let text = read_file_to_string(file_path)?;
     let xmss_data = xmss::encode_xmss(&text)?;
     clipboard::write_fm_clipboard(&xmss_data)?;
     println!("Script written to clipboard from {}", file_path);

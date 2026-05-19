@@ -35,6 +35,15 @@ FM (Cmd+V) ← fm-bridge write ← script.fmscript
 2. Ejecutarlo. Aceptar todas las opciones por defecto (1 → Enter).
 3. Cerrar y volver a abrir cualquier terminal (cmd, PowerShell, Git Bash).
 4. Verificar: `cargo --version` debe imprimir algo como `cargo 1.8x.x`.
+5. **Importante:** Necesitas MSYS2 con el toolchain mingw64. Si ya tenes MSYS2 instalado, abri **MSYS2 UCRT64** desde el menu de inicio y ejecuta:
+   ```
+   pacman -S mingw-w64-x86_64-gcc
+   ```
+   Si no tenes MSYS2, la opcion mas simple es cambiar al toolchain MSVC de Rust:
+   ```
+   rustup default stable-x86_64-pc-windows-msvc
+   ```
+   (Requiere Visual Studio Build Tools con el workload "Desktop development with C++".)
 
 **Mac:**
 
@@ -55,6 +64,19 @@ cd fm-bridge
 ```bash
 cargo install --path .
 ```
+
+**Windows con MSYS2 (solo si usas el toolchain `x86_64-pc-windows-gnu`):**
+
+Si ves un error de linker como `collect2.exe: error: ld returned 53 exit status`,
+es porque Rust esta encontrando el linker de UCRT64 en vez del de MINGW64.
+Arreglalo temporalmente antes de compilar:
+
+```powershell
+$env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+cargo install --path .
+```
+
+O hacelo permanente agregando `C:\msys64\mingw64\bin` al PATH del sistema.
 
 Esto compila en modo release y deja el binario `fm-bridge` en:
 
@@ -82,7 +104,11 @@ Lee el clipboard (asumiendo que copiaste algo de FM) y lo imprime como texto en
 la terminal. Para guardarlo en archivo:
 
 ```bash
+# Unix (Mac/Linux) — redireccion funciona bien porque la terminal usa UTF-8
 fm-bridge read > miscript.fmscript
+
+# Windows (PowerShell) — evita > porque PowerShell recodifica a UTF-16:
+fm-bridge read miscript.fmscript
 ```
 
 ### `fm-bridge write <archivo>`
@@ -228,6 +254,16 @@ step en el clipboard.
 
 Otro proceso está bloqueando el clipboard (típicamente clipboard managers tipo
 Ditto, ClipClip, etc.). Cerralo temporalmente y reintentá.
+
+### "stream did not contain valid UTF-8" (Windows)
+
+PowerShell recodifica la salida de `>` a UTF-16 LE, que versiones viejas de
+`fm-bridge` no pueden leer. Solución:
+
+1. Actualizá `fm-bridge` (este fix está incluido desde la versión 0.1.0+).
+2. O usá la sintaxis directa: `fm-bridge read miscript.fmscript` en vez de 
+   `fm-bridge read > miscript.fmscript`.
+3. O usá `Out-File`: `fm-bridge read | Out-File -Encoding utf8 miscript.fmscript`.
 
 ### El binario `fm-bridge` no se encuentra después de instalarlo
 

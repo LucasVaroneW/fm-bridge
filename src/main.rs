@@ -3,6 +3,8 @@
 // No UI, no HTTP, no async. Procedural and minimal.
 
 mod clipboard;
+#[cfg(windows)]
+mod ole_clipboard;
 mod steps;
 mod text_format;
 mod xmss;
@@ -223,8 +225,17 @@ fn run_passthrough_cli() -> Result<(), String> {
         .map_err(|e| format!("Cannot save raw data: {}", e))?;
     println!("Raw bytes saved to: {}", raw_path.display());
 
-    clipboard::write_fm_clipboard(&data)?;
-    println!("Wrote {} bytes back to clipboard (exact copy)", data.len());
+    // read_fm_clipboard returns bytes WITH the 4-byte LE length header that FM
+    // puts on the HGLOBAL. write_fm_clipboard prepends ITS OWN 4-byte header.
+    // For a true passthrough we must strip FM's header first; otherwise we'd
+    // produce a doubly-framed buffer that FM rejects on paste.
+    let xml_bytes = if data.len() > 4 {
+        &data[4..]
+    } else {
+        &data[..]
+    };
+    clipboard::write_fm_clipboard(xml_bytes)?;
+    println!("Wrote {} bytes of XML back to clipboard (header re-added by write).", xml_bytes.len());
     println!("Now try pasting in FileMaker.");
     Ok(())
 }

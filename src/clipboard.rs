@@ -30,62 +30,45 @@ pub fn read_fm_clipboard() -> Result<Vec<u8>, String> {
 
 #[cfg(windows)]
 pub fn write_fm_clipboard(data: &[u8]) -> Result<(), String> {
-    use windows_sys::Win32::{
-        Foundation::{HWND, FALSE, GetLastError},
-        System::DataExchange::{OpenClipboard, CloseClipboard, EmptyClipboard, SetClipboardData, RegisterClipboardFormatA},
-        System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
-    };
+    // FileMaker on Windows only accepts pastes when clipboard data was published
+    // via the OLE clipboard from a "proper" IDataObject — raw SetClipboardData
+    // and SHCreateDataObject's stock object both fail silently. We provide our
+    // own minimal IDataObject (see ole_clipboard.rs) mirroring what .NET's
+    // System.Windows.Forms.DataObject does internally.
+
+    use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
+    use windows::Win32::System::Ole::{OleFlushClipboard, OleInitialize, OleSetClipboard};
+    use windows::Win32::System::Com::IDataObject;
 
     unsafe {
-        let c_name = std::ffi::CString::new("XMSS").map_err(|e| e.to_string())?;
-        let fmt = RegisterClipboardFormatA(c_name.as_ptr() as *const u8);
-        if fmt == 0 {
-            return Err(format!("RegisterClipboardFormatA(XMSS) failed, GetLastError={}", GetLastError()));
+        // OleInitialize is required before any OLE clipboard calls. Safe to
+        // call multiple times; we never call OleUninitialize because the
+        // process exits right after.
+        let _ = OleInitialize(None);
+
+        let name: Vec<u16> = "Mac-XMSS\0".encode_utf16().collect();
+        let fmt_id = RegisterClipboardFormatW(windows::core::PCWSTR(name.as_ptr()));
+        if fmt_id == 0 {
+            return Err("RegisterClipboardFormatW(Mac-XMSS) failed".to_string());
         }
 
-        // Windows FM clipboard payload: 4-byte LE u32 length, then raw XML.
-        let len = data.len() as u32;
+        // Windows FM payload: 4-byte LE u32 length prefix + raw XML.
         let mut framed = Vec::with_capacity(4 + data.len());
-        framed.extend_from_slice(&len.to_le_bytes());
+        framed.extend_from_slice(&(data.len() as u32).to_le_bytes());
         framed.extend_from_slice(data);
 
-        for _attempt in 0..30 {
-            if OpenClipboard(0 as HWND) == FALSE {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                continue;
-            }
+        let inner = crate::ole_clipboard::FmDataObject::new(fmt_id as u16, framed);
+        let data_obj: IDataObject = inner.into();
 
-            EmptyClipboard();
+        OleSetClipboard(Some(&data_obj))
+            .map_err(|e| format!("OleSetClipboard failed: {:?}", e))?;
 
-            let mem_size = framed.len();
-            let hmem = GlobalAlloc(GMEM_MOVEABLE, mem_size);
-            if hmem.is_null() {
-                let code = GetLastError();
-                CloseClipboard();
-                return Err(format!("GlobalAlloc({} bytes) failed, GetLastError={}", mem_size, code));
-            }
+        // Persist data after our process exits — otherwise the IDataObject
+        // pointer becomes dangling once we drop it.
+        OleFlushClipboard()
+            .map_err(|e| format!("OleFlushClipboard failed: {:?}", e))?;
 
-            let locked = GlobalLock(hmem) as *mut u8;
-            if locked.is_null() {
-                let code = GetLastError();
-                CloseClipboard();
-                return Err(format!("GlobalLock failed, GetLastError={}", code));
-            }
-
-            std::ptr::copy_nonoverlapping(framed.as_ptr(), locked, mem_size);
-            GlobalUnlock(hmem);
-
-            if SetClipboardData(fmt, hmem).is_null() {
-                let code = GetLastError();
-                CloseClipboard();
-                return Err(format!("SetClipboardData(fmt={}) failed, GetLastError={}", fmt, code));
-            }
-
-            CloseClipboard();
-            return Ok(());
-        }
-
-        Err("Cannot open clipboard after 30 attempts".to_string())
+        Ok(())
     }
 }
 

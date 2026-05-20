@@ -146,8 +146,13 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
     let mut steps: Vec<ScriptStep> = Vec::new();
     let mut parser = StepParser::default();
     let mut indent_level: u32 = 0;
+    // For Opaque-shaped steps: byte offset where the step's inner XML begins
+    // (right after the `<Step ...>` start tag). Some => current step is opaque.
+    let mut opaque_inner_start: Option<usize> = None;
 
     loop {
+        // Byte position before this event is read = start of the event's tag.
+        let pos_before = reader.buffer_position() as usize;
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
                 match e.name().as_ref() {
@@ -164,6 +169,14 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                                 _ => {}
                             }
                         }
+                        // Opaque steps: remember where the inner XML starts so the
+                        // whole thing can be captured verbatim at the </Step> end.
+                        let en = steps::translate_to_en(&parser.name);
+                        opaque_inner_start = if steps::shape_for_en(&en) == Some(&StepShape::Opaque) {
+                            Some(reader.buffer_position() as usize)
+                        } else {
+                            None
+                        };
                     }
                     b"Calculation" => {
                         let parent = parser.current_target().clone();
@@ -319,6 +332,15 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"Step" => {
                         // Translate Spanish name to English
                         let en_name = steps::translate_to_en(&parser.name);
+
+                        // Opaque step: capture the full inner XML verbatim. `pos_before`
+                        // is the start of this `</Step>` tag, so the slice from the
+                        // inner-start offset to here is exactly the step's children.
+                        if let Some(start) = opaque_inner_start.take() {
+                            if pos_before > start {
+                                parser.calculation = xml_clean[start..pos_before].to_string();
+                            }
+                        }
 
                         // Close block BEFORE the step
                         if steps::closes_block(&en_name) {
@@ -692,6 +714,13 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         Some(StepShape::AdjustWindow) => {
             if let Some(state) = &step.window_state {
                 xml.push_str(&format!("<WindowState value=\"{}\"></WindowState>", xml_escape(state)));
+            }
+        }
+        Some(StepShape::Opaque) => {
+            // The raw inner XML was captured verbatim on decode — emit it as-is.
+            // Already valid, entity-escaped XML; must NOT be re-escaped or wrapped.
+            if let Some(raw) = &step.calculation {
+                xml.push_str(raw);
             }
         }
         Some(StepShape::Plain) | None => {

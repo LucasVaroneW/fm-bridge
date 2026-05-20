@@ -6,3 +6,4 @@ debug_raw.xml
 debug_raw.hex
 debug_built.xml
 test_roundtrip.xml
+scripts/

@@ -201,8 +201,9 @@ pub fn format_step(step: &ScriptStep) -> String {
                 (None, true)       => {}
             }
         }
-        Some(StepShape::Comment) | Some(StepShape::Plain) | None => {
-            // Fallback: show any calc or text we have
+        Some(StepShape::Comment) | Some(StepShape::Plain) | Some(StepShape::Opaque) | None => {
+            // Fallback: show any calc or text we have.
+            // Opaque steps carry their full inner FM XML verbatim in `calculation`.
             if let Some(calc) = &step.calculation {
                 let trimmed = calc.trim();
                 if !trimmed.is_empty() {
@@ -529,8 +530,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 indent_level: indent,
             }
         }
-        // Calculation, Plain, or unknown — store content as calculation
-        Some(StepShape::Calculation) | Some(StepShape::Plain) | None => ScriptStep {
+        // Calculation, Plain, Opaque, or unknown — store content as calculation.
+        // Opaque keeps the bracket content (raw inner FM XML) verbatim.
+        Some(StepShape::Calculation) | Some(StepShape::Plain) | Some(StepShape::Opaque) | None => ScriptStep {
             name: name.to_string(), enable: enabled, id,
             text: None, calculation: content.map(|c| c.to_string()),
             var_name: None, repetition: None,

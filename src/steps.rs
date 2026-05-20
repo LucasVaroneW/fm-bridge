@@ -43,6 +43,11 @@ pub enum StepShape {
     SelectWindow,
     /// <WindowState value="ResizeToFit|Maximize|Minimize|Restore|Hide"/>
     AdjustWindow,
+    /// Whole inner XML preserved verbatim — no structured parsing.
+    /// Used by steps whose FM config is too rich for a flat text line
+    /// (Import/Export Records: <Profile>, <TargetFields> with N field maps, etc.).
+    /// The raw inner XML round-trips losslessly via the `calculation` field.
+    Opaque,
 }
 
 /// Internal step kind identifier from steps.toml.

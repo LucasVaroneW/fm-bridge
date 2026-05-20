@@ -242,7 +242,7 @@ fn run_passthrough_cli() -> Result<(), String> {
 
 fn run_test_cli() -> Result<(), String> {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_file = manifest_dir.join("test_script.fmscript");
+    let test_file = manifest_dir.join("scripts").join("test_script.fmscript");
 
     println!("=== ROUNDTRIP TEST ===\n");
     println!("Input file: {}\n", test_file.display());

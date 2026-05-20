@@ -526,7 +526,7 @@ kind = "ExportFieldContents"
 id = 132
 en = "Export Field Contents"
 es = "Exportar contenido del campo"
-shape = "plain"
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -674,7 +674,7 @@ kind = "ImportRecords"
 id = 35
 en = "Import Records"
 es = "Importar registros"
-shape = "plain"
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -683,7 +683,7 @@ kind = "ExportRecords"
 id = 36
 en = "Export Records"
 es = "Exportar registros"
-shape = "plain"
+shape = "opaque"
 opens_block = false
 closes_block = false
 

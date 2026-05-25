@@ -195,24 +195,87 @@ pub fn format_step(step: &ScriptStep) -> String {
             }
         }
         Some(StepShape::FieldAndCalc) => {
-            // Set Field: "[Table::Name #id; calc]". The `#id` suffix mirrors Perform Script
-            // and lets FM resolve the field by numeric ID on paste (resilient to TO/name
-            // changes). Drop it manually if you want FM to resolve by name only.
+            // Set Field: "[Table::Name; calc]". No numeric ID — FM resolves the field
+            // by table+name on paste. This lets AI/humans author scripts from scratch
+            // without having to discover FM's internal IDs.
             let target_display: Option<String> = match (&step.field_table, &step.field_target) {
                 (Some(t), Some(n)) => Some(format!("{}::{}", t, n)),
                 (None, Some(n)) => Some(n.clone()),
                 _ => None,
             };
-            let target_display = target_display.map(|t| match &step.field_numeric_id {
-                Some(id) => format!("{} #{}", t, id),
-                None => t,
-            });
             let calc = step.calculation.as_deref().map(|c| c.trim()).unwrap_or("");
             match (target_display, calc.is_empty()) {
                 (Some(tgt), false) => line.push_str(&format!(" [{}; {}]", tgt, calc)),
                 (Some(tgt), true)  => line.push_str(&format!(" [{};]", tgt)),
                 (None, false)      => line.push_str(&format!(" [{}]", calc)),
                 (None, true)       => {}
+            }
+        }
+        Some(StepShape::GoToObject) => {
+            // `Go to Object [name]` or `[name; Rep: N]` when repetition ≠ 1.
+            let obj = step.object_name.as_deref().map(|s| s.trim()).unwrap_or("");
+            let rep = step.repetition.as_deref().map(|s| s.trim()).unwrap_or("1");
+            if obj.is_empty() && rep == "1" {
+                // nothing useful — emit no brackets
+            } else if rep == "1" || rep.is_empty() {
+                line.push_str(&format!(" [{}]", obj));
+            } else {
+                line.push_str(&format!(" [{}; Rep: {}]", obj, rep));
+            }
+        }
+        Some(StepShape::GoToLayoutNamed) => {
+            // `Go to Layout ["Name" #id]` (round-trip) or `["Name"]` (from-scratch);
+            // `[original]` for OriginalLayout.
+            let dest = step.layout_destination.as_deref().unwrap_or("SelectedLayout");
+            if dest == "OriginalLayout" {
+                line.push_str(" [original]");
+            } else if let Some(name) = &step.layout_name {
+                match &step.layout_id {
+                    Some(id) => line.push_str(&format!(" [\"{}\" #{}]", name, id)),
+                    None => line.push_str(&format!(" [\"{}\"]", name)),
+                }
+            }
+        }
+        Some(StepShape::NewWindow) => {
+            // `New Window [Style: Document; Layout: "X"; Height: 1; Width: 1; Top: -1000; Left: -1000]`
+            // All fields optional; emit only what is set.
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(s) = &step.window_style_name { parts.push(format!("Style: {}", s.trim())); }
+            if let Some(l) = &step.layout_name       { parts.push(format!("Layout: \"{}\"", l)); }
+            if let Some(h) = &step.window_height     { let t = h.trim(); if !t.is_empty() { parts.push(format!("Height: {}", t)); } }
+            if let Some(w) = &step.window_width      { let t = w.trim(); if !t.is_empty() { parts.push(format!("Width: {}", t)); } }
+            if let Some(t) = &step.window_top        { let v = t.trim(); if !v.is_empty() { parts.push(format!("Top: {}", v)); } }
+            if let Some(l) = &step.window_left       { let v = l.trim(); if !v.is_empty() { parts.push(format!("Left: {}", v)); } }
+            if !parts.is_empty() {
+                line.push_str(&format!(" [{}]", parts.join("; ")));
+            }
+        }
+        Some(StepShape::PerformFind) => {
+            // Multi-line by default for readability. Each request becomes one section:
+            //   Find: T::F1 => v1; T::F2 => v2
+            //   Omit: T::F3 => v3
+            // Sections are on their own line; criteria within a section are `;`-separated.
+            if step.find_requests.is_empty() {
+                // nothing to render
+            } else {
+                line.push_str(" [");
+                let line_indent = "  ".repeat(step.indent_level as usize);
+                let cont_indent = format!("{}  ", line_indent);
+                for req in &step.find_requests {
+                    let header = if req.operation == "Omit" { "Omit" } else { "Find" };
+                    let crits: Vec<String> = req.criteria.iter()
+                        .map(|c| {
+                            let target = if c.table.is_empty() { c.field.clone() } else { format!("{}::{}", c.table, c.field) };
+                            format!("{} => {}", target, c.text)
+                        })
+                        .collect();
+                    line.push('\n');
+                    line.push_str(&cont_indent);
+                    line.push_str(&format!("{}: {}", header, crits.join("; ")));
+                }
+                line.push('\n');
+                line.push_str(&line_indent);
+                line.push(']');
             }
         }
         Some(StepShape::Comment) | Some(StepShape::Plain) | Some(StepShape::Opaque) | None => {
@@ -271,6 +334,9 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: 0,
             });
             i += 1;
@@ -300,6 +366,9 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: indent,
             });
             i += 1;
@@ -391,6 +460,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
             indent_level: indent,
         },
         Some(StepShape::ValueCalcName) => {
@@ -405,6 +477,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: indent,
             }
         }
@@ -419,6 +494,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
             indent_level: indent,
         },
         Some(StepShape::SetState) => ScriptStep {
@@ -432,6 +510,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
             indent_level: indent,
         },
         Some(StepShape::Dialog) => {
@@ -447,6 +528,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: indent,
             }
         }
@@ -463,6 +547,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: indent,
             }
         }
@@ -485,6 +572,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: mode, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: indent,
             }
         }
@@ -501,6 +591,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: state,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: indent,
             }
         }
@@ -517,6 +610,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: indent,
             }
         }
@@ -533,6 +629,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: loc, goto_exit_after_last: exit, goto_no_interact: no_int,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: indent,
             }
         }
@@ -549,6 +648,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: script_name, script_target_id: script_id, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: indent,
             }
         }
@@ -565,6 +667,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
                 indent_level: indent,
             }
         }
@@ -581,6 +686,86 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::GoToObject) => {
+            let (obj, rep) = parse_go_to_object_content(content);
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: None,
+                var_name: None, repetition: rep,
+                object_name: obj, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::GoToLayoutNamed) => {
+            let (layout, layout_id, dest) = parse_go_to_layout_content(content);
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: None,
+                var_name: None, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: layout, layout_id, layout_destination: dest,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::NewWindow) => {
+            let nw = parse_new_window_content(content);
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: None,
+                var_name: None, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: nw.layout, layout_id: None, layout_destination: None,
+                window_height: nw.height, window_width: nw.width, window_top: nw.top, window_left: nw.left,
+                window_style_name: nw.style,
+                find_requests: Vec::new(),
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::PerformFind) => {
+            let requests = parse_perform_find_content(content);
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: None,
+                var_name: None, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: requests,
                 indent_level: indent,
             }
         }
@@ -597,6 +782,9 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
             indent_level: indent,
         },
     }
@@ -860,6 +1048,126 @@ fn parse_js_content(content: Option<&str>) -> (Option<String>, Option<String>, V
     }
 
     (object_name, function_name, parameters)
+}
+
+/// Parse `Go to Object` bracket content: `"objectName"` or `"objectName"; Rep: N`.
+/// Quotes are optional. Returns (object_name_calc, repetition_calc).
+fn parse_go_to_object_content(content: Option<&str>) -> (Option<String>, Option<String>) {
+    let content = match content { Some(c) => c.trim(), None => return (None, None) };
+    if content.is_empty() { return (None, None); }
+    let mut obj: Option<String> = None;
+    let mut rep: Option<String> = None;
+    for part in split_smart(content) {
+        let p = part.trim();
+        if let Some(v) = p.strip_prefix("Rep:") {
+            rep = Some(v.trim().to_string());
+        } else if obj.is_none() {
+            obj = Some(p.to_string());
+        }
+    }
+    (obj, rep)
+}
+
+/// Parse `Go to Layout` bracket content. Forms accepted:
+///   `original`         → OriginalLayout
+///   `"Name"`           → SelectedLayout, no id (FM may fail to link on paste)
+///   `"Name" #N`        → SelectedLayout with FM Layout id N (round-trip exact)
+/// Returns (layout_name, layout_id, destination).
+fn parse_go_to_layout_content(content: Option<&str>) -> (Option<String>, Option<String>, Option<String>) {
+    let content = match content { Some(c) => c.trim(), None => return (None, None, None) };
+    if content.eq_ignore_ascii_case("original") {
+        return (None, None, Some("OriginalLayout".to_string()));
+    }
+    // Split off optional ` #N` numeric id suffix.
+    let (name_part, id) = match content.rfind(" #") {
+        Some(idx) => {
+            let after = &content[idx + 2..];
+            if !after.is_empty() && after.chars().all(|c| c.is_ascii_digit()) {
+                (content[..idx].trim().to_string(), Some(after.to_string()))
+            } else {
+                (content.to_string(), None)
+            }
+        }
+        None => (content.to_string(), None),
+    };
+    let name = name_part.trim_matches('"').to_string();
+    if name.is_empty() {
+        (None, id, None)
+    } else {
+        (Some(name), id, Some("SelectedLayout".to_string()))
+    }
+}
+
+/// Parsed bag of New Window fields — used to pass through `build_step_from_name`.
+struct ParsedNewWindow {
+    style: Option<String>,
+    layout: Option<String>,
+    height: Option<String>,
+    width: Option<String>,
+    top: Option<String>,
+    left: Option<String>,
+}
+
+/// Parse `New Window` bracket content. Key/value pairs separated by `;`:
+/// `Style: Document; Layout: "Name"; Height: 1; Width: 1; Top: -1000; Left: -1000`.
+fn parse_new_window_content(content: Option<&str>) -> ParsedNewWindow {
+    let mut out = ParsedNewWindow { style: None, layout: None, height: None, width: None, top: None, left: None };
+    let content = match content { Some(c) => c, None => return out };
+    for part in split_smart(content) {
+        let p = part.trim();
+        if let Some(v) = p.strip_prefix("Style:")     { out.style  = Some(v.trim().to_string()); }
+        else if let Some(v) = p.strip_prefix("Layout:") { out.layout = Some(v.trim().trim_matches('"').to_string()); }
+        else if let Some(v) = p.strip_prefix("Height:") { out.height = Some(v.trim().to_string()); }
+        else if let Some(v) = p.strip_prefix("Width:")  { out.width  = Some(v.trim().to_string()); }
+        else if let Some(v) = p.strip_prefix("Top:")    { out.top    = Some(v.trim().to_string()); }
+        else if let Some(v) = p.strip_prefix("Left:")   { out.left   = Some(v.trim().to_string()); }
+    }
+    out
+}
+
+/// Parse `Perform Find` bracket content. Multi-line DSL:
+///
+/// ```text
+/// Find: T::F1 => value1; T::F2 => value2
+/// Omit: T::F3 => value3
+/// ```
+///
+/// Each `Find:` / `Omit:` opens one RequestRow. Criteria within a row are
+/// `;`-separated, and each criterion is `Table::Field => value`.
+fn parse_perform_find_content(content: Option<&str>) -> Vec<crate::xmss::FindRequest> {
+    use crate::xmss::{FindCriterion, FindRequest};
+    let content = match content { Some(c) => c, None => return Vec::new() };
+    let mut requests: Vec<FindRequest> = Vec::new();
+    // Split on logical lines (newlines), then within a line look for the `Find:` /
+    // `Omit:` header. Bracket-aware splitting is overkill here — the DSL is intentionally
+    // flat, and any complex value would have been authored on a single criterion.
+    for raw in content.split('\n') {
+        let line = raw.trim();
+        if line.is_empty() { continue; }
+        let (op, rest) = if let Some(r) = line.strip_prefix("Find:") {
+            ("Include", r.trim())
+        } else if let Some(r) = line.strip_prefix("Omit:") {
+            ("Omit", r.trim())
+        } else {
+            continue; // ignore stray content
+        };
+        let mut req = FindRequest { operation: op.to_string(), criteria: Vec::new() };
+        for crit_str in rest.split(';') {
+            let cs = crit_str.trim();
+            if cs.is_empty() { continue; }
+            let (target, value) = match cs.find("=>") {
+                Some(idx) => (cs[..idx].trim().to_string(), cs[idx + 2..].trim().to_string()),
+                None => continue,
+            };
+            let (table, field) = match target.find("::") {
+                Some(idx) => (target[..idx].to_string(), target[idx + 2..].to_string()),
+                None => (String::new(), target),
+            };
+            req.criteria.push(FindCriterion { table, field, text: value });
+        }
+        requests.push(req);
+    }
+    requests
 }
 
 /// Split content by `;` but respect brackets `[]` and parentheses `()`.

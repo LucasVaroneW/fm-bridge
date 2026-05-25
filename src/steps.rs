@@ -43,6 +43,22 @@ pub enum StepShape {
     SelectWindow,
     /// <WindowState value="ResizeToFit|Maximize|Minimize|Restore|Hide"/>
     AdjustWindow,
+    /// <ObjectName><Calculation>name</Calculation></ObjectName>
+    /// + optional <Repetition><Calculation>n</Calculation></Repetition>
+    /// Used by Go to Object.
+    GoToObject,
+    /// <LayoutDestination value="SelectedLayout|OriginalLayout"/>
+    /// + optional <Layout name="..."/> (name-only — FM resolves on paste).
+    /// Used by Go to Layout.
+    GoToLayoutNamed,
+    /// New Window: layout target + geometry calcs + window style name.
+    /// FM also has bitfield style flags (Close/Resize/etc) which we default to
+    /// the standard "Document" set on encode.
+    NewWindow,
+    /// <Restore state="True"/> + <Query> with N <RequestRow> each having Include/Omit
+    /// and N <Criteria> (Field by table+name + Text). No numeric IDs are emitted —
+    /// FM resolves field references by table+name on paste.
+    PerformFind,
     /// Whole inner XML preserved verbatim — no structured parsing.
     /// Used by steps whose FM config is too rich for a flat text line
     /// (Import/Export Records: <Profile>, <TargetFields> with N field maps, etc.).

@@ -315,7 +315,7 @@ kind = "PerformFind"
 id = 28
 en = "Perform Find"
 es = "Ejecutar búsqueda"
-shape = "opaque"
+shape = "perform_find"
 opens_block = false
 closes_block = false
 
@@ -739,7 +739,7 @@ kind = "GoToLayout"
 id = 6
 en = "Go to Layout"
 es = "Ir a la presentación"
-shape = "opaque"
+shape = "go_to_layout_named"
 opens_block = false
 closes_block = false
 
@@ -748,7 +748,7 @@ kind = "GoToObject"
 id = 145
 en = "Go to Object"
 es = "Ir a objeto"
-shape = "opaque"
+shape = "go_to_object"
 opens_block = false
 closes_block = false
 
@@ -840,7 +840,7 @@ kind = "NewWindow"
 id = 122
 en = "New Window"
 es = "Nueva ventana"
-shape = "opaque"
+shape = "new_window"
 opens_block = false
 closes_block = false
 

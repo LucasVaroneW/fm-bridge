@@ -18,7 +18,22 @@ pub struct FmScript {
     pub steps: Vec<ScriptStep>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A single criterion inside a Perform Find request: one field = one text value.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FindCriterion {
+    pub table: String,
+    pub field: String,
+    pub text: String,
+}
+
+/// One row in a Perform Find query — either Include or Omit, with N criteria.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FindRequest {
+    pub operation: String, // "Include" or "Omit"
+    pub criteria: Vec<FindCriterion>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScriptStep {
     pub name: String,       // Always English canonical name
     pub enable: bool,
@@ -38,7 +53,8 @@ pub struct ScriptStep {
     pub dialog_buttons: Vec<String>,
     pub field_result: Option<String>,
     pub field_target: Option<String>,
-    // For Set Field (FieldAndCalc shape): preserves the full <Field> attributes.
+    // For Set Field (FieldAndCalc shape): preserves <Field table=...> attribute.
+    // `field_numeric_id` is kept for backward-compat decode only; we no longer emit it.
     pub field_table: Option<String>,
     pub field_numeric_id: Option<String>,
     // For Perform Script (PerformScript shape): target script + parent mode.
@@ -53,6 +69,19 @@ pub struct ScriptStep {
     pub window_mode: Option<String>,       // SelectWindow: ByName/Current/First/Last/Next/Previous
     pub window_limit_current_file: Option<String>,  // SelectWindow: True/False
     pub window_state: Option<String>,      // AdjustWindow: ResizeToFit/Maximize/...
+    // For Go to Layout (GoToLayoutNamed shape) and New Window (NewWindow shape).
+    pub layout_name: Option<String>,
+    pub layout_id: Option<String>, // optional numeric FM Layout id; preserves round-trip
+    pub layout_destination: Option<String>, // SelectedLayout | OriginalLayout | byCalculation
+    // For New Window (NewWindow shape): geometry + style. All values are calc expressions
+    // (FM stores them as <Calculation>) so they can be literal numbers or `$variables`.
+    pub window_height: Option<String>,
+    pub window_width: Option<String>,
+    pub window_top: Option<String>,
+    pub window_left: Option<String>,
+    pub window_style_name: Option<String>,  // Document | Floating | Dialog | Card
+    // For Perform Find (PerformFind shape).
+    pub find_requests: Vec<FindRequest>,
     pub indent_level: u32,
 }
 
@@ -211,7 +240,59 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             }
                         }
                     }
-                    b"Text" => { parser.push_target(TextTarget::Text); }
+                    b"Text" => {
+                        // <Text> inside a Perform Find <Criteria> is the search value, not the
+                        // step's comment text. Route it to the current criterion.
+                        if parser.in_find_criteria {
+                            parser.push_target(TextTarget::FindCriterionText);
+                        } else {
+                            parser.push_target(TextTarget::Text);
+                        }
+                    }
+                    b"LayoutDestination" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"value" {
+                                parser.layout_destination = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"Layout" => {
+                        for attr in e.attributes().flatten() {
+                            let val = String::from_utf8_lossy(&attr.value).to_string();
+                            match attr.key.as_ref() {
+                                b"name" => parser.layout_name = val,
+                                b"id" => parser.layout_id = val,
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"Height" => { parser.push_target(TextTarget::WinHeight); }
+                    b"Width" => { parser.push_target(TextTarget::WinWidth); }
+                    b"DistanceFromTop" => { parser.push_target(TextTarget::WinTop); }
+                    b"DistanceFromLeft" => { parser.push_target(TextTarget::WinLeft); }
+                    b"NewWndStyles" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"Style" {
+                                parser.window_style_name = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"Query" => {
+                        // Container; per-row state is initialized on RequestRow.
+                    }
+                    b"RequestRow" => {
+                        let mut op = "Include".to_string();
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"operation" {
+                                op = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                        parser.current_find_request = Some(FindRequest { operation: op, criteria: Vec::new() });
+                    }
+                    b"Criteria" => {
+                        parser.in_find_criteria = true;
+                        parser.current_find_criterion = Some(FindCriterion::default());
+                    }
                     b"Name" => { parser.push_target(TextTarget::VarName); }
                     b"ObjectName" => { parser.push_target(TextTarget::ObjectName); }
                     b"FunctionName" => { parser.push_target(TextTarget::FunctionName); }
@@ -233,20 +314,34 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                         }
                     }
                     b"Field" => {
+                        let mut tbl = String::new();
+                        let mut nm = String::new();
                         let mut has_name_attr = false;
+                        let mut numeric_id = String::new();
                         for attr in e.attributes().flatten() {
                             let val = String::from_utf8_lossy(&attr.value).to_string();
                             match attr.key.as_ref() {
-                                b"table" => parser.field_table = val,
-                                b"id" => parser.field_numeric_id = val,
-                                b"name" => { parser.field_target = val; has_name_attr = true; }
+                                b"table" => tbl = val,
+                                b"id" => numeric_id = val,
+                                b"name" => { nm = val; has_name_attr = true; }
                                 _ => {}
                             }
                         }
-                        if !has_name_attr {
-                            // No name attr — element carries the target as text content
-                            // (Execute FileMaker Data API uses <Field>$var</Field>).
-                            parser.push_target(TextTarget::FieldTextContent);
+                        if parser.in_find_criteria {
+                            // <Field> inside <Criteria> is the criterion's target — route to it,
+                            // NOT to the Set Field target fields.
+                            if let Some(c) = parser.current_find_criterion.as_mut() {
+                                c.table = tbl;
+                                c.field = nm;
+                            }
+                        } else {
+                            parser.field_table = tbl;
+                            parser.field_numeric_id = numeric_id;
+                            parser.field_target = nm;
+                            if !has_name_attr {
+                                // <Field>$var</Field> form used by Execute FileMaker Data API.
+                                parser.push_target(TextTarget::FieldTextContent);
+                            }
                         }
                     }
                     b"SelectAll" => {
@@ -377,7 +472,6 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                         }
                     }
                     b"Calculation" => { parser.pop_target(TextTarget::Calculation); }
-                    b"Text" => { parser.pop_target(TextTarget::Text); }
                     b"Name" => { parser.pop_target(TextTarget::VarName); }
                     b"ObjectName" => { parser.pop_target(TextTarget::ObjectName); }
                     b"FunctionName" => { parser.pop_target(TextTarget::FunctionName); }
@@ -401,6 +495,28 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"Result" => { parser.pop_target(TextTarget::FieldResult); }
                     b"TargetName" => { parser.pop_target(TextTarget::FieldTarget); }
                     b"Field" => { parser.pop_target(TextTarget::FieldTextContent); }
+                    b"Text" => {
+                        if parser.in_find_criteria {
+                            parser.pop_target(TextTarget::FindCriterionText);
+                        } else {
+                            parser.pop_target(TextTarget::Text);
+                        }
+                    }
+                    b"Height" => { parser.pop_target(TextTarget::WinHeight); }
+                    b"Width" => { parser.pop_target(TextTarget::WinWidth); }
+                    b"DistanceFromTop" => { parser.pop_target(TextTarget::WinTop); }
+                    b"DistanceFromLeft" => { parser.pop_target(TextTarget::WinLeft); }
+                    b"Criteria" => {
+                        if let (Some(req), Some(c)) = (parser.current_find_request.as_mut(), parser.current_find_criterion.take()) {
+                            req.criteria.push(c);
+                        }
+                        parser.in_find_criteria = false;
+                    }
+                    b"RequestRow" => {
+                        if let Some(req) = parser.current_find_request.take() {
+                            parser.find_requests.push(req);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -441,6 +557,13 @@ enum TextTarget {
     FieldTarget,
     FieldTextContent,  // <Field>$var</Field> form used by Execute FileMaker Data API
     SetState,
+    // New Window geometry calcs
+    WinHeight,
+    WinWidth,
+    WinTop,
+    WinLeft,
+    // Perform Find <Criteria><Text>...</Text>: routes text to current_find_criterion.text
+    FindCriterionText,
 }
 
 #[derive(Default)]
@@ -475,6 +598,20 @@ struct StepParser {
     window_mode: String,
     window_limit_current_file: String,
     window_state: String,
+    // New Window + Go to Layout
+    layout_name: String,
+    layout_id: String,
+    layout_destination: String,
+    window_height: String,
+    window_width: String,
+    window_top: String,
+    window_left: String,
+    window_style_name: String,
+    // Perform Find
+    find_requests: Vec<FindRequest>,
+    current_find_request: Option<FindRequest>,
+    current_find_criterion: Option<FindCriterion>,
+    in_find_criteria: bool,
     context_stack: Vec<TextTarget>,
 }
 
@@ -508,6 +645,15 @@ impl StepParser {
             TextTarget::FieldResult => self.field_result.push_str(text),
             TextTarget::FieldTarget => self.field_target.push_str(text),
             TextTarget::FieldTextContent => self.field_target.push_str(text),
+            TextTarget::WinHeight => self.window_height.push_str(text),
+            TextTarget::WinWidth => self.window_width.push_str(text),
+            TextTarget::WinTop => self.window_top.push_str(text),
+            TextTarget::WinLeft => self.window_left.push_str(text),
+            TextTarget::FindCriterionText => {
+                if let Some(c) = self.current_find_criterion.as_mut() {
+                    c.text.push_str(text);
+                }
+            }
             TextTarget::SetState | TextTarget::None => {}
         }
     }
@@ -542,6 +688,15 @@ impl StepParser {
             window_mode: if self.window_mode.is_empty() { None } else { Some(self.window_mode.clone()) },
             window_limit_current_file: if self.window_limit_current_file.is_empty() { None } else { Some(self.window_limit_current_file.clone()) },
             window_state: if self.window_state.is_empty() { None } else { Some(self.window_state.clone()) },
+            layout_name: if self.layout_name.is_empty() { None } else { Some(self.layout_name.clone()) },
+            layout_id: if self.layout_id.is_empty() { None } else { Some(self.layout_id.clone()) },
+            layout_destination: if self.layout_destination.is_empty() { None } else { Some(self.layout_destination.clone()) },
+            window_height: if self.window_height.is_empty() { None } else { Some(self.window_height.clone()) },
+            window_width: if self.window_width.is_empty() { None } else { Some(self.window_width.clone()) },
+            window_top: if self.window_top.is_empty() { None } else { Some(self.window_top.clone()) },
+            window_left: if self.window_left.is_empty() { None } else { Some(self.window_left.clone()) },
+            window_style_name: if self.window_style_name.is_empty() { None } else { Some(self.window_style_name.clone()) },
+            find_requests: self.find_requests.clone(),
             indent_level,
         }
     }
@@ -693,13 +848,12 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             if let Some(calc) = &step.calculation {
                 xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
             }
-            if step.field_target.is_some() || step.field_table.is_some() || step.field_numeric_id.is_some() {
+            if step.field_target.is_some() || step.field_table.is_some() {
+                // Emit only table+name. No `id` attribute — FM resolves by name on paste,
+                // which is what makes from-scratch authoring possible.
                 xml.push_str("<Field");
                 if let Some(t) = &step.field_table {
                     xml.push_str(&format!(" table=\"{}\"", xml_escape(t)));
-                }
-                if let Some(id) = &step.field_numeric_id {
-                    xml.push_str(&format!(" id=\"{}\"", xml_escape(id)));
                 }
                 if let Some(name) = &step.field_target {
                     xml.push_str(&format!(" name=\"{}\"", xml_escape(name)));
@@ -738,6 +892,71 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         Some(StepShape::AdjustWindow) => {
             if let Some(state) = &step.window_state {
                 xml.push_str(&format!("<WindowState value=\"{}\"></WindowState>", xml_escape(state)));
+            }
+        }
+        Some(StepShape::GoToObject) => {
+            if let Some(obj) = &step.object_name {
+                xml.push_str(&format!("<ObjectName><Calculation>{}</Calculation></ObjectName>", cdata(obj)));
+            }
+            // Repetition defaults to "1" — FM emits it even when implicit.
+            let rep = step.repetition.as_deref().unwrap_or("1");
+            xml.push_str(&format!("<Repetition><Calculation>{}</Calculation></Repetition>", cdata(rep)));
+        }
+        Some(StepShape::GoToLayoutNamed) => {
+            let dest = step.layout_destination.as_deref().unwrap_or("SelectedLayout");
+            xml.push_str(&format!("<LayoutDestination value=\"{}\"></LayoutDestination>", xml_escape(dest)));
+            if dest == "SelectedLayout" {
+                if let Some(name) = &step.layout_name {
+                    xml.push_str("<Layout");
+                    if let Some(id) = &step.layout_id {
+                        xml.push_str(&format!(" id=\"{}\"", xml_escape(id)));
+                    }
+                    xml.push_str(&format!(" name=\"{}\"></Layout>", xml_escape(name)));
+                }
+            }
+        }
+        Some(StepShape::NewWindow) => {
+            xml.push_str("<LayoutDestination value=\"SelectedLayout\"></LayoutDestination>");
+            // Geometry calcs — emit empty if missing so FM has a parse target.
+            let h = step.window_height.as_deref().unwrap_or("");
+            let w = step.window_width.as_deref().unwrap_or("");
+            let top = step.window_top.as_deref().unwrap_or("");
+            let left = step.window_left.as_deref().unwrap_or("");
+            xml.push_str(&format!("<Height><Calculation>{}</Calculation></Height>", cdata(h)));
+            xml.push_str(&format!("<Width><Calculation>{}</Calculation></Width>", cdata(w)));
+            xml.push_str(&format!("<DistanceFromTop><Calculation>{}</Calculation></DistanceFromTop>", cdata(top)));
+            xml.push_str(&format!("<DistanceFromLeft><Calculation>{}</Calculation></DistanceFromLeft>", cdata(left)));
+            // Style bitfield + named-style attribute. We emit the standard "Document" flag set
+            // unless overridden. The `Styles` integer is FM's internal representation; the
+            // value 1076299266 matches a Document window with all chrome enabled.
+            let style = step.window_style_name.as_deref().unwrap_or("Document");
+            xml.push_str(&format!(
+                "<NewWndStyles DimParentWindow=\"No\" Toolbars=\"Yes\" MenuBar=\"Yes\" Style=\"{}\" Close=\"Yes\" Minimize=\"Yes\" Maximize=\"Yes\" Resize=\"Yes\" Styles=\"1076299266\"></NewWndStyles>",
+                xml_escape(style)
+            ));
+            if let Some(name) = &step.layout_name {
+                xml.push_str(&format!("<Layout name=\"{}\"></Layout>", xml_escape(name)));
+            }
+        }
+        Some(StepShape::PerformFind) => {
+            xml.push_str("<Restore state=\"True\"></Restore>");
+            if !step.find_requests.is_empty() {
+                xml.push_str("<Query>");
+                for req in &step.find_requests {
+                    xml.push_str(&format!("<RequestRow operation=\"{}\">", xml_escape(&req.operation)));
+                    for c in &req.criteria {
+                        xml.push_str("<Criteria><Field");
+                        if !c.table.is_empty() {
+                            xml.push_str(&format!(" table=\"{}\"", xml_escape(&c.table)));
+                        }
+                        if !c.field.is_empty() {
+                            xml.push_str(&format!(" name=\"{}\"", xml_escape(&c.field)));
+                        }
+                        xml.push_str(&format!("></Field><Text>{}</Text></Criteria>", xml_escape(&c.text)));
+                    }
+                    xml.push_str("</RequestRow>");
+                }
+                xml.push_str("</Query>");
             }
         }
         Some(StepShape::Opaque) => {

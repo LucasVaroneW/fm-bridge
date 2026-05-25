@@ -7,3 +7,9 @@ debug_raw.hex
 debug_built.xml
 test_roundtrip.xml
 scripts/
+
+# Local working copies of FM scripts (read/edit/write workflow output)
+*.fmscript
+built_*.xml
+decoded_*.fmscript
+clipboard_*.fmscript

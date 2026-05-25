@@ -18,10 +18,18 @@ pub fn format_script(script: &FmScript) -> String {
 pub fn format_step(step: &ScriptStep) -> String {
     let indent = "  ".repeat(step.indent_level as usize);
 
-    // Comments are special: "# text"
+    // Comments are special: "# text".
+    // A comment with no <Text> child in FM is a truly blank line the user added
+    // by pressing Enter in the Script Workspace — render it as an empty line so
+    // it survives round-trip without becoming `# `.
+    // FM stores Enter-inside-a-comment as `&#13;`. Quick-xml decodes that to `\r`
+    // and we normalize to `\n`. Re-encode as the `&#13;` sigil so each comment
+    // stays on a single .fmscript line.
     if step.name == steps::COMMENT_NAME {
-        let text = step.text.as_deref().unwrap_or("");
-        return format!("{}# {}", indent, text);
+        return match step.text.as_deref() {
+            None => String::new(),
+            Some(t) => format!("{}# {}", indent, t.replace('\n', "&#13;")),
+        };
     }
 
     let prefix = if step.enable { "" } else { "// " };
@@ -187,12 +195,18 @@ pub fn format_step(step: &ScriptStep) -> String {
             }
         }
         Some(StepShape::FieldAndCalc) => {
-            // Set Field: shows "[Table::Name; calc]" or just "[calc]" if no target.
+            // Set Field: "[Table::Name #id; calc]". The `#id` suffix mirrors Perform Script
+            // and lets FM resolve the field by numeric ID on paste (resilient to TO/name
+            // changes). Drop it manually if you want FM to resolve by name only.
             let target_display: Option<String> = match (&step.field_table, &step.field_target) {
                 (Some(t), Some(n)) => Some(format!("{}::{}", t, n)),
                 (None, Some(n)) => Some(n.clone()),
                 _ => None,
             };
+            let target_display = target_display.map(|t| match &step.field_numeric_id {
+                Some(id) => format!("{} #{}", t, id),
+                None => t,
+            });
             let calc = step.calculation.as_deref().map(|c| c.trim()).unwrap_or("");
             match (target_display, calc.is_empty()) {
                 (Some(tgt), false) => line.push_str(&format!(" [{}; {}]", tgt, calc)),
@@ -240,7 +254,28 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
 
     while i < lines.len() {
         let line = lines[i];
-        if line.trim().is_empty() { i += 1; continue; }
+        // Blank line → emit an empty comment step. FM represents the user pressing
+        // Enter in the Script Workspace as `<Step name="# (comment)"></Step>` with
+        // no <Text> child, and we want that to round-trip.
+        if line.trim().is_empty() {
+            steps.push(ScriptStep {
+                name: steps::COMMENT_NAME.to_string(),
+                enable: true,
+                id: resolve_id(steps::COMMENT_NAME)?,
+                text: None,
+                calculation: None, var_name: None, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: None, field_table: None, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
+                indent_level: 0,
+            });
+            i += 1;
+            continue;
+        }
 
         let leading_spaces = line.len() - line.trim_start().len();
         let indent = (leading_spaces / 2) as u32;
@@ -250,7 +285,8 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
 
         // Comment lines
         if content.starts_with('#') {
-            let comment_text = content.strip_prefix("# ").unwrap_or("").to_string();
+            // Reverse of the format_step `\n` → `&#13;` sigil.
+            let comment_text = content.strip_prefix("# ").unwrap_or("").replace("&#13;", "\n");
             steps.push(ScriptStep {
                 name: steps::COMMENT_NAME.to_string(),
                 enable: true,
@@ -278,6 +314,15 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
             let step_name = &content[..idx];
             let first_chunk = &content[idx + 2..];
 
+            // The formatter adds `indent + 2` leading spaces to continuation lines
+            // for CalculationWithRestore so the multi-line `If [...]` reads cleanly.
+            // Other shapes embed user-authored calcs verbatim, so dedenting them
+            // would destroy intentional indentation (e.g. Let blocks in Set Variable).
+            let dedent_continuations = matches!(
+                steps::shape_for_en(step_name),
+                Some(StepShape::CalculationWithRestore)
+            );
+
             let mut bracket_content = String::new();
             let mut depth: i32 = 0;
             let mut in_string = false;
@@ -303,7 +348,16 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
                     return Err(format!("Unclosed `[` in step '{}'", step_name));
                 }
                 bracket_content.push('\n');
-                current_text = lines[i];
+                let raw_line = lines[i];
+                current_text = if dedent_continuations {
+                    // Eat up to `leading_spaces + 2` leading spaces (matches the
+                    // formatter's added indent). Tabs are never eaten.
+                    let cont_dedent = leading_spaces + 2;
+                    let strip = raw_line.chars().take(cont_dedent).take_while(|c| *c == ' ').count();
+                    &raw_line[strip..]
+                } else {
+                    raw_line
+                };
             }
             i += 1;
 
@@ -499,7 +553,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
             }
         }
         Some(StepShape::FieldAndCalc) => {
-            let (table, target, calc) = parse_field_and_calc_content(content);
+            let (table, target, numeric_id, calc) = parse_field_and_calc_content(content);
             ScriptStep {
                 name: name.to_string(), enable: enabled, id,
                 text: None, calculation: calc,
@@ -507,7 +561,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 object_name: None, function_name: None, parameters: Vec::new(),
                 restore_state: None, set_state: None,
                 dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
-                field_result: None, field_target: target, field_table: table, field_numeric_id: None,
+                field_result: None, field_target: target, field_table: table, field_numeric_id: numeric_id,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
                 window_mode: None, window_limit_current_file: None, window_state: None,
@@ -706,12 +760,13 @@ fn parse_perform_script_content(content: Option<&str>) -> (Option<String>, Optio
     (Some(script_name), script_id, calc)
 }
 
-/// Parse Set Field content: `Table::Field; calc` or `Field; calc` or `calc` or `Table::Field;`.
-/// Split on the first `;` at bracket depth 0 (so semicolons inside calcs don't trigger).
-fn parse_field_and_calc_content(content: Option<&str>) -> (Option<String>, Option<String>, Option<String>) {
+/// Parse Set Field content: `Table::Field #id; calc` or any subset.
+/// Returns (table, field_name, numeric_id, calc). The `#id` suffix is optional;
+/// when omitted, FM resolves the field by name on paste.
+fn parse_field_and_calc_content(content: Option<&str>) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
     let content = match content {
         Some(c) => c,
-        None => return (None, None, None),
+        None => return (None, None, None, None),
     };
 
     // Find the first ';' at depth 0 (outside any [ ] or "..." pair).
@@ -730,7 +785,20 @@ fn parse_field_and_calc_content(content: Option<&str>) -> (Option<String>, Optio
 
     let (target_str, calc_str) = match split_at {
         Some(pos) => (content[..pos].trim().to_string(), content[pos + 1..].trim().to_string()),
-        None => return (None, None, Some(content.trim().to_string())),
+        None => return (None, None, None, Some(content.trim().to_string())),
+    };
+
+    // Strip optional ` #N` suffix from the target (numeric FM field id).
+    let (target_str, numeric_id) = match target_str.rfind(" #") {
+        Some(idx) => {
+            let after = &target_str[idx + 2..];
+            if !after.is_empty() && after.chars().all(|c| c.is_ascii_digit()) {
+                (target_str[..idx].trim().to_string(), Some(after.to_string()))
+            } else {
+                (target_str, None)
+            }
+        }
+        None => (target_str, None),
     };
 
     let (table, name) = if let Some(idx) = target_str.find("::") {
@@ -742,7 +810,7 @@ fn parse_field_and_calc_content(content: Option<&str>) -> (Option<String>, Optio
     };
 
     let calc = if calc_str.is_empty() { None } else { Some(calc_str) };
-    (table, name, calc)
+    (table, name, numeric_id, calc)
 }
 
 /// Parse "Set Field By Name" bracket content: `Result: ...; Target: ...`

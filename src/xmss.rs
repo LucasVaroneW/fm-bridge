@@ -133,6 +133,20 @@ fn strip_bom(s: &str) -> &str {
     s.strip_prefix('\u{FEFF}').unwrap_or(s)
 }
 
+/// FileMaker stores line breaks inside calculations as CR (0x0D) on both Mac and Windows
+/// (legacy classic-Mac convention). Editors treat CR-only as one line, which collapses
+/// adjacent tokens (e.g. `1\ror\rnot` → `1ornot`). Normalize to `\n` so the text format
+/// can detect multi-line content. Encode flips it back to CR before emitting CDATA.
+fn normalize_eol(s: &str) -> String {
+    s.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// Inverse of `normalize_eol` for emitting calculations back into CDATA.
+/// FM expects CR-only inside calc text regardless of platform.
+pub fn cr_for_cdata(s: &str) -> String {
+    s.replace("\r\n", "\r").replace('\n', "\r")
+}
+
 /// Parse an FM XML snippet string into a structured script.
 /// Translates Spanish step names to English using the steps table.
 pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
@@ -318,13 +332,17 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                 }
             }
             Ok(Event::Text(ref e)) => {
-                let text = String::from_utf8_lossy(e.as_ref()).to_string();
-                let text = strip_bom(&text).to_string();
+                // `unescape()` resolves `&#13;`, `&amp;`, `&gt;` etc. to their literal
+                // characters so the round-trip xml_escape on the encode side doesn't
+                // double-escape them. CDATA is exempt — it's already literal.
+                let raw = e.unescape().map(|c| c.into_owned())
+                    .unwrap_or_else(|_| String::from_utf8_lossy(e.as_ref()).to_string());
+                let text = normalize_eol(strip_bom(&raw));
                 parser.capture(&text);
             }
             Ok(Event::CData(ref e)) => {
                 let text = String::from_utf8_lossy(e.as_ref()).to_string();
-                let text = strip_bom(&text).to_string();
+                let text = normalize_eol(strip_bom(&text));
                 parser.capture(&text);
             }
             Ok(Event::End(ref e)) => {
@@ -558,16 +576,22 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
     let enabled = if step.enable { "True" } else { "False" };
     let mut xml = format!("<Step enable=\"{}\" id=\"{}\" name=\"{}\">", enabled, step.id, xml_escape(&step.name));
 
+    // Helper: wrap a calc body in CDATA, converting `\n` back to `\r` (FM's native EOL
+    // inside calculations). Opaque shape bypasses this — its body is already raw XML.
+    let cdata = |s: &str| format!("<![CDATA[{}]]>", cr_for_cdata(s));
+
     let shape = steps::shape_for_en(&step.name);
     match shape {
         Some(StepShape::Comment) => {
+            // FM uses `&#13;` for line breaks in comment Text. xml_escape runs first
+            // so any literal `&` in the comment is properly escaped; then `\n` is
+            // turned into the CR entity so FM displays the comment as multi-line.
             let text = step.text.as_deref().unwrap_or("");
-            xml.push_str(&format!("<Text>{}</Text>", xml_escape(text)));
+            let escaped = xml_escape(text).replace('\n', "&#13;");
+            xml.push_str(&format!("<Text>{}</Text>", escaped));
         }
         Some(StepShape::ValueCalcName) => {
-            xml.push_str("<Value><Calculation><![CDATA[");
-            xml.push_str(step.calculation.as_deref().unwrap_or(""));
-            xml.push_str("]]></Calculation></Value>");
+            xml.push_str(&format!("<Value><Calculation>{}</Calculation></Value>", cdata(step.calculation.as_deref().unwrap_or(""))));
             xml.push_str("<Repetition><Calculation><![CDATA[1]]></Calculation></Repetition>");
             if let Some(var_name) = &step.var_name {
                 xml.push_str(&format!("<Name>{}</Name>", xml_escape(var_name)));
@@ -576,12 +600,12 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         Some(StepShape::CalculationWithRestore) => {
             xml.push_str("<Restore state=\"False\"/>");
             if let Some(calc) = &step.calculation {
-                xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+                xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
             }
         }
         Some(StepShape::Calculation) => {
             if let Some(calc) = &step.calculation {
-                xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+                xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
             }
         }
         Some(StepShape::SetState) => {
@@ -593,10 +617,10 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             // The bracket content the user typed is the literal calc expression
             // (so "prueba" with quotes is a string literal in FM-calc terms).
             if let Some(title) = &step.dialog_title {
-                xml.push_str(&format!("<Title><Calculation><![CDATA[{}]]></Calculation></Title>", title));
+                xml.push_str(&format!("<Title><Calculation>{}</Calculation></Title>", cdata(title)));
             }
             if let Some(msg) = &step.dialog_message {
-                xml.push_str(&format!("<Message><Calculation><![CDATA[{}]]></Calculation></Message>", msg));
+                xml.push_str(&format!("<Message><Calculation>{}</Calculation></Message>", cdata(msg)));
             }
             if !step.dialog_buttons.is_empty() {
                 xml.push_str("<Buttons>");
@@ -604,8 +628,8 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                     // First button defaults to CommitState=True (the OK button), rest False.
                     let commit = if i == 0 { "True" } else { "False" };
                     xml.push_str(&format!(
-                        "<Button CommitState=\"{}\"><Calculation><![CDATA[{}]]></Calculation></Button>",
-                        commit, btn
+                        "<Button CommitState=\"{}\"><Calculation>{}</Calculation></Button>",
+                        commit, cdata(btn)
                     ));
                 }
                 xml.push_str("</Buttons>");
@@ -613,7 +637,7 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         }
         Some(StepShape::FieldByName) => {
             if let Some(result) = &step.field_result {
-                xml.push_str(&format!("<Result><![CDATA[{}]]></Result>", result));
+                xml.push_str(&format!("<Result>{}</Result>", cdata(result)));
             }
             if let Some(target) = &step.field_target {
                 xml.push_str(&format!("<TargetName>{}</TargetName>", xml_escape(target)));
@@ -624,7 +648,7 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             // the user can flip it manually in FM if they need otherwise.
             xml.push_str("<SelectAll state=\"True\"></SelectAll>");
             if let Some(calc) = &step.calculation {
-                xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+                xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
             }
             xml.push_str("<Text></Text>");
             if let Some(target) = &step.field_target {
@@ -642,7 +666,7 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                 xml.push_str(&format!("<RowPageLocation value=\"{}\"></RowPageLocation>", xml_escape(loc)));
                 if loc == "byCalculation" {
                     if let Some(calc) = &step.calculation {
-                        xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+                        xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
                     }
                 }
             }
@@ -652,7 +676,7 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                 xml.push_str(&format!("<CurrentScript value=\"{}\"></CurrentScript>", xml_escape(mode)));
             }
             if let Some(calc) = &step.calculation {
-                xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+                xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
             }
             if step.script_target_name.is_some() || step.script_target_id.is_some() {
                 xml.push_str("<Script");
@@ -667,7 +691,7 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         }
         Some(StepShape::FieldAndCalc) => {
             if let Some(calc) = &step.calculation {
-                xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+                xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
             }
             if step.field_target.is_some() || step.field_table.is_some() || step.field_numeric_id.is_some() {
                 xml.push_str("<Field");
@@ -686,15 +710,15 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         Some(StepShape::WebViewerJs) => {
             // FM nests text inside <Calculation><![CDATA[...]]></Calculation>
             if let Some(obj) = &step.object_name {
-                xml.push_str(&format!("<ObjectName><Calculation><![CDATA[{}]]></Calculation></ObjectName>", obj));
+                xml.push_str(&format!("<ObjectName><Calculation>{}</Calculation></ObjectName>", cdata(obj)));
             }
             if let Some(func) = &step.function_name {
-                xml.push_str(&format!("<FunctionName><Calculation><![CDATA[{}]]></Calculation></FunctionName>", func));
+                xml.push_str(&format!("<FunctionName><Calculation>{}</Calculation></FunctionName>", cdata(func)));
             }
             if !step.parameters.is_empty() {
                 xml.push_str(&format!("<Parameters Count=\"{}\">", step.parameters.len()));
                 for p in &step.parameters {
-                    xml.push_str(&format!("<P><Calculation><![CDATA[{}]]></Calculation></P>", p));
+                    xml.push_str(&format!("<P><Calculation>{}</Calculation></P>", cdata(p)));
                 }
                 xml.push_str("</Parameters>");
             }
@@ -708,7 +732,7 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             let mode = step.window_mode.as_deref().unwrap_or(default_mode);
             xml.push_str(&format!("<Window value=\"{}\"></Window>", xml_escape(mode)));
             if let Some(name) = &step.var_name {
-                xml.push_str(&format!("<Name><Calculation><![CDATA[{}]]></Calculation></Name>", name));
+                xml.push_str(&format!("<Name><Calculation>{}</Calculation></Name>", cdata(name)));
             }
         }
         Some(StepShape::AdjustWindow) => {
@@ -726,7 +750,7 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         Some(StepShape::Plain) | None => {
             // Unknown or plain steps: output whatever data we have as fallback
             if let Some(calc) = &step.calculation {
-                xml.push_str(&format!("<Calculation><![CDATA[{}]]></Calculation>", calc));
+                xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
             } else if let Some(text) = &step.text {
                 xml.push_str(&format!("<Text>{}</Text>", xml_escape(text)));
             }

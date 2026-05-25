@@ -104,7 +104,7 @@ kind = "AllowUserAbort"
 id = 85
 en = "Allow User Abort"
 es = "Permitir cancelación del usuario"
-shape = "calculation"
+shape = "set_state"
 opens_block = false
 closes_block = false
 
@@ -315,7 +315,7 @@ kind = "PerformFind"
 id = 28
 en = "Perform Find"
 es = "Ejecutar búsqueda"
-shape = "plain"
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -739,7 +739,7 @@ kind = "GoToLayout"
 id = 6
 en = "Go to Layout"
 es = "Ir a la presentación"
-shape = "calculation"
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -748,7 +748,7 @@ kind = "GoToObject"
 id = 145
 en = "Go to Object"
 es = "Ir a objeto"
-shape = "plain"
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -840,7 +840,7 @@ kind = "NewWindow"
 id = 122
 en = "New Window"
 es = "Nueva ventana"
-shape = "plain"
+shape = "opaque"
 opens_block = false
 closes_block = false
 

@@ -108,6 +108,27 @@ fn run_cli_mode() -> Result<(), String> {
         "test" => run_test_cli(),
         "passthrough" => run_passthrough_cli(),
         "dump-ids" => run_dump_ids_cli(),
+        "encode-text" => {
+            if args.len() < 3 { return Err("Usage: fm-bridge encode-text <in.fmscript> <out.xml>".to_string()); }
+            let text = read_file_to_string(&args[1])?;
+            let xml_bytes = xmss::encode_xmss(&text)?;
+            std::fs::write(&args[2], &xml_bytes).map_err(|e| e.to_string())?;
+            println!("Wrote {} ({} bytes)", args[2], xml_bytes.len());
+            Ok(())
+        }
+        "decode-xml" => {
+            if args.len() < 2 { return Err("Usage: fm-bridge decode-xml <file.xml>".to_string()); }
+            let xml = std::fs::read_to_string(&args[1]).map_err(|e| e.to_string())?;
+            let script = xmss::parse_fmxml_snippet(&xml)?;
+            let text = text_format::format_script(&script);
+            if let Some(out) = args.get(2) {
+                std::fs::write(out, &text).map_err(|e| e.to_string())?;
+                println!("Wrote {}", out);
+            } else {
+                println!("{}", text);
+            }
+            Ok(())
+        }
         _ => Err(format!("Unknown command: {}. Use: read, write, json, debug, test, passthrough, dump-ids", args[0]))
     }
 }

@@ -600,7 +600,7 @@ kind = "InsertFromURL"
 id = 160
 en = "Insert from URL"
 es = "Insertar desde URL"
-shape = "plain"
+shape = "insert_from_url"
 opens_block = false
 closes_block = false
 

@@ -82,6 +82,13 @@ pub struct ScriptStep {
     pub window_style_name: Option<String>,  // Document | Floating | Dialog | Card
     // For Perform Find (PerformFind shape).
     pub find_requests: Vec<FindRequest>,
+    // For Insert from URL (InsertFromUrl shape). Boolean flags stored as "True"/"False"
+    // strings (matches FM's XML attribute form); curl_options is a calc expression.
+    // `goto_no_interact` is reused for NoInteract (same semantics — suppress dialog).
+    pub curl_options: Option<String>,
+    pub dont_encode_url: Option<String>,
+    pub verify_ssl: Option<String>,
+    pub select_all_state: Option<String>,
     pub indent_level: u32,
 }
 
@@ -234,7 +241,12 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             | TextTarget::ObjectName
                             | TextTarget::FunctionName
                             | TextTarget::Param
-                            | TextTarget::VarName => {}
+                            | TextTarget::VarName
+                            | TextTarget::CurlOptions
+                            | TextTarget::WinHeight
+                            | TextTarget::WinWidth
+                            | TextTarget::WinTop
+                            | TextTarget::WinLeft => {}
                             _ => {
                                 parser.push_target(TextTarget::Calculation);
                             }
@@ -345,9 +357,27 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                         }
                     }
                     b"SelectAll" => {
-                        // FM emits this on Execute FileMaker Data API; we preserve only
-                        // the calc + target, defaulting SelectAll to True on encode.
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.select_all_state = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
                     }
+                    b"DontEncodeURL" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.dont_encode_url = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"VerifySSLCertificates" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.verify_ssl = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"CURLOptions" => { parser.push_target(TextTarget::CurlOptions); }
                     b"Set" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
@@ -502,6 +532,7 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             parser.pop_target(TextTarget::Text);
                         }
                     }
+                    b"CURLOptions" => { parser.pop_target(TextTarget::CurlOptions); }
                     b"Height" => { parser.pop_target(TextTarget::WinHeight); }
                     b"Width" => { parser.pop_target(TextTarget::WinWidth); }
                     b"DistanceFromTop" => { parser.pop_target(TextTarget::WinTop); }
@@ -564,6 +595,8 @@ enum TextTarget {
     WinLeft,
     // Perform Find <Criteria><Text>...</Text>: routes text to current_find_criterion.text
     FindCriterionText,
+    // Insert from URL <CURLOptions><Calculation>...</Calculation></CURLOptions>
+    CurlOptions,
 }
 
 #[derive(Default)]
@@ -612,6 +645,11 @@ struct StepParser {
     current_find_request: Option<FindRequest>,
     current_find_criterion: Option<FindCriterion>,
     in_find_criteria: bool,
+    // Insert from URL
+    curl_options: String,
+    dont_encode_url: String,
+    verify_ssl: String,
+    select_all_state: String,
     context_stack: Vec<TextTarget>,
 }
 
@@ -654,6 +692,7 @@ impl StepParser {
                     c.text.push_str(text);
                 }
             }
+            TextTarget::CurlOptions => self.curl_options.push_str(text),
             TextTarget::SetState | TextTarget::None => {}
         }
     }
@@ -697,6 +736,10 @@ impl StepParser {
             window_left: if self.window_left.is_empty() { None } else { Some(self.window_left.clone()) },
             window_style_name: if self.window_style_name.is_empty() { None } else { Some(self.window_style_name.clone()) },
             find_requests: self.find_requests.clone(),
+            curl_options: if self.curl_options.is_empty() { None } else { Some(self.curl_options.clone()) },
+            dont_encode_url: if self.dont_encode_url.is_empty() { None } else { Some(self.dont_encode_url.clone()) },
+            verify_ssl: if self.verify_ssl.is_empty() { None } else { Some(self.verify_ssl.clone()) },
+            select_all_state: if self.select_all_state.is_empty() { None } else { Some(self.select_all_state.clone()) },
             indent_level,
         }
     }
@@ -936,6 +979,38 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             ));
             if let Some(name) = &step.layout_name {
                 xml.push_str(&format!("<Layout name=\"{}\"></Layout>", xml_escape(name)));
+            }
+        }
+        Some(StepShape::InsertFromUrl) => {
+            // FM emits these 4 flags in a fixed order; preserve it to match the
+            // original byte-for-byte where possible.
+            let no_int = step.goto_no_interact.as_deref().unwrap_or("False");
+            let dont_enc = step.dont_encode_url.as_deref().unwrap_or("False");
+            let sel_all = step.select_all_state.as_deref().unwrap_or("False");
+            let verify = step.verify_ssl.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<NoInteract state=\"{}\"></NoInteract>", xml_escape(no_int)));
+            xml.push_str(&format!("<DontEncodeURL state=\"{}\"></DontEncodeURL>", xml_escape(dont_enc)));
+            xml.push_str(&format!("<SelectAll state=\"{}\"></SelectAll>", xml_escape(sel_all)));
+            xml.push_str(&format!("<VerifySSLCertificates state=\"{}\"></VerifySSLCertificates>", xml_escape(verify)));
+            if let Some(curl) = &step.curl_options {
+                xml.push_str(&format!("<CURLOptions><Calculation>{}</Calculation></CURLOptions>", cdata(curl)));
+            }
+            // URL calc (the "Specify URL" calc in FM's dialog).
+            if let Some(url) = &step.calculation {
+                xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(url)));
+            }
+            xml.push_str("<Text></Text>");
+            // Target: variable (`<Field>$var</Field>`) or named field (`<Field name="..."/>`).
+            if let Some(t) = &step.field_target {
+                if t.starts_with('$') {
+                    xml.push_str(&format!("<Field>{}</Field>", xml_escape(t)));
+                } else {
+                    xml.push_str("<Field");
+                    if let Some(tbl) = &step.field_table {
+                        xml.push_str(&format!(" table=\"{}\"", xml_escape(tbl)));
+                    }
+                    xml.push_str(&format!(" name=\"{}\"></Field>", xml_escape(t)));
+                }
             }
         }
         Some(StepShape::PerformFind) => {

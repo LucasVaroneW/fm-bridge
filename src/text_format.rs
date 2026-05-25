@@ -250,6 +250,36 @@ pub fn format_step(step: &ScriptStep) -> String {
                 line.push_str(&format!(" [{}]", parts.join("; ")));
             }
         }
+        Some(StepShape::InsertFromUrl) => {
+            // [Target: ...; URL: ...; cURL: "..."; Dialog: Off; VerifySSL; SelectAll; DontEncode]
+            // Flags emit only when non-default (FM default for all 4 flag fields is False).
+            // Dialog: Off ↔ NoInteract=True. Dialog defaults On so emit nothing when NoInteract=False.
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(t) = &step.field_target {
+                let qualified = match &step.field_table {
+                    Some(tb) if !t.starts_with('$') => format!("{}::{}", tb, t),
+                    _ => t.clone(),
+                };
+                parts.push(format!("Target: {}", qualified));
+            }
+            if let Some(url) = &step.calculation {
+                let u = url.trim();
+                if !u.is_empty() { parts.push(format!("URL: {}", u)); }
+            }
+            if let Some(curl) = &step.curl_options {
+                let c = curl.trim();
+                if !c.is_empty() { parts.push(format!("cURL: {}", c)); }
+            }
+            if step.goto_no_interact.as_deref() == Some("True") {
+                parts.push("Dialog: Off".to_string());
+            }
+            if step.verify_ssl.as_deref() == Some("True")  { parts.push("VerifySSL".to_string()); }
+            if step.select_all_state.as_deref() == Some("True") { parts.push("SelectAll".to_string()); }
+            if step.dont_encode_url.as_deref() == Some("True")  { parts.push("DontEncode".to_string()); }
+            if !parts.is_empty() {
+                line.push_str(&format!(" [{}]", parts.join("; ")));
+            }
+        }
         Some(StepShape::PerformFind) => {
             // Multi-line by default for readability. Each request becomes one section:
             //   Find: T::F1 => v1; T::F2 => v2
@@ -337,6 +367,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: 0,
             });
             i += 1;
@@ -369,6 +400,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             });
             i += 1;
@@ -463,6 +495,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
             indent_level: indent,
         },
         Some(StepShape::ValueCalcName) => {
@@ -480,6 +513,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -497,6 +531,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
             indent_level: indent,
         },
         Some(StepShape::SetState) => ScriptStep {
@@ -513,6 +548,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
             indent_level: indent,
         },
         Some(StepShape::Dialog) => {
@@ -531,6 +567,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -550,6 +587,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -575,6 +613,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -594,6 +633,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -613,6 +653,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -632,6 +673,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -651,6 +693,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -670,6 +713,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -689,6 +733,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -708,6 +753,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -727,6 +773,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: layout, layout_id, layout_destination: dest,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -747,6 +794,31 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 window_height: nw.height, window_width: nw.width, window_top: nw.top, window_left: nw.left,
                 window_style_name: nw.style,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::InsertFromUrl) => {
+            let p = parse_insert_from_url_content(content);
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: p.url,
+                var_name: None, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: p.target, field_table: p.table, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None,
+                goto_no_interact: if p.dialog_off { Some("True".to_string()) } else { None },
+                window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
+                curl_options: p.curl,
+                dont_encode_url: if p.dont_encode { Some("True".to_string()) } else { None },
+                verify_ssl: if p.verify_ssl { Some("True".to_string()) } else { None },
+                select_all_state: if p.select_all { Some("True".to_string()) } else { None },
                 indent_level: indent,
             }
         }
@@ -766,6 +838,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: requests,
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
                 indent_level: indent,
             }
         }
@@ -785,6 +858,7 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
                 find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
             indent_level: indent,
         },
     }
@@ -1121,6 +1195,49 @@ fn parse_new_window_content(content: Option<&str>) -> ParsedNewWindow {
         else if let Some(v) = p.strip_prefix("Width:")  { out.width  = Some(v.trim().to_string()); }
         else if let Some(v) = p.strip_prefix("Top:")    { out.top    = Some(v.trim().to_string()); }
         else if let Some(v) = p.strip_prefix("Left:")   { out.left   = Some(v.trim().to_string()); }
+    }
+    out
+}
+
+/// Parsed bag of Insert from URL fields. Filled by `parse_insert_from_url_content`.
+struct ParsedInsertFromUrl {
+    target: Option<String>,
+    table: Option<String>,
+    url: Option<String>,
+    curl: Option<String>,
+    dialog_off: bool,
+    verify_ssl: bool,
+    select_all: bool,
+    dont_encode: bool,
+}
+
+/// Parse `Insert from URL` bracket content. Key/value pairs separated by `;`:
+///   `Target: $var | Table::Field`
+///   `URL: <calc expression>`
+///   `cURL: <calc expression>`
+///   bare flags (any order): `Dialog: Off`, `VerifySSL`, `SelectAll`, `DontEncode`
+fn parse_insert_from_url_content(content: Option<&str>) -> ParsedInsertFromUrl {
+    let mut out = ParsedInsertFromUrl {
+        target: None, table: None, url: None, curl: None,
+        dialog_off: false, verify_ssl: false, select_all: false, dont_encode: false,
+    };
+    let content = match content { Some(c) => c, None => return out };
+    for part in split_smart(content) {
+        let p = part.trim();
+        if let Some(v) = p.strip_prefix("Target:") {
+            let tgt = v.trim();
+            if let Some(idx) = tgt.find("::") {
+                out.table = Some(tgt[..idx].to_string());
+                out.target = Some(tgt[idx + 2..].to_string());
+            } else {
+                out.target = Some(tgt.to_string());
+            }
+        } else if let Some(v) = p.strip_prefix("URL:")  { out.url  = Some(v.trim().to_string()); }
+          else if let Some(v) = p.strip_prefix("cURL:") { out.curl = Some(v.trim().to_string()); }
+          else if let Some(v) = p.strip_prefix("Dialog:") { if v.trim().eq_ignore_ascii_case("off") { out.dialog_off = true; } }
+          else if p.eq_ignore_ascii_case("VerifySSL")  { out.verify_ssl = true; }
+          else if p.eq_ignore_ascii_case("SelectAll")  { out.select_all = true; }
+          else if p.eq_ignore_ascii_case("DontEncode") { out.dont_encode = true; }
     }
     out
 }

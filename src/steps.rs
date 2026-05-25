@@ -59,6 +59,11 @@ pub enum StepShape {
     /// and N <Criteria> (Field by table+name + Text). No numeric IDs are emitted —
     /// FM resolves field references by table+name on paste.
     PerformFind,
+    /// <NoInteract/> + <DontEncodeURL/> + <SelectAll/> + <VerifySSLCertificates/>
+    /// + <CURLOptions><Calculation>...</Calculation></CURLOptions>
+    /// + <Calculation>url</Calculation> + <Text/> + <Field>$var</Field> or <Field name=.../>.
+    /// Used by Insert from URL.
+    InsertFromUrl,
     /// Whole inner XML preserved verbatim — no structured parsing.
     /// Used by steps whose FM config is too rich for a flat text line
     /// (Import/Export Records: <Profile>, <TargetFields> with N field maps, etc.).

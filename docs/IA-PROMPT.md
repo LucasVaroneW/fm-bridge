@@ -312,6 +312,47 @@ New Window [Style: Floating; Layout: "Picker"; Width: 400; Height: 600]
 New Window [Style: Document; Layout: "HiddenWorker"; Height: 1; Width: 1; Top: -1000; Left: -1000]
 ```
 
+### Insert from URL
+
+```
+Insert from URL [Target: <target>; URL: <calc>; cURL: <calc>; Dialog: Off; VerifySSL; SelectAll; DontEncode]
+```
+
+* `Target:` is where the response goes. Two forms:
+  * `$variableName` (or `$$globalVar`) — emits as `<Field>$var</Field>`.
+  * `Table::FieldName` — emits as `<Field table="..." name="..."/>`. FM resolves
+    by table+name on paste (same rule as `Set Field`).
+* `URL:` is a FM calc expression. Quotes literal strings: `URL: "https://api.example.com/v1"`.
+* `cURL:` is a FM calc expression with cURL options. Optional — omit when not needed.
+  Common pattern: `cURL: "--request POST --header \"Content-Type: application/json\" --data @$payload"`.
+* **Flags** (all default to off — emit only when needed, in any order):
+  * `Dialog: Off` → suppresses FM's "With dialog" interactive prompt (FM stores
+    this as `NoInteract=True`). Almost always set for headless API calls.
+  * `VerifySSL` → enable SSL certificate verification. **FM's default is OFF**, which
+    is insecure — emit this flag for production HTTPS calls.
+  * `SelectAll` → select all of the target field's content before insertion.
+  * `DontEncode` → skip FM's automatic URL encoding (use when the URL is already encoded).
+
+Examples:
+
+```
+# Simple GET into a variable
+Insert from URL [Target: $response; URL: "https://api.example.com/health"; Dialog: Off; VerifySSL]
+
+# POST with JSON payload and bearer token, no dialog
+Insert from URL [Target: $respuesta; URL: $endpointUrl; cURL: "--request POST --header \"Content-Type: application/json\" --header \"Authorization: Bearer " & $$token & "\" --data @$payload"; Dialog: Off; VerifySSL]
+
+# Result into a real field
+Insert from URL [Target: Logs::LastResponse; URL: $url; Dialog: Off]
+```
+
+Notes:
+* The cURL expression uses FM-calc string concatenation with `&`. Variables
+  like `$$token` are interpolated at runtime, not at script-paste time.
+* Escape inner quotes as `\"` inside FM string literals.
+* No numeric IDs needed anywhere — `Insert from URL` doesn't link to any
+  FM object by id.
+
 ### Show All Records / Show Omitted Only / Show Custom Dialog / etc.
 
 Simple parameterless or `plain` steps:
@@ -471,6 +512,7 @@ Import Records [<ImportSource>...<TargetFields>...</TargetFields></ImportSource>
 | Perform Find | multi-line `Find:` / `Omit:` DSL with `T::F => value` |
 | Perform JS in WebViewer | `[Object: ..; Function: ..; Param[0]: ..]` |
 | Execute FM Data API | `[$target; jsonCalc]` |
+| Insert from URL | `[Target: $var; URL: calc; cURL: calc; Dialog: Off; VerifySSL]` |
 | Plain steps | `Commit Records/Requests`, `New Record/Request`, `Delete Record/Request`, `Show All Records`, `Refresh Window`, `Close Window`, etc. |
 
 ---

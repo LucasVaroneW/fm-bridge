@@ -43,7 +43,12 @@ from `fm-bridge read`), it MUST preserve the id verbatim.
 * One step per line (multi-line cases noted below).
 * Comments start with `# `. A line with just `#` is a comment with no text.
 * A **truly empty line** (just `\n`) round-trips as a blank Script Workspace line.
-* Disabled steps are prefixed with `// ` (space after `//` is required).
+* Disabled steps:
+  * Single-line: prefix with `// ` (space after `//` is required).
+  * Multi-line: wrap with `/* ... */` (the `/*` opens before the step name on
+    the first line, `*/` is on its own line after the closing `]`). The block
+    form prevents VSCode (and other editors) from treating an unclosed `"`
+    inside the calc as a string that leaks through the rest of the file.
 * Block indentation: 2 spaces per nesting level (`If`, `Loop`).
 * Encoding: **UTF-8 without BOM**.
 

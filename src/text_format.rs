@@ -325,13 +325,67 @@ pub fn format_step(step: &ScriptStep) -> String {
         }
     }
 
+    // Editor-friendly disabled steps: when the rendered step spans multiple lines,
+    // the per-line `// ` prefix only marks the first line — VSCode and similar editors
+    // then treat continuation lines as live code, and a stray `"` in the first line
+    // leaks as an unclosed string through the rest of the file. Re-wrap as
+    // `/* ... */` so the block comment encompasses every line. Single-line disabled
+    // steps stay as `// step [...]` (no editor confusion possible).
+    if !step.enable && line.contains('\n') {
+        if let Some(rest) = line.strip_prefix(&format!("{}// ", indent)) {
+            line = format!("{}/* {}\n{}*/", indent, rest, indent);
+        }
+    }
+
     line
+}
+
+/// Rewrite `/* ... */` block comments into per-line `// ` prefixes so the
+/// rest of the parser can stay single-line-aware. Block comments are the
+/// editor-friendly form for disabling multi-line steps (a `// ` on the first
+/// line lets stray `"` in the calc leak as unclosed strings through VSCode).
+fn preprocess_block_comments(text: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut in_block = false;
+    for raw in text.lines() {
+        let leading_ws_len = raw.len() - raw.trim_start().len();
+        let leading_ws = &raw[..leading_ws_len];
+        let body = raw.trim_start();
+
+        if !in_block {
+            if let Some(after_open) = body.strip_prefix("/* ").or_else(|| body.strip_prefix("/*")) {
+                in_block = true;
+                // Check for `*/` on the same line (single-line block comment).
+                if let Some(close_idx) = after_open.rfind("*/") {
+                    let inner = after_open[..close_idx].trim_end();
+                    out.push(format!("{}// {}", leading_ws, inner));
+                    in_block = false;
+                } else {
+                    out.push(format!("{}// {}", leading_ws, after_open));
+                }
+            } else {
+                out.push(raw.to_string());
+            }
+        } else if let Some(close_idx) = raw.rfind("*/") {
+            // Closing line — keep any content before `*/`.
+            let kept = raw[..close_idx].trim_end();
+            if !kept.is_empty() {
+                out.push(kept.to_string());
+            }
+            in_block = false;
+        } else {
+            out.push(raw.to_string());
+        }
+    }
+    out.join("\n")
 }
 
 /// Parse plain text into a structured script.
 /// Handles multiline bracket content by collecting lines until `]` is found.
 pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
     let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+    let preprocessed = preprocess_block_comments(text);
+    let text = preprocessed.as_str();
     let mut steps = Vec::new();
     let lines: Vec<&str> = text.lines().collect();
     let mut i = 0;

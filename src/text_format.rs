@@ -1367,3 +1367,38 @@ fn split_smart(content: &str) -> Vec<String> {
 
     parts
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::xmss;
+
+    // Real capture from FileMaker (debug_raw.xml). Replace Field Contents carries
+    // a dialog flag, replace mode, serial-number options and a target field — all
+    // of which the old `None` shape dropped. Opaque must round-trip it verbatim.
+    const REPLACE_FIELD_CONTENTS: &str = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"91\" name=\"Replace Field Contents\"><NoInteract state=\"True\"></NoInteract><Restore state=\"True\"></Restore><With value=\"Calculation\"></With><Calculation><![CDATA[\"pruebas\"]]></Calculation><SerialNumbers PerformAutoEnter=\"True\" UpdateEntryOptions=\"False\" UseEntryOptions=\"True\"></SerialNumbers><Field table=\"Cli_d_Sesiones\" id=\"1509\" name=\"g__END__\"></Field></Step></fmxmlsnippet>";
+
+    #[test]
+    fn replace_field_contents_roundtrips_losslessly() {
+        let script = xmss::parse_fmxml_snippet(REPLACE_FIELD_CONTENTS).unwrap();
+        // Field + dialog flag survive into the verbatim opaque body.
+        let calc = script.steps[0].calculation.as_deref().unwrap();
+        assert!(calc.contains("name=\"g__END__\""), "field target lost: {calc}");
+        assert!(calc.contains("<NoInteract state=\"True\">"), "dialog flag lost: {calc}");
+
+        // Full text round-trip must reproduce the original XML byte-for-byte.
+        let text = super::format_script(&script);
+        let script2 = super::parse_text_to_script(&text).unwrap();
+        let rebuilt = xmss::build_xml_from_script(&script2).unwrap();
+        assert_eq!(rebuilt, REPLACE_FIELD_CONTENTS);
+    }
+
+    #[test]
+    fn replace_field_contents_spanish_name_translates() {
+        let es = REPLACE_FIELD_CONTENTS.replace(
+            "name=\"Replace Field Contents\"",
+            "name=\"Reemplazar contenido del campo\"",
+        );
+        let script = xmss::parse_fmxml_snippet(&es).unwrap();
+        assert_eq!(script.steps[0].name, "Replace Field Contents");
+    }
+}

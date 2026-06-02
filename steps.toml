@@ -486,6 +486,20 @@ opens_block = false
 closes_block = false
 
 [[steps]]
+kind = "ReplaceFieldContents"
+id = 91
+en = "Replace Field Contents"
+es = "Reemplazar contenido del campo"
+# Opaque: FM stores several sub-options (NoInteract dialog flag, Restore, With
+# value=replace-mode, Calculation, SerialNumbers options, Field target) and the
+# replace mode varies (calculated result / current contents / serial numbers).
+# Capturing the inner XML verbatim round-trips all of it losslessly without us
+# having to model every mode. Same approach as Import/Export Records.
+shape = "opaque"
+opens_block = false
+closes_block = false
+
+[[steps]]
 kind = "GoToField"
 id = 17
 en = "Go to Field"

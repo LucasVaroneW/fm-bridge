@@ -92,9 +92,25 @@ pub struct ScriptStep {
     pub indent_level: u32,
 }
 
-/// Strip the 4-byte header from raw clipboard data and return decoded XML string.
-/// Accepts any known FM header variant. Falls back to Windows-1252 if not valid UTF-8.
+/// Strip the platform framing from raw clipboard data and return decoded XML string.
+///
+/// Two framings exist:
+///   - Windows: a 4-byte little-endian u32 length prefix + XML bytes (added by
+///     `write_fm_clipboard` and present on data FM puts on the HGLOBAL).
+///   - macOS: raw XML bytes with no prefix — NSPasteboard hands us the payload
+///     verbatim, so it starts directly with `<`.
+/// Falls back to Windows-1252 if the XML is not valid UTF-8.
 pub fn strip_header(data: &[u8]) -> Result<String, String> {
+    if data.is_empty() {
+        return Err("Empty clipboard data".to_string());
+    }
+
+    // macOS style: no header, data is XML already.
+    if data[0] == b'<' {
+        return Ok(decode_xml_bytes(data));
+    }
+
+    // Windows style: 4-byte LE length prefix.
     if data.len() < 5 {
         return Err("Data too short to be valid XMSS".to_string());
     }
@@ -111,14 +127,17 @@ pub fn strip_header(data: &[u8]) -> Result<String, String> {
     };
 
     let xml_bytes = &data[xml_start..];
+    Ok(decode_xml_bytes(xml_bytes))
+}
 
+/// Decode XML bytes as UTF-8, falling back to Windows-1252 for legacy Latin-1 data.
+fn decode_xml_bytes(xml_bytes: &[u8]) -> String {
     // Try strict UTF-8 first
     if let Ok(s) = std::str::from_utf8(xml_bytes) {
-        return Ok(s.to_string());
+        return s.to_string();
     }
-
     // Fallback: decode as Windows-1252 (covers Latin-1 accented chars)
-    Ok(decode_windows1252(xml_bytes))
+    decode_windows1252(xml_bytes)
 }
 
 /// Decode bytes as Windows-1252 (also covers Latin-1 / ISO-8859-1).
@@ -186,8 +205,15 @@ pub fn cr_for_cdata(s: &str) -> String {
 /// Parse an FM XML snippet string into a structured script.
 /// Translates Spanish step names to English using the steps table.
 pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
-    let xml_clean = strip_bom(xml);
-    let mut reader = Reader::from_reader(Cursor::new(xml_clean));
+    // Normalize to NFC once, here, so EVERY name, calculation, and comment shares
+    // a single canonical Unicode form regardless of the source platform (macOS
+    // emits NFD, Windows NFC). Doing it on the whole string — rather than per
+    // attribute — keeps names and the references embedded in calculations
+    // consistent with each other. Idempotent on already-NFC (Windows) input.
+    // The reader and the opaque byte-slice capture both operate on this same
+    // normalized string, so buffer offsets stay valid.
+    let xml_clean = crate::normalization::to_nfc(strip_bom(xml));
+    let mut reader = Reader::from_reader(Cursor::new(xml_clean.as_str()));
     // FM emits some elements as self-closing (<Field .../>) and others as
     // explicit pairs (<Field ...></Field>) inconsistently. Normalize both
     // into Start+End pairs so we only need one handler per element.
@@ -1068,4 +1094,75 @@ pub fn encode_xmss(text: &str) -> Result<Vec<u8>, String> {
 pub fn decode_xmss(data: &[u8]) -> Result<FmScript, String> {
     let xml_str = strip_header(data)?;
     parse_fmxml_snippet(&xml_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SNIPPET: &str =
+        "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"1\" name=\"Comment\"><Text>hi</Text></Step></fmxmlsnippet>";
+
+    /// Frame XML as Windows clipboard data: 4-byte LE length prefix + bytes.
+    fn windows_frame(xml: &str) -> Vec<u8> {
+        let body = xml.as_bytes();
+        let mut data = (body.len() as u32).to_le_bytes().to_vec();
+        data.extend_from_slice(body);
+        data
+    }
+
+    #[test]
+    fn strip_header_mac_style_no_prefix() {
+        // macOS hands us raw XML with no length prefix.
+        let xml = strip_header(SNIPPET.as_bytes()).unwrap();
+        assert!(xml.starts_with("<fmxmlsnippet"));
+        assert!(xml.ends_with("</fmxmlsnippet>"));
+    }
+
+    #[test]
+    fn strip_header_windows_style_with_prefix() {
+        let xml = strip_header(&windows_frame(SNIPPET)).unwrap();
+        assert!(xml.starts_with("<fmxmlsnippet"));
+        assert!(xml.ends_with("</fmxmlsnippet>"));
+    }
+
+    #[test]
+    fn strip_header_empty_errors() {
+        assert!(strip_header(&[]).is_err());
+    }
+
+    #[test]
+    fn decode_roundtrip_both_framings_agree() {
+        let mac = decode_xmss(SNIPPET.as_bytes()).unwrap();
+        let win = decode_xmss(&windows_frame(SNIPPET)).unwrap();
+        assert_eq!(mac.steps.len(), 1);
+        assert_eq!(win.steps.len(), 1);
+        assert_eq!(mac.steps[0].text, win.steps[0].text);
+    }
+
+    #[test]
+    fn decode_normalizes_names_and_text_to_nfc() {
+        // "café" written in NFD (e + combining acute) inside a comment must come
+        // back precomposed (NFC, U+00E9) after decode.
+        let nfd = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"1\" name=\"Comment\"><Text>cafe\u{0301}</Text></Step></fmxmlsnippet>";
+        let script = parse_fmxml_snippet(nfd).unwrap();
+        assert_eq!(script.steps[0].text.as_deref(), Some("café"));
+    }
+
+    #[test]
+    fn parse_tolerates_xml_declaration() {
+        // Some FM/MBS variants prepend `<?xml ...?>`. quick-xml surfaces this as a
+        // Decl event the parser already ignores — verify, so we know the prompt's
+        // proposed strip_xml_declaration() is unnecessary.
+        let with_decl = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>{}", SNIPPET);
+        let script = parse_fmxml_snippet(&with_decl).unwrap();
+        assert_eq!(script.steps.len(), 1);
+    }
+
+    #[test]
+    fn parse_tolerates_bom() {
+        let with_bom = format!("\u{FEFF}{}", SNIPPET);
+        let script = parse_fmxml_snippet(&with_bom).unwrap();
+        assert_eq!(script.steps.len(), 1);
+    }
 }

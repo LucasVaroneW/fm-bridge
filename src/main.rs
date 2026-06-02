@@ -3,6 +3,7 @@
 // No UI, no HTTP, no async. Procedural and minimal.
 
 mod clipboard;
+mod normalization;
 #[cfg(windows)]
 mod ole_clipboard;
 mod steps;
@@ -246,11 +247,13 @@ fn run_passthrough_cli() -> Result<(), String> {
         .map_err(|e| format!("Cannot save raw data: {}", e))?;
     println!("Raw bytes saved to: {}", raw_path.display());
 
-    // read_fm_clipboard returns bytes WITH the 4-byte LE length header that FM
-    // puts on the HGLOBAL. write_fm_clipboard prepends ITS OWN 4-byte header.
-    // For a true passthrough we must strip FM's header first; otherwise we'd
-    // produce a doubly-framed buffer that FM rejects on paste.
-    let xml_bytes = if data.len() > 4 {
+    // On Windows, read_fm_clipboard returns bytes WITH the 4-byte LE length header
+    // that FM puts on the HGLOBAL, and write_fm_clipboard prepends ITS OWN header —
+    // so for a true passthrough we must strip FM's header first, otherwise we'd
+    // produce a doubly-framed buffer that FM rejects on paste. On macOS the data is
+    // raw XML (no header) and starts with `<`, so stripping 4 bytes would corrupt it.
+    // Detect which case we're in by the leading byte.
+    let xml_bytes = if data.len() > 4 && data[0] != b'<' {
         &data[4..]
     } else {
         &data[..]

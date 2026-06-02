@@ -490,12 +490,11 @@ kind = "ReplaceFieldContents"
 id = 91
 en = "Replace Field Contents"
 es = "Reemplazar contenido del campo"
-# Opaque: FM stores several sub-options (NoInteract dialog flag, Restore, With
-# value=replace-mode, Calculation, SerialNumbers options, Field target) and the
-# replace mode varies (calculated result / current contents / serial numbers).
-# Capturing the inner XML verbatim round-trips all of it losslessly without us
-# having to model every mode. Same approach as Import/Export Records.
-shape = "opaque"
+# Structured like Set Field: [Table::Field; calc] + optional `Dialog: Off`.
+# Models the "replace with calculated result" mode (the common one); FM's fixed
+# <Restore>/<With value="Calculation">/<SerialNumbers> scaffolding is emitted with
+# defaults on encode. The current-contents and serial-number modes are not modeled.
+shape = "replace_field_contents"
 opens_block = false
 closes_block = false
 

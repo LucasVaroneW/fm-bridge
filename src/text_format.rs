@@ -211,6 +211,25 @@ pub fn format_step(step: &ScriptStep) -> String {
                 (None, true)       => {}
             }
         }
+        Some(StepShape::ReplaceFieldContents) => {
+            // Like Set Field — `[Table::Field; calc]` — plus a trailing `Dialog: Off`
+            // when the dialog is suppressed. Parts joined with `; `.
+            let target_display: Option<String> = match (&step.field_table, &step.field_target) {
+                (Some(t), Some(n)) => Some(format!("{}::{}", t, n)),
+                (None, Some(n)) => Some(n.clone()),
+                _ => None,
+            };
+            let calc = step.calculation.as_deref().map(|c| c.trim()).unwrap_or("");
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(tgt) = target_display { parts.push(tgt); }
+            if !calc.is_empty() { parts.push(calc.to_string()); }
+            if step.goto_no_interact.as_deref() == Some("True") {
+                parts.push("Dialog: Off".to_string());
+            }
+            if !parts.is_empty() {
+                line.push_str(&format!(" [{}]", parts.join("; ")));
+            }
+        }
         Some(StepShape::GoToObject) => {
             // `Go to Object [name]` or `[name; Rep: N]` when repetition ≠ 1.
             let obj = step.object_name.as_deref().map(|s| s.trim()).unwrap_or("");
@@ -466,7 +485,10 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
         // `[...]` pairs (JSONSetElement rows, List() literals, etc.) don't terminate
         // the step's bracket. We close only when an unmatched `]` is found.
         if let Some(idx) = content.find(" [") {
-            let step_name = &content[..idx];
+            // Accept Spanish step names too: translate to the English canonical
+            // name before any shape/id lookup (decode does the same for XML).
+            // English names pass through unchanged.
+            let step_name = steps::translate_to_en(&content[..idx]);
             let first_chunk = &content[idx + 2..];
 
             // The formatter adds `indent + 2` leading spaces to continuation lines
@@ -474,7 +496,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
             // Other shapes embed user-authored calcs verbatim, so dedenting them
             // would destroy intentional indentation (e.g. Let blocks in Set Variable).
             let dedent_continuations = matches!(
-                steps::shape_for_en(step_name),
+                steps::shape_for_en(&step_name),
                 Some(StepShape::CalculationWithRestore)
             );
 
@@ -516,11 +538,12 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
             }
             i += 1;
 
-            let step = build_step_from_name(step_name, Some(&bracket_content), enabled, resolve_id(step_name)?, indent);
+            let step = build_step_from_name(&step_name, Some(&bracket_content), enabled, resolve_id(&step_name)?, indent);
             steps.push(step);
         } else {
-            // No bracket content
-            let step = build_step_from_name(content, None, enabled, resolve_id(content)?, indent);
+            // No bracket content. Translate Spanish → English canonical first.
+            let step_name = steps::translate_to_en(content);
+            let step = build_step_from_name(&step_name, None, enabled, resolve_id(&step_name)?, indent);
             steps.push(step);
             i += 1;
         }
@@ -763,6 +786,27 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 field_result: None, field_target: target, field_table: table, field_numeric_id: numeric_id,
                 script_target_name: None, script_target_id: None, current_script_mode: None,
                 goto_location: None, goto_exit_after_last: None, goto_no_interact: None,
+                window_mode: None, window_limit_current_file: None, window_state: None,
+                layout_name: None, layout_id: None, layout_destination: None,
+                window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
+                find_requests: Vec::new(),
+                curl_options: None, dont_encode_url: None, verify_ssl: None, select_all_state: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::ReplaceFieldContents) => {
+            let (table, target, calc, dialog_off) = parse_replace_field_contents_content(content);
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                text: None, calculation: calc,
+                var_name: None, repetition: None,
+                object_name: None, function_name: None, parameters: Vec::new(),
+                restore_state: None, set_state: None,
+                dialog_title: None, dialog_message: None, dialog_buttons: Vec::new(),
+                field_result: None, field_target: target, field_table: table, field_numeric_id: None,
+                script_target_name: None, script_target_id: None, current_script_mode: None,
+                goto_location: None, goto_exit_after_last: None,
+                goto_no_interact: if dialog_off { Some("True".to_string()) } else { None },
                 window_mode: None, window_limit_current_file: None, window_state: None,
                 layout_name: None, layout_id: None, layout_destination: None,
                 window_height: None, window_width: None, window_top: None, window_left: None, window_style_name: None,
@@ -1129,6 +1173,74 @@ fn parse_field_and_calc_content(content: Option<&str>) -> (Option<String>, Optio
     (table, name, numeric_id, calc)
 }
 
+/// Parse "Replace Field Contents" bracket content: `Table::Field; calc[; Dialog: Off]`.
+/// Returns (table, field, calc, dialog_off). The first `;`-segment (bracket-aware)
+/// is the target; a segment equal to `Dialog: Off` toggles the flag; the rest is the
+/// calc (re-joined with `; ` in case the calc itself contained a top-level `;`).
+fn parse_replace_field_contents_content(content: Option<&str>) -> (Option<String>, Option<String>, Option<String>, bool) {
+    let content = match content {
+        Some(c) => c.trim(),
+        None => return (None, None, None, false),
+    };
+    if content.is_empty() {
+        return (None, None, None, false);
+    }
+
+    // Quote- and bracket-aware split on `;` so a `;` inside a string ("a;b") or
+    // inside a calc's ()/[] doesn't terminate a segment.
+    let mut segments: Vec<String> = Vec::new();
+    {
+        let mut cur = String::new();
+        let mut depth: i32 = 0;
+        let mut in_string = false;
+        for ch in content.chars() {
+            match ch {
+                '"' => { in_string = !in_string; cur.push(ch); }
+                '[' | '(' if !in_string => { depth += 1; cur.push(ch); }
+                ']' | ')' if !in_string => { depth -= 1; cur.push(ch); }
+                ';' if !in_string && depth == 0 => { segments.push(cur.trim().to_string()); cur.clear(); }
+                _ => cur.push(ch),
+            }
+        }
+        if !cur.trim().is_empty() {
+            segments.push(cur.trim().to_string());
+        }
+    }
+    if segments.is_empty() {
+        return (None, None, None, false);
+    }
+
+    // First segment is the target field. Strip an optional ` #N` numeric id suffix
+    // (we never emit it, but tolerate it if hand-typed).
+    let mut target_str = segments[0].trim().to_string();
+    if let Some(idx) = target_str.rfind(" #") {
+        let after = &target_str[idx + 2..];
+        if !after.is_empty() && after.chars().all(|c| c.is_ascii_digit()) {
+            target_str = target_str[..idx].trim().to_string();
+        }
+    }
+    let (table, field) = if let Some(idx) = target_str.find("::") {
+        (Some(target_str[..idx].to_string()), Some(target_str[idx + 2..].to_string()))
+    } else if target_str.is_empty() {
+        (None, None)
+    } else {
+        (None, Some(target_str))
+    };
+
+    let mut dialog_off = false;
+    let mut calc_parts: Vec<String> = Vec::new();
+    for seg in segments.iter().skip(1) {
+        if seg.eq_ignore_ascii_case("Dialog: Off") {
+            dialog_off = true;
+        } else {
+            calc_parts.push(seg.clone());
+        }
+    }
+    let calc = if calc_parts.is_empty() { None } else { Some(calc_parts.join("; ")) };
+
+    (table, field, calc, dialog_off)
+}
+
 /// Parse "Set Field By Name" bracket content: `Result: ...; Target: ...`
 fn parse_field_content(content: Option<&str>) -> (Option<String>, Option<String>) {
     let content = match content {
@@ -1378,18 +1490,43 @@ mod tests {
     const REPLACE_FIELD_CONTENTS: &str = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"91\" name=\"Replace Field Contents\"><NoInteract state=\"True\"></NoInteract><Restore state=\"True\"></Restore><With value=\"Calculation\"></With><Calculation><![CDATA[\"pruebas\"]]></Calculation><SerialNumbers PerformAutoEnter=\"True\" UpdateEntryOptions=\"False\" UseEntryOptions=\"True\"></SerialNumbers><Field table=\"Cli_d_Sesiones\" id=\"1509\" name=\"g__END__\"></Field></Step></fmxmlsnippet>";
 
     #[test]
-    fn replace_field_contents_roundtrips_losslessly() {
+    fn replace_field_contents_decodes_to_structured_text() {
         let script = xmss::parse_fmxml_snippet(REPLACE_FIELD_CONTENTS).unwrap();
-        // Field + dialog flag survive into the verbatim opaque body.
-        let calc = script.steps[0].calculation.as_deref().unwrap();
-        assert!(calc.contains("name=\"g__END__\""), "field target lost: {calc}");
-        assert!(calc.contains("<NoInteract state=\"True\">"), "dialog flag lost: {calc}");
+        let s = &script.steps[0];
+        assert_eq!(s.field_table.as_deref(), Some("Cli_d_Sesiones"));
+        assert_eq!(s.field_target.as_deref(), Some("g__END__"));
+        assert_eq!(s.calculation.as_deref(), Some("\"pruebas\""));
+        assert_eq!(s.goto_no_interact.as_deref(), Some("True")); // dialog off
 
-        // Full text round-trip must reproduce the original XML byte-for-byte.
+        let text = super::format_script(&script);
+        assert_eq!(text, "Replace Field Contents [Cli_d_Sesiones::g__END__; \"pruebas\"; Dialog: Off]");
+    }
+
+    #[test]
+    fn replace_field_contents_roundtrips() {
+        // Round-trip reproduces the original XML, minus the Field `id` (we resolve
+        // by name on paste, same as Set Field).
+        let script = xmss::parse_fmxml_snippet(REPLACE_FIELD_CONTENTS).unwrap();
         let text = super::format_script(&script);
         let script2 = super::parse_text_to_script(&text).unwrap();
         let rebuilt = xmss::build_xml_from_script(&script2).unwrap();
-        assert_eq!(rebuilt, REPLACE_FIELD_CONTENTS);
+        let expected = REPLACE_FIELD_CONTENTS.replace(" id=\"1509\"", "");
+        assert_eq!(rebuilt, expected);
+    }
+
+    #[test]
+    fn replace_field_contents_authored_from_scratch() {
+        // Hand-authored (Spanish name, no dialog flag → dialog stays on).
+        let script = super::parse_text_to_script(
+            "Reemplazar contenido del campo [Ta_d_MovimientosRef::MovRef_Del; 1]",
+        ).unwrap();
+        let s = &script.steps[0];
+        assert_eq!(s.name, "Replace Field Contents");
+        let xml = xmss::build_xml_from_script(&script).unwrap();
+        assert!(xml.contains("<Field table=\"Ta_d_MovimientosRef\" name=\"MovRef_Del\"></Field>"));
+        assert!(xml.contains("<NoInteract state=\"False\">")); // dialog on (default)
+        assert!(xml.contains("<Calculation><![CDATA[1]]></Calculation>"));
+        assert!(xml.contains("<With value=\"Calculation\">"));
     }
 
     #[test]
@@ -1400,5 +1537,20 @@ mod tests {
         );
         let script = xmss::parse_fmxml_snippet(&es).unwrap();
         assert_eq!(script.steps[0].name, "Replace Field Contents");
+    }
+
+    #[test]
+    fn write_accepts_spanish_step_name_with_brackets() {
+        // Authoring a .fmscript using the Spanish step name must resolve to the
+        // English canonical step (and its FM id) just like an English name.
+        let script = super::parse_text_to_script("Establecer variable [$x = 1]").unwrap();
+        assert_eq!(script.steps[0].name, "Set Variable");
+        assert_eq!(script.steps[0].var_name.as_deref(), Some("$x"));
+    }
+
+    #[test]
+    fn write_accepts_spanish_step_name_without_brackets() {
+        let script = super::parse_text_to_script("Fin Si").unwrap();
+        assert_eq!(script.steps[0].name, "End If");
     }
 }

@@ -930,6 +930,29 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                 xml.push_str("/>");
             }
         }
+        Some(StepShape::ReplaceFieldContents) => {
+            // Fixed element order matching FM's output for the calculated-result mode.
+            let no_int = step.goto_no_interact.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<NoInteract state=\"{}\"></NoInteract>", xml_escape(no_int)));
+            xml.push_str("<Restore state=\"True\"></Restore>");
+            xml.push_str("<With value=\"Calculation\"></With>");
+            if let Some(calc) = &step.calculation {
+                xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
+            }
+            // Serial-number options are inert in calc mode but FM always emits them.
+            xml.push_str("<SerialNumbers PerformAutoEnter=\"True\" UpdateEntryOptions=\"False\" UseEntryOptions=\"True\"></SerialNumbers>");
+            if step.field_target.is_some() || step.field_table.is_some() {
+                // table+name only — FM resolves by name on paste (like Set Field).
+                xml.push_str("<Field");
+                if let Some(t) = &step.field_table {
+                    xml.push_str(&format!(" table=\"{}\"", xml_escape(t)));
+                }
+                if let Some(name) = &step.field_target {
+                    xml.push_str(&format!(" name=\"{}\"", xml_escape(name)));
+                }
+                xml.push_str("></Field>");
+            }
+        }
         Some(StepShape::WebViewerJs) => {
             // FM nests text inside <Calculation><![CDATA[...]]></Calculation>
             if let Some(obj) = &step.object_name {

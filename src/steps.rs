@@ -29,6 +29,13 @@ pub enum StepShape {
     WebViewerJs,
     /// <Calculation> + <Field table="..." id="..." name="..."/> (Set Field)
     FieldAndCalc,
+    /// Replace Field Contents (replace-with-calculated-result mode). Text form
+    /// mirrors Set Field — `[Table::Field; calc]` — plus an optional `Dialog: Off`
+    /// flag. On encode it also emits FM's fixed scaffolding for this step:
+    /// <NoInteract> (dialog), <Restore state="True">, <With value="Calculation">,
+    /// <Calculation>, <SerialNumbers> (defaults). `Dialog: Off` ↔ NoInteract=True
+    /// (reuses goto_no_interact). No Field id is emitted — FM resolves by name.
+    ReplaceFieldContents,
     /// <Script id="..." name="..."/> + optional <Calculation> + <CurrentScript value="..."/>
     /// Used by Perform Script and Perform Script on Server.
     PerformScript,

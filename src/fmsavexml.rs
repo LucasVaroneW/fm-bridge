@@ -800,7 +800,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 if !lays.is_empty() {
                                     script_layouts.insert(script_id, lays);
                                 }
-                                let normalized = normalize_calculations(inner_xml);
+                                let normalized = fmsavexml_to_xmss(inner_xml);
                                 let wrapped =
                                     format!("<FMScriptStep>{}</FMScriptStep>", normalized);
                                 if let Ok(parsed) = parse_fmxml_snippet(&wrapped) {
@@ -1362,6 +1362,165 @@ fn extract_xml_attr<'a>(tag: &'a str, attr_name: &str) -> Option<&'a str> {
     let start = tag.find(&needle)? + needle.len();
     let end = tag[start..].find('"')? + start;
     Some(&tag[start..end])
+}
+
+/// Transform a FMSaveAsXML ObjectList payload into the XMSS clipboard format that
+/// `parse_fmxml_snippet` understands. Two phases:
+///   1. Collapse double Calculation wrappers
+///      `<Calculation datatype="N" position="M"><Calculation>…</Calculation></Calculation>`
+///      → `<Calculation>…</Calculation>`
+///   2. Rewrite step parameter wrappers:
+///      - `<Parameter type="Boolean"><Boolean id="X" value="True"/></Parameter>` → `<Set state="True"/>`
+///        (skip Boolean with type="Collapsed", which is UI-state for If/Loop)
+///      - `<Parameter type="List"><List …><ScriptReference id name UUID/></List></Parameter>`
+///        → `<Script id name/>` (Perform Script target)
+///      - `<Parameter type="LayoutReferenceContainer">…<LayoutReference id name UUID/>…</Parameter>`
+///        → `<Layout id name/>` (Go to Layout / New Window destination)
+///      - Drop the `<ParameterValues>`, `<Parameter type="…">`, `<List>`,
+///        `<LayoutReferenceContainer>`, `<Animation/>` wrappers
+///      - Lowercase `<value>` / `<repetition>` (Set Variable wrappers) → `<Value>` / `<Repetition>`
+///
+/// Safe to run on a Script ObjectList: ScriptReference/LayoutReference inside there
+/// can only be step targets (the catalog-level <Script>/<Layout> references live outside).
+fn fmsavexml_to_xmss(xml: &str) -> String {
+    let step1 = normalize_calculations(xml);
+    transform_step_tags(&step1)
+}
+
+fn transform_step_tags(xml: &str) -> String {
+    let bytes = xml.as_bytes();
+    let mut out = String::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            out.push(bytes[i] as char);
+            i += 1;
+            continue;
+        }
+        let tag_start = i;
+        let mut j = i + 1;
+        while j < bytes.len() && bytes[j] != b'>' {
+            j += 1;
+        }
+        let tag_end = if j < bytes.len() { j + 1 } else { j };
+        let tag = &xml[tag_start..tag_end];
+
+        // ── Drop wrappers entirely (both open and close) ──────────────────
+        // Note: </Boolean>, </ScriptReference>, </LayoutReference> end up here too
+        // because we rewrite the corresponding opens to self-closing tags, so the
+        // close tag must be consumed or the XML becomes unbalanced.
+        if tag.starts_with("<ParameterValues")
+            || tag == "</ParameterValues>"
+            || tag.starts_with("<Parameter type=")
+            || tag == "<Parameter>"
+            || tag == "</Parameter>"
+            || tag.starts_with("<List ")
+            || tag == "</List>"
+            || tag.starts_with("<LayoutReferenceContainer")
+            || tag == "</LayoutReferenceContainer>"
+            || tag.starts_with("<Animation ")
+            || tag.starts_with("<Animation/>")
+            || tag == "</Animation>"
+            || tag == "</Boolean>"
+            || tag == "</ScriptReference>"
+            || tag == "</LayoutReference>"
+            // Unwrap <Text> inside <Calculation>: in FMSaveAsXML scripts, <Text> only
+            // ever appears as a direct child of <Calculation> (verified across 24955
+            // occurrences). XMSS clipboard parser captures Calculation text directly
+            // into the `.calculation` field, so dropping the <Text> wrapper makes the
+            // calc text route correctly instead of landing in `.text`.
+            || tag == "<Text>"
+            || tag == "</Text>"
+        {
+            i = tag_end;
+            continue;
+        }
+
+        // ── Boolean: state vs UI-collapsed flag ──────────────────────────
+        // <Boolean type="Collapsed" .../> is If/Loop's "is the block collapsed in the UI"
+        // flag — irrelevant to logic, drop it.
+        // <Boolean id="..." value="True/False"/> (no type="Collapsed") is the actual state
+        // for Set Error Capture, Allow User Abort, etc. Rewrite as <Set state="X"/>.
+        if tag.starts_with("<Boolean") {
+            if tag.contains("type=\"Collapsed\"") {
+                i = tag_end;
+                continue;
+            }
+            if let Some(value) = extract_xml_attr(tag, "value") {
+                out.push_str(&format!("<Set state=\"{}\"/>", value));
+                i = tag_end;
+                continue;
+            }
+            // Unknown shape — fall through and emit raw.
+        }
+
+        // ── ScriptReference → Script (Perform Script target) ─────────────
+        if tag.starts_with("<ScriptReference") {
+            let id = extract_xml_attr(tag, "id").unwrap_or("");
+            let name = extract_xml_attr(tag, "name").unwrap_or("");
+            out.push_str(&format!(
+                "<Script id=\"{}\" name=\"{}\"/>",
+                id, xml_escape_attr(name)
+            ));
+            i = tag_end;
+            continue;
+        }
+
+        // ── LayoutReference → Layout (Go to Layout / New Window) ─────────
+        if tag.starts_with("<LayoutReference") {
+            let id = extract_xml_attr(tag, "id").unwrap_or("");
+            let name = extract_xml_attr(tag, "name").unwrap_or("");
+            out.push_str(&format!(
+                "<Layout id=\"{}\" name=\"{}\"/>",
+                id, xml_escape_attr(name)
+            ));
+            i = tag_end;
+            continue;
+        }
+
+        // ── Lowercase Set Variable wrappers ──────────────────────────────
+        if tag == "<value>" {
+            out.push_str("<Value>");
+            i = tag_end;
+            continue;
+        }
+        if tag == "</value>" {
+            out.push_str("</Value>");
+            i = tag_end;
+            continue;
+        }
+        if tag == "<repetition>" {
+            out.push_str("<Repetition>");
+            i = tag_end;
+            continue;
+        }
+        if tag == "</repetition>" {
+            out.push_str("</Repetition>");
+            i = tag_end;
+            continue;
+        }
+
+        // Default: emit as-is.
+        out.push_str(tag);
+        i = tag_end;
+    }
+
+    out
+}
+
+/// Escape a string for use as an XML attribute value.
+fn xml_escape_attr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '"' => out.push_str("&quot;"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Collapse FMSaveAsXML's double-nested Calculation wrapper to XMSS single-level form.

@@ -162,8 +162,11 @@ fm-bridge inspect "By_00_Desk.xml" output/
 output/
   manifest.json             ← índice global con contadores
   scripts/<id>_<name>.fmscript   ← scripts en formato editable (mismo formato que `read`)
-  layouts/<id>_<name>.json       ← cada layout con TO base, partes, objetos
-                                   (fields, buttons → script, portales)
+  layouts/<id>_<name>.json       ← cada layout con TO base, objetos recursivos
+                                   (fields, buttons → script, portales con su
+                                   contenido anidado), tooltips, ScriptTriggers
+                                   de objetos (OnObjectExit…) y de layout
+                                   (OnLayoutEnter, OnRecordCommit…)
   layouts.json              ← índice de layouts
   tables/<Tabla>.json       ← campos por tabla base (solo tablas locales del archivo)
   table_occurrences.json    ← 800+ TOs resueltas a (archivo externo, tabla)
@@ -173,6 +176,9 @@ output/
   custom_functions.json     ← índice
   analysis/analysis.json    ← grafo de llamadas, scripts no usados,
                               triggers de botones, dependencias por archivo externo
+  relationships.mmd         ← diagrama ER en formato Mermaid (se abre en VSCode
+                              con la extensión "Markdown Preview Mermaid Support"
+                              o en https://mermaid.live)
 ```
 
 Sirve para versionar la base (cada export del XML → diff en git), buscar campos
@@ -205,6 +211,8 @@ slice_dir/
   custom_functions/*.fmcalc
   custom_functions.json
   external_sources.json
+  relationships.mmd         ← diagrama ER del subset (mucho más legible que
+                              el global cuando son pocas tablas)
 ```
 
 ### `fm-bridge json`

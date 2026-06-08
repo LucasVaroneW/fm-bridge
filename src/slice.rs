@@ -30,9 +30,19 @@ struct LayoutObject {
     #[allow(dead_code)]
     object_type: String,
     button_script_id: Option<u32>,
+    #[allow(dead_code)]
     button_script_name: Option<String>,
     field_table_occurrence: Option<String>,
     portal_table_occurrence: Option<String>,
+    #[serde(default)]
+    script_triggers: Vec<TriggerRef>,
+    #[serde(default)]
+    children: Vec<LayoutObject>,
+}
+
+#[derive(Deserialize)]
+struct TriggerRef {
+    script_id: u32,
 }
 
 #[derive(Deserialize)]
@@ -335,6 +345,12 @@ pub fn run_slice(output_dir: &str, slice_dir: &str, layout_names: &[String]) -> 
     write_json(&slice.join("external_sources.json"), &wanted_eds)?;
     write_json(&slice.join("custom_functions.json"), &wanted_cfs)?;
 
+    // Mermaid ER diagram restricted to this slice's TOs — much more readable than
+    // the global one. Opens in any Markdown viewer with Mermaid support.
+    let mermaid = slice_mermaid(&wanted_tos, &wanted_rels);
+    fs::write(slice.join("relationships.mmd"), &mermaid)
+        .map_err(|e| format!("write relationships.mmd: {}", e))?;
+
     // ── Write summary ────────────────────────────────────────────────────────
     let summary = build_summary(
         &wanted_layouts,
@@ -376,6 +392,53 @@ fn write_json<T: serde::Serialize>(path: &PathBuf, value: &T) -> Result<(), Stri
     fs::write(path, &s).map_err(|e| format!("write {}: {}", path.display(), e))
 }
 
+fn slice_mermaid(tos: &[TableOccurrence], rels: &[Relationship]) -> String {
+    let mut out = String::from("erDiagram\n");
+    let mut used: HashSet<String> = HashSet::new();
+    let to_by_name: HashMap<&str, &TableOccurrence> =
+        tos.iter().map(|t| (t.name.as_str(), t)).collect();
+    for r in rels {
+        used.insert(r.left_to.clone());
+        used.insert(r.right_to.clone());
+        let l = mermaid_id(&r.left_to);
+        let rt = mermaid_id(&r.right_to);
+        let label = if r.predicates.is_empty() {
+            "rel".to_string()
+        } else {
+            let p = &r.predicates[0];
+            let extra = if r.predicates.len() > 1 {
+                format!(" +{}", r.predicates.len() - 1)
+            } else {
+                String::new()
+            };
+            format!("{}={}{}", p.left_field, p.right_field, extra)
+        };
+        out.push_str(&format!("    {} ||--o{{ {} : \"{}\"\n", l, rt, label));
+    }
+    for to_name in &used {
+        if let Some(to) = to_by_name.get(to_name.as_str()) {
+            let id = mermaid_id(to_name);
+            let table = if to.data_source.is_empty() {
+                to.base_table.clone()
+            } else {
+                format!("{}__{}", to.data_source, to.base_table)
+            };
+            out.push_str(&format!(
+                "    {} {{\n        string {}\n    }}\n",
+                id,
+                mermaid_id(&table)
+            ));
+        }
+    }
+    out
+}
+
+fn mermaid_id(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect()
+}
+
 fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| match c {
@@ -406,6 +469,13 @@ fn build_summary(
     );
     s.push_str("Includes their triggered scripts (transitively), referenced table occurrences,\n");
     s.push_str("joining relationships, and any custom functions actually used in the scripts.\n\n");
+    s.push_str(
+        "Each `layouts/*.json` carries: base TO, **all layout objects (recursively — portal\n",
+    );
+    s.push_str("contents included)** with field/TO refs, button → script links, tooltips,\n");
+    s.push_str("object-level ScriptTriggers (OnObjectExit/OnObjectModify/…), and layout-level\n");
+    s.push_str("ScriptTriggers (OnLayoutEnter/OnRecordCommit/…). `relationships.mmd` is a\n");
+    s.push_str("Mermaid ER diagram of the relationships included.\n\n");
 
     s.push_str("## Requested layouts\n\n");
     for (l, lf) in requested.iter().zip(layout_files.iter()) {

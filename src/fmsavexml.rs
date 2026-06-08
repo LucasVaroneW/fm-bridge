@@ -38,8 +38,26 @@ pub struct LayoutInfo {
 }
 
 #[derive(Debug, Serialize, Clone, Default)]
+pub struct ScriptTriggerRef {
+    /// "OnObjectEnter", "OnObjectExit", "OnObjectModify", "OnObjectKeystroke",
+    /// "OnLayoutEnter", "OnLayoutExit", "OnRecordCommit", "OnRecordLoad", etc.
+    pub event: String,
+    pub script_id: u32,
+    pub script_name: String,
+    /// Optional script parameter calculation passed to the trigger.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameter: Option<String>,
+    /// Modes in which the trigger is active (browseMode/findMode/previewMode).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub modes: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
 pub struct LayoutObjectRef {
     pub object_type: String,    // "Field", "Button", "Portal", "Text", ...
+    /// Optional object name (FM lets you name objects for Go to Object etc.)
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub object_name: String,
     pub bounds: Option<String>, // "top,left,bottom,right"
     /// For Field objects: the field reference (TO::Field).
     pub field_table_occurrence: Option<String>,
@@ -49,6 +67,17 @@ pub struct LayoutObjectRef {
     pub button_script_name: Option<String>,
     /// For Portal objects: the TO it shows.
     pub portal_table_occurrence: Option<String>,
+    /// Tooltip text (calculation expression; usually a literal string).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tooltip: Option<String>,
+    /// ScriptTriggers attached to this object — "hidden" functionality that
+    /// fires on user interactions with this control.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub script_triggers: Vec<ScriptTriggerRef>,
+    /// For Portal objects: the LayoutObjects displayed inside each portal row
+    /// (fields, buttons, etc.). Top-level objects use `LayoutFull.objects`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<LayoutObjectRef>,
 }
 
 #[derive(Debug, Serialize, Clone, Default)]
@@ -61,9 +90,13 @@ pub struct LayoutFull {
     pub table_occurrence: Option<String>,
     pub table_occurrence_id: Option<u32>,
     pub objects: Vec<LayoutObjectRef>,
-    /// Distinct script ids triggered from this layout's buttons.
+    /// Layout-level ScriptTriggers (OnLayoutEnter, OnRecordCommit, etc.)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub layout_triggers: Vec<ScriptTriggerRef>,
+    /// Distinct script ids triggered from this layout's buttons OR triggers
+    /// (object-level + layout-level), including those inside portals.
     pub triggered_scripts: Vec<u32>,
-    /// Distinct TOs referenced by fields on this layout.
+    /// Distinct TOs referenced by fields/portals on this layout (any nesting).
     pub referenced_tos: Vec<String>,
 }
 
@@ -295,9 +328,26 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
     let mut cur_layout: Option<LayoutFull> = None;
     let mut layout_started_depth: u32 = 0;
     let mut in_layout_partslist = false;
-    let mut cur_object: Option<LayoutObjectRef> = None;
-    let mut object_depth: u32 = 0;
+    // Stack of (object, depth_at_which_it_opened). Portals contain nested
+    // LayoutObjects in their <Portal><ObjectList>; we push on each <LayoutObject>
+    // start and pop on </LayoutObject>. On pop, the object goes into the parent's
+    // children if the stack isn't empty, otherwise into LayoutFull.objects.
+    let mut object_stack: Vec<(LayoutObjectRef, u32)> = Vec::new();
     let mut in_button_action = false;
+    // ScriptTriggers parsing: track whether we're inside a <ScriptTriggers> block
+    // and at what depth, plus the current <ScriptTrigger> being assembled and
+    // whether to attach it to the top of the object stack (object trigger) or
+    // the layout (layout trigger).
+    let mut script_trigger_depth: Option<u32> = None;
+    let mut cur_trigger: Option<ScriptTriggerRef> = None;
+    let mut trigger_target_is_object: bool = false;
+    let mut in_trigger_calc: bool = false;
+    let mut trigger_calc_start: Option<usize> = None;
+    let mut trigger_calc_depth: u32 = 0;
+    // Tooltip: capture inner calc text.
+    let mut in_tooltip: bool = false;
+    let mut tooltip_calc_start: Option<usize> = None;
+    let mut tooltip_calc_depth: u32 = 0;
 
     // Tables / Fields state
     let mut cur_table: Option<TableInfo> = None;
@@ -439,7 +489,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                     }
 
                     Section::LayoutCatalog { depth: sec_depth } => {
-                        let sec_depth = *sec_depth;
+                        let _ = sec_depth;
                         if local == b"Layout" && cur_layout.is_none() {
                             let (id, name) = parse_id_name_attrs(e);
                             let width = parse_u32_attr(e, "width").unwrap_or(0);
@@ -455,39 +505,80 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 });
                                 layout_started_depth = depth;
                             }
-                        } else if let Some(l) = cur_layout.as_mut() {
-                            // Direct child of <Layout> at depth sec_depth+2
-                            if depth == layout_started_depth + 1
-                                && local == b"TableOccurrenceReference"
-                            {
-                                let (id, name) = parse_id_name_attrs(e);
-                                if id != 0 {
-                                    l.table_occurrence_id = Some(id);
-                                }
-                                if !name.is_empty() {
-                                    l.table_occurrence = Some(name);
-                                }
-                            } else if local == b"PartsList" {
-                                in_layout_partslist = true;
-                            } else if in_layout_partslist && local == b"LayoutObject" {
-                                if cur_object.is_none() {
-                                    let mut obj = LayoutObjectRef::default();
-                                    for attr in e.attributes().flatten() {
-                                        if attr.key.as_ref() == b"type" {
+                        } else if cur_layout.is_some() {
+                            // ── LayoutObject open: push to stack ────────────────
+                            if in_layout_partslist && local == b"LayoutObject" {
+                                let mut obj = LayoutObjectRef::default();
+                                for attr in e.attributes().flatten() {
+                                    match attr.key.as_ref() {
+                                        b"type" => {
                                             obj.object_type =
                                                 String::from_utf8_lossy(&attr.value).to_string();
                                         }
+                                        b"name" => {
+                                            obj.object_name =
+                                                String::from_utf8_lossy(&attr.value).to_string();
+                                        }
+                                        _ => {}
                                     }
-                                    cur_object = Some(obj);
-                                    object_depth = depth;
                                 }
-                            } else if cur_object.is_some() {
+                                object_stack.push((obj, depth));
+                            } else if local == b"PartsList" {
+                                in_layout_partslist = true;
+                            } else if local == b"TableOccurrenceReference"
+                                && object_stack.is_empty()
+                                && depth == layout_started_depth + 1
+                            {
+                                // Layout's base TO (direct child of <Layout>).
+                                let (id, name) = parse_id_name_attrs(e);
+                                if let Some(l) = cur_layout.as_mut() {
+                                    if id != 0 { l.table_occurrence_id = Some(id); }
+                                    if !name.is_empty() { l.table_occurrence = Some(name); }
+                                }
+                            } else if local == b"ScriptTriggers" {
+                                // Distinguish layout-level vs object-level: if there's
+                                // a current object on the stack, it's an object trigger.
+                                script_trigger_depth = Some(depth);
+                                trigger_target_is_object = !object_stack.is_empty();
+                            } else if script_trigger_depth.is_some() && local == b"ScriptTrigger" {
+                                let mut event = String::new();
+                                let mut modes: Vec<String> = Vec::new();
+                                for attr in e.attributes().flatten() {
+                                    match attr.key.as_ref() {
+                                        b"action" => {
+                                            event = String::from_utf8_lossy(&attr.value).to_string();
+                                        }
+                                        b"browseMode" if &attr.value[..] == b"True" => {
+                                            modes.push("browseMode".to_string());
+                                        }
+                                        b"findMode" if &attr.value[..] == b"True" => {
+                                            modes.push("findMode".to_string());
+                                        }
+                                        b"previewMode" if &attr.value[..] == b"True" => {
+                                            modes.push("previewMode".to_string());
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                cur_trigger = Some(ScriptTriggerRef {
+                                    event,
+                                    modes,
+                                    ..Default::default()
+                                });
+                            } else if cur_trigger.is_some() && local == b"ScriptReference" {
+                                let (id, name) = parse_id_name_attrs(e);
+                                if let Some(t) = cur_trigger.as_mut() {
+                                    t.script_id = id;
+                                    t.script_name = name;
+                                }
+                            } else if cur_trigger.is_some() && local == b"Calculation" {
+                                // Trigger parameter calc.
+                                in_trigger_calc = true;
+                                trigger_calc_start = Some(reader.buffer_position() as usize);
+                                trigger_calc_depth = depth;
+                            } else if let Some((o, _)) = object_stack.last_mut() {
+                                // ── Inside an object: fields, bounds, tooltip, etc. ─
                                 if local == b"Bounds" {
-                                    let mut bounds = String::new();
-                                    let mut t = "";
-                                    let mut le = "";
-                                    let mut b = "";
-                                    let mut r = "";
                                     let mut t_s = String::new();
                                     let mut l_s = String::new();
                                     let mut b_s = String::new();
@@ -495,75 +586,55 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                     for attr in e.attributes().flatten() {
                                         let v = String::from_utf8_lossy(&attr.value).to_string();
                                         match attr.key.as_ref() {
-                                            b"top" => {
-                                                t_s = v;
-                                                t = &t_s;
-                                            }
-                                            b"left" => {
-                                                l_s = v;
-                                                le = &l_s;
-                                            }
-                                            b"bottom" => {
-                                                b_s = v;
-                                                b = &b_s;
-                                            }
-                                            b"right" => {
-                                                r_s = v;
-                                                r = &r_s;
-                                            }
+                                            b"top" => t_s = v,
+                                            b"left" => l_s = v,
+                                            b"bottom" => b_s = v,
+                                            b"right" => r_s = v,
                                             _ => {}
                                         }
                                     }
-                                    bounds.push_str(t);
-                                    bounds.push(',');
-                                    bounds.push_str(le);
-                                    bounds.push(',');
-                                    bounds.push_str(b);
-                                    bounds.push(',');
-                                    bounds.push_str(r);
-                                    if let Some(o) = cur_object.as_mut() {
-                                        o.bounds = Some(bounds);
-                                    }
+                                    o.bounds = Some(format!("{},{},{},{}", t_s, l_s, b_s, r_s));
                                 } else if local == b"FieldReference" {
-                                    // Field reference inside a Field-type object.
                                     let (_, name) = parse_id_name_attrs(e);
-                                    if let Some(o) = cur_object.as_mut() {
-                                        if o.field_name.is_none() {
-                                            o.field_name = Some(name);
-                                        }
+                                    if o.field_name.is_none() {
+                                        o.field_name = Some(name);
                                     }
                                 } else if local == b"TableOccurrenceReference" {
-                                    // TO reference inside a Field/Portal object.
                                     let (_, name) = parse_id_name_attrs(e);
-                                    if let Some(o) = cur_object.as_mut() {
-                                        if o.object_type == "Portal"
-                                            && o.portal_table_occurrence.is_none()
-                                        {
-                                            o.portal_table_occurrence = Some(name);
-                                        } else if o.field_table_occurrence.is_none() {
-                                            o.field_table_occurrence = Some(name);
-                                        }
+                                    if o.object_type == "Portal"
+                                        && o.portal_table_occurrence.is_none()
+                                    {
+                                        o.portal_table_occurrence = Some(name);
+                                    } else if o.field_table_occurrence.is_none() {
+                                        o.field_table_occurrence = Some(name);
                                     }
                                 } else if local == b"action" {
                                     in_button_action = true;
                                 } else if in_button_action && local == b"ScriptReference" {
                                     let (id, name) = parse_id_name_attrs(e);
-                                    if let Some(o) = cur_object.as_mut() {
-                                        o.button_script_id = Some(id);
-                                        o.button_script_name = Some(name);
-                                    }
+                                    o.button_script_id = Some(id);
+                                    o.button_script_name = Some(name);
+                                } else if local == b"Tooltip" {
+                                    in_tooltip = true;
+                                } else if in_tooltip && local == b"Calculation" {
+                                    tooltip_calc_start = Some(reader.buffer_position() as usize);
+                                    tooltip_calc_depth = depth;
                                 }
                             }
                             // Hidden flag from Options on the Layout itself.
-                            if local == b"Options" && depth == layout_started_depth + 1 {
+                            if local == b"Options"
+                                && object_stack.is_empty()
+                                && depth == layout_started_depth + 1
+                            {
                                 for attr in e.attributes().flatten() {
                                     if attr.key.as_ref() == b"hidden" {
-                                        l.hidden = &attr.value[..] == b"True";
+                                        if let Some(l) = cur_layout.as_mut() {
+                                            l.hidden = &attr.value[..] == b"True";
+                                        }
                                     }
                                 }
                             }
                         }
-                        let _ = sec_depth;
                     }
 
                     Section::BaseTableCatalog { .. } => {
@@ -897,26 +968,64 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             in_layout_partslist = false;
                         } else if local == b"action" {
                             in_button_action = false;
-                        } else if local == b"LayoutObject" && depth == object_depth {
-                            if let Some(o) = cur_object.take() {
-                                if let Some(l) = cur_layout.as_mut() {
+                        } else if local == b"Tooltip" {
+                            in_tooltip = false;
+                        } else if local == b"Calculation" && in_tooltip
+                            && depth == tooltip_calc_depth
+                        {
+                            if let (Some(start), Some((o, _))) =
+                                (tooltip_calc_start.take(), object_stack.last_mut())
+                            {
+                                let inner = &xml_str[start..pos_before];
+                                o.tooltip = Some(extract_cdata_or_text(inner));
+                            }
+                        } else if local == b"Calculation" && in_trigger_calc
+                            && depth == trigger_calc_depth
+                        {
+                            if let (Some(start), Some(t)) =
+                                (trigger_calc_start.take(), cur_trigger.as_mut())
+                            {
+                                let inner = &xml_str[start..pos_before];
+                                let body = extract_cdata_or_text(inner);
+                                if !body.is_empty() {
+                                    t.parameter = Some(body);
+                                }
+                            }
+                            in_trigger_calc = false;
+                        } else if local == b"ScriptTrigger" {
+                            if let Some(t) = cur_trigger.take() {
+                                if trigger_target_is_object {
+                                    if let Some((o, _)) = object_stack.last_mut() {
+                                        o.script_triggers.push(t);
+                                    }
+                                } else if let Some(l) = cur_layout.as_mut() {
+                                    l.layout_triggers.push(t);
+                                }
+                            }
+                        } else if local == b"ScriptTriggers" {
+                            if Some(depth) == script_trigger_depth {
+                                script_trigger_depth = None;
+                            }
+                        } else if local == b"LayoutObject" {
+                            // Pop the matching object from the stack. The depth check
+                            // ensures we only pop when we're closing the same object
+                            // we opened (defensive against unexpected XML).
+                            if let Some((o, _open_depth)) = object_stack.pop() {
+                                if let Some((parent, _)) = object_stack.last_mut() {
+                                    parent.children.push(o);
+                                } else if let Some(l) = cur_layout.as_mut() {
                                     l.objects.push(o);
                                 }
                             }
                         } else if local == b"Layout" && depth == layout_started_depth {
                             if let Some(mut l) = cur_layout.take() {
-                                // Aggregate triggered scripts & referenced TOs.
+                                // Aggregate scripts & TOs from the whole tree.
                                 let mut triggered: HashSet<u32> = HashSet::new();
                                 let mut tos: HashSet<String> = HashSet::new();
-                                for o in &l.objects {
-                                    if let Some(sid) = o.button_script_id {
-                                        triggered.insert(sid);
-                                    }
-                                    if let Some(ref t) = o.field_table_occurrence {
-                                        tos.insert(t.clone());
-                                    }
-                                    if let Some(ref t) = o.portal_table_occurrence {
-                                        tos.insert(t.clone());
+                                collect_aggregates(&l.objects, &mut triggered, &mut tos);
+                                for t in &l.layout_triggers {
+                                    if t.script_id != 0 {
+                                        triggered.insert(t.script_id);
                                     }
                                 }
                                 l.triggered_scripts = triggered.into_iter().collect();
@@ -1236,6 +1345,12 @@ pub fn write_inspection(db: &ParsedDatabase, output_dir: &str) -> Result<Inspect
     std::fs::write(out.join("relationships.json"), &rels_json)
         .map_err(|e| format!("write relationships.json: {}", e))?;
 
+    // Mermaid ER diagram — opens in any Markdown viewer with Mermaid support
+    // (VSCode + Markdown Preview Enhanced, GitHub, mermaid.live).
+    let mermaid = build_mermaid_diagram(&db.relationships, &db.table_occurrences);
+    std::fs::write(out.join("relationships.mmd"), &mermaid)
+        .map_err(|e| format!("write relationships.mmd: {}", e))?;
+
     // ── Custom Functions: one .fmcalc per function + index ──────────────────
     let cfs_dir = out.join("custom_functions");
     std::fs::create_dir_all(&cfs_dir).map_err(|e| format!("mkdir custom_functions: {}", e))?;
@@ -1342,21 +1457,22 @@ fn build_analysis(db: &ParsedDatabase) -> AnalysisReport {
         }
     }
 
-    // Scripts triggered from layout buttons also count as "referenced".
+    // Scripts triggered from layouts (button actions + object ScriptTriggers +
+    // layout-level ScriptTriggers + anything inside portals) count as referenced.
+    // layout.triggered_scripts is the precomputed aggregate from collect_aggregates.
     let mut scripts_triggered_by_layouts: Vec<LayoutScriptTrigger> = Vec::new();
     for layout in &db.layouts {
-        for o in &layout.objects {
-            if let (Some(sid), Some(sname)) = (o.button_script_id, &o.button_script_name) {
-                if all_ids.contains(&sid) {
-                    referenced_ids.insert(sid);
-                }
-                scripts_triggered_by_layouts.push(LayoutScriptTrigger {
-                    layout_id: layout.id,
-                    layout_name: layout.name.clone(),
-                    script_id: sid,
-                    script_name: sname.clone(),
-                });
+        for sid in &layout.triggered_scripts {
+            if all_ids.contains(sid) {
+                referenced_ids.insert(*sid);
             }
+            let name = id_to_name.get(sid).copied().unwrap_or("").to_string();
+            scripts_triggered_by_layouts.push(LayoutScriptTrigger {
+                layout_id: layout.id,
+                layout_name: layout.name.clone(),
+                script_id: *sid,
+                script_name: name,
+            });
         }
     }
 
@@ -1466,6 +1582,89 @@ fn parse_bool_attr(e: &quick_xml::events::BytesStart, name: &str) -> bool {
         }
     }
     false
+}
+
+/// Walk a layout's object tree (top-level objects + nested portal children)
+/// and aggregate every script id triggered and every TO referenced — by any
+/// kind of attachment: button action, object ScriptTrigger, field, portal.
+/// Build a Mermaid `erDiagram` document from relationships. Each TO becomes
+/// a node, each relationship an edge labelled with the join predicates.
+/// Sanitizes names because Mermaid IDs can't have special chars.
+fn build_mermaid_diagram(rels: &[Relationship], tos: &[TableOccurrence]) -> String {
+    let mut out = String::from("erDiagram\n");
+    // Track which TOs participate so we can show their base table as a comment.
+    let mut used: HashSet<String> = HashSet::new();
+    for r in rels {
+        used.insert(r.left_to.clone());
+        used.insert(r.right_to.clone());
+    }
+    let to_by_name: HashMap<&str, &TableOccurrence> =
+        tos.iter().map(|t| (t.name.as_str(), t)).collect();
+    for r in rels {
+        let l = mermaid_id(&r.left_to);
+        let rt = mermaid_id(&r.right_to);
+        let label = if r.predicates.is_empty() {
+            "rel".to_string()
+        } else {
+            let p = &r.predicates[0];
+            let extra = if r.predicates.len() > 1 {
+                format!(" +{}", r.predicates.len() - 1)
+            } else {
+                String::new()
+            };
+            mermaid_label(&format!("{}={}{}", p.left_field, p.right_field, extra))
+        };
+        out.push_str(&format!("    {} ||--o{{ {} : \"{}\"\n", l, rt, label));
+    }
+    // Node decorations: show base table name for each TO used.
+    for to_name in &used {
+        if let Some(to) = to_by_name.get(to_name.as_str()) {
+            let id = mermaid_id(to_name);
+            let table = if to.data_source.is_empty() {
+                to.base_table.clone()
+            } else {
+                format!("{}__{}", to.data_source, to.base_table)
+            };
+            out.push_str(&format!("    {} {{\n        string {}\n    }}\n", id, mermaid_id(&table)));
+        }
+    }
+    out
+}
+
+fn mermaid_id(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect()
+}
+
+fn mermaid_label(s: &str) -> String {
+    s.replace('"', "'").replace('\n', " ")
+}
+
+fn collect_aggregates(
+    objects: &[LayoutObjectRef],
+    scripts: &mut HashSet<u32>,
+    tos: &mut HashSet<String>,
+) {
+    for o in objects {
+        if let Some(sid) = o.button_script_id {
+            scripts.insert(sid);
+        }
+        for t in &o.script_triggers {
+            if t.script_id != 0 {
+                scripts.insert(t.script_id);
+            }
+        }
+        if let Some(ref t) = o.field_table_occurrence {
+            tos.insert(t.clone());
+        }
+        if let Some(ref t) = o.portal_table_occurrence {
+            tos.insert(t.clone());
+        }
+        if !o.children.is_empty() {
+            collect_aggregates(&o.children, scripts, tos);
+        }
+    }
 }
 
 fn sanitize_filename(name: &str) -> String {

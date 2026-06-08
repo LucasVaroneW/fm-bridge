@@ -601,10 +601,23 @@ to Z that triggers a new script"). Read these files in order:
 
 2. **`layouts/*.json`** — the LayoutFull objects. Key fields per layout:
    - `table_occurrence` — the base TO the layout shows
-   - `objects[]` — each Field/Button/Portal/Edit Box with `field_table_occurrence`
-     + `field_name`, or `button_script_id` + `button_script_name`
-   - `triggered_scripts[]` — script ids any button on this layout fires
-   - `referenced_tos[]` — distinct TOs whose fields appear on this layout
+   - `objects[]` — each Field/Button/Portal/Edit Box. For each:
+     - `field_table_occurrence` + `field_name` if it shows a field
+     - `button_script_id` + `button_script_name` if it's a button
+     - `portal_table_occurrence` if it's a portal — and `children[]` with the
+       fields/buttons displayed inside each portal row (recursive — read these
+       too, they are not surfaced in the top-level list)
+     - `tooltip` — usually a quoted string the user sees on hover
+     - `script_triggers[]` — **HIDDEN automation**: events like
+       `OnObjectExit`/`OnObjectModify` that fire scripts when the user touches
+       this control. When migrating, you MUST account for these or behavior
+       will silently break.
+   - `layout_triggers[]` — layout-level events (`OnLayoutEnter`,
+     `OnRecordCommit`, `OnModeEnter`…) that fire automatically. Same
+     "must-account-for" rule.
+   - `triggered_scripts[]` — aggregate (all scripts triggered anywhere on this
+     layout — buttons + object triggers + layout triggers + inside portals)
+   - `referenced_tos[]` — distinct TOs whose fields appear anywhere (incl. portals)
 
 3. **`scripts/*.fmscript`** — script bodies in the same plain-text format as
    `fm-bridge read`. Every script transitively reachable from the layout
@@ -646,9 +659,13 @@ to Z that triggers a new script"). Read these files in order:
 
 - Field definitions of tables in external `.fmp12` files (only TO + table names
   are resolved; the schema of those tables lives in the *other* XML exports).
+  If exact field types/names matter, ask the user to run
+  `fm-bridge inspect <external.xml>` on those sources.
 - Raw HTML / JavaScript of existing `<WebViewer>` objects.
-- CSS / fonts / colors of layout objects (only bounds and type are captured).
+- CSS / fonts / colors of layout objects (only bounds and type are captured —
+  intentional: visual fidelity is not the goal, functional completeness is).
 - Value Lists (FM's enum dropdowns).
+- Field-level validations / auto-enter rules for *external* tables.
 
 If any of these are required for the task, say so explicitly instead of
 guessing.

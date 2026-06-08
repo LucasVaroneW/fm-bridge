@@ -3,6 +3,7 @@
 // No UI, no HTTP, no async. Procedural and minimal.
 
 mod clipboard;
+mod fmsavexml;
 mod normalization;
 #[cfg(windows)]
 mod ole_clipboard;
@@ -130,7 +131,8 @@ fn run_cli_mode() -> Result<(), String> {
             }
             Ok(())
         }
-        _ => Err(format!("Unknown command: {}. Use: read, write, json, debug, test, passthrough, dump-ids", args[0]))
+        "inspect" => run_inspect_cli(&args[1..]),
+        _ => Err(format!("Unknown command: {}. Use: read, write, json, debug, test, passthrough, dump-ids, inspect", args[0]))
     }
 }
 
@@ -318,6 +320,37 @@ fn run_test_cli() -> Result<(), String> {
         println!("\n*** ROUNDTRIP FAILED - Lines differ ***");
     }
 
+    Ok(())
+}
+
+fn run_inspect_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("Usage: fm-bridge inspect <FMSaveAsXML.xml> [output-dir]".to_string());
+    }
+    let xml_path = &args[0];
+    let output_dir = args.get(1).map(|s| s.as_str()).unwrap_or("fm-inspect-output");
+
+    println!("Parsing {}...", xml_path);
+    let db = fmsavexml::parse(xml_path)?;
+
+    println!(
+        "  Scripts: {}  |  Layouts: {}  |  Tables: {}",
+        db.scripts.iter().filter(|s| !s.is_folder && !s.is_separator).count(),
+        db.layouts.len(),
+        db.tables.len(),
+    );
+
+    println!("Writing to {}...", output_dir);
+    let stats = fmsavexml::write_inspection(&db, output_dir)?;
+
+    println!(
+        "Done.\n  Scripts exported : {}\n  Layouts indexed  : {}\n  Tables indexed   : {}\n  Fields indexed   : {}\n  Unreferenced scripts (analysis): {}",
+        stats.scripts_written,
+        stats.layouts,
+        stats.tables,
+        stats.fields,
+        stats.unreferenced_scripts,
+    );
     Ok(())
 }
 

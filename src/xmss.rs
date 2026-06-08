@@ -287,6 +287,16 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             parser.push_target(TextTarget::Text);
                         }
                     }
+                    b"Comment" => {
+                        // FMSaveAsXML stores comment text as a value attribute:
+                        // <Comment value="the text">. XMSS uses <Text> elements instead,
+                        // so this element only appears in the FMSaveAsXML path.
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"value" {
+                                parser.text = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
                     b"LayoutDestination" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"value" {
@@ -331,7 +341,22 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                         parser.in_find_criteria = true;
                         parser.current_find_criterion = Some(FindCriterion::default());
                     }
-                    b"Name" => { parser.push_target(TextTarget::VarName); }
+                    b"Name" => {
+                        // XMSS: variable name is text content (<Name>$var</Name>).
+                        // FMSaveAsXML: stored as value attribute (<Name value="$var">).
+                        // Try attribute first; fall back to text-content capture.
+                        let mut attr_val = String::new();
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"value" {
+                                attr_val = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                        if !attr_val.is_empty() {
+                            parser.var_name = attr_val;
+                        } else {
+                            parser.push_target(TextTarget::VarName);
+                        }
+                    }
                     b"ObjectName" => { parser.push_target(TextTarget::ObjectName); }
                     b"FunctionName" => { parser.push_target(TextTarget::FunctionName); }
                     b"P" => {
@@ -473,6 +498,15 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     }
                     b"Title" => { parser.push_target(TextTarget::DialogTitle); }
                     b"Message" => { parser.push_target(TextTarget::DialogMessage); }
+                    // Send Mail recipient/subject fields. Reuse existing capture targets so
+                    // no new struct fields are needed: To→var_name, CC→object_name,
+                    // BCC→function_name, Subject→dialog_title. Each is a wrapper around a
+                    // <Calculation>, so the inner calc text routes to the same target.
+                    // Guarded on Send Mail because To/CC/BCC are generic-enough names.
+                    b"To" if steps::translate_to_en(&parser.name) == "Send Mail" => { parser.push_target(TextTarget::VarName); }
+                    b"CC" if steps::translate_to_en(&parser.name) == "Send Mail" => { parser.push_target(TextTarget::ObjectName); }
+                    b"BCC" if steps::translate_to_en(&parser.name) == "Send Mail" => { parser.push_target(TextTarget::FunctionName); }
+                    b"Subject" => { parser.push_target(TextTarget::DialogTitle); }
                     b"Button" => {
                         parser.current_button.clear();
                         parser.push_target(TextTarget::DialogButton);
@@ -541,6 +575,12 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"Set" => { parser.pop_target(TextTarget::SetState); }
                     b"Title" => { parser.pop_target(TextTarget::DialogTitle); }
                     b"Message" => { parser.pop_target(TextTarget::DialogMessage); }
+                    // Send Mail field closers (see start handlers). pop_target is a no-op
+                    // unless the matching target is on top, so these are safe for any step.
+                    b"To" => { parser.pop_target(TextTarget::VarName); }
+                    b"CC" => { parser.pop_target(TextTarget::ObjectName); }
+                    b"BCC" => { parser.pop_target(TextTarget::FunctionName); }
+                    b"Subject" => { parser.pop_target(TextTarget::DialogTitle); }
                     b"Button" => {
                         parser.pop_target(TextTarget::DialogButton);
                         if !parser.current_button.is_empty() {
@@ -858,6 +898,34 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                 }
                 xml.push_str("</Buttons>");
             }
+        }
+        Some(StepShape::SendMail) => {
+            // Field reuse: To→var_name, CC→object_name, BCC→function_name,
+            // Subject→dialog_title, Message→dialog_message. Each value is a FM calc.
+            // NoInteract=True: scripted send performs without the mail dialog.
+            xml.push_str("<NoInteract state=\"True\"></NoInteract>");
+            if let Some(to) = &step.var_name {
+                xml.push_str(&format!("<To UseFoundSet=\"False\"><Calculation>{}</Calculation></To>", cdata(to)));
+            }
+            if let Some(cc) = &step.object_name {
+                xml.push_str(&format!("<CC><Calculation>{}</Calculation></CC>", cdata(cc)));
+            }
+            if let Some(bcc) = &step.function_name {
+                xml.push_str(&format!("<BCC><Calculation>{}</Calculation></BCC>", cdata(bcc)));
+            }
+            if let Some(subject) = &step.dialog_title {
+                xml.push_str(&format!("<Subject><Calculation>{}</Calculation></Subject>", cdata(subject)));
+            }
+            if let Some(msg) = &step.dialog_message {
+                xml.push_str(&format!("<Message><Calculation>{}</Calculation></Message>", cdata(msg)));
+            }
+            // Send method: deliver through the user's email client (no SMTP/OAuth).
+            xml.push_str("<MultipleEmails state=\"False\"></MultipleEmails>");
+            xml.push_str("<SendViaSMTP state=\"False\"></SendViaSMTP>");
+            xml.push_str("<SendViaOAuthAuthentication state=\"False\"></SendViaOAuthAuthentication>");
+            xml.push_str("<SMTPEncryptionType type=\"SMTPEncryptionNone\"></SMTPEncryptionType>");
+            xml.push_str("<SMTPAuthenticationType type=\"SMTPAuthenticationNone\"></SMTPAuthenticationType>");
+            xml.push_str("<OAuthProvider type=\"OAuthProviderGoogle\"></OAuthProvider>");
         }
         Some(StepShape::FieldByName) => {
             if let Some(result) = &step.field_result {

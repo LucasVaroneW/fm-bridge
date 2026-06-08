@@ -145,6 +145,22 @@ Show Custom Dialog [Title: "Warning"; Message: "Values missing."; Buttons: "OK"]
 Show Custom Dialog [Title: "Confirm"; Message: "Proceed?"; Buttons: "Yes", "No"]
 ```
 
+### Send Mail
+
+```
+Send Mail [To: <calc>; CC: <calc>; BCC: <calc>; Subject: <calc>; Message: <calc>]
+```
+
+* Fields are separated by top-level `;` markers (`To:`, `CC:`, `BCC:`, `Subject:`, `Message:`). A `;` *inside* a calc (strings like `"a;b"`, or `Case ( x ; y ; z )`) does NOT split — only a `;` right before the next field keyword does.
+* Every value is a FileMaker calc expression, so literal text needs `"..."`. Use `¶` for line breaks inside the message body.
+* All fields are optional and order-independent; omit the ones you don't need. A bracket with no keyword (e.g. `Send Mail ["a@b.com"]`) is read as `To:`.
+* On encode the step is sent through the user's email client (no SMTP/OAuth) and performed without the mail dialog.
+* Do NOT use the old `["to""subject"]` two-quote form — it glues To+Subject together and drops the body.
+
+```
+Send Mail [To: "soporte@empresa.com"; Subject: "Aviso " & Get ( CurrentDate ); Message: "Revisar el pedido " & $ref & ".¶¶Gracias."]
+```
+
 ### Set Field
 
 ```
@@ -505,6 +521,7 @@ Import Records [<ImportSource>...<TargetFields>...</TargetFields></ImportSource>
 | Allow User Abort | `Allow User Abort [True\|False]` |
 | Exit / Halt Script | `Exit Script` / `Halt Script` |
 | Show Custom Dialog | `Show Custom Dialog [Title: ..; Message: ..; Buttons: a, b]` |
+| Send Mail | `Send Mail [To: ..; CC: ..; BCC: ..; Subject: ..; Message: ..]` |
 | Set Field | `Set Field [Table::Field; expr]` |
 | Go to Record | `Go to Record/Request/Page [First\|Last\|Next\|Previous]` |
 | Go to Layout | `Go to Layout ["Name" #id]` or `[original]` (id REQUIRED to link) |
@@ -567,3 +584,71 @@ Set Field [Contacts::FavoriteOrder; Get ( FoundCount ) + 1]
 Commit Records/Requests
 Go to Layout [original]
 ```
+
+---
+
+## Working with `fm-bridge slice` output
+
+If the user gives you a `slice/` directory (output of `fm-bridge slice ...`),
+it contains a focused subset of a FileMaker database built around 1-N layouts.
+This is the canonical way to feed the AI enough context for non-trivial work
+("rewrite layout X as a web viewer", "explain how Y flow works", "add a button
+to Z that triggers a new script"). Read these files in order:
+
+1. **`slice_summary.md`** — narrative overview. Read this first. It lists the
+   requested layouts, their base TO, how many scripts are in the closure,
+   the full TO + relationship + custom function inventory.
+
+2. **`layouts/*.json`** — the LayoutFull objects. Key fields per layout:
+   - `table_occurrence` — the base TO the layout shows
+   - `objects[]` — each Field/Button/Portal/Edit Box with `field_table_occurrence`
+     + `field_name`, or `button_script_id` + `button_script_name`
+   - `triggered_scripts[]` — script ids any button on this layout fires
+   - `referenced_tos[]` — distinct TOs whose fields appear on this layout
+
+3. **`scripts/*.fmscript`** — script bodies in the same plain-text format as
+   `fm-bridge read`. Every script transitively reachable from the layout
+   buttons is here. Read these to understand the actual logic.
+
+4. **`table_occurrences.json`** — every TO referenced anywhere in the slice,
+   resolved to `(data_source, base_table)`. Use this to know which external
+   `.fmp12` file holds each table's real data.
+
+5. **`relationships.json`** — joins. Each predicate is
+   `left_to.left_field <op> right_to.right_field`. Use for SQL queries or
+   to understand portal data.
+
+6. **`custom_functions/*.fmcalc`** — bodies of custom functions actually
+   invoked by the scripts. Use these when a script calls something like
+   `tienePermiso(...)` or `AUDITLOG(...)`.
+
+7. **`external_sources.json`** — list of `By_XX_*.fmp12` files the slice
+   depends on. Tables in those files are NOT in the slice; you only have
+   their *names* via `table_occurrences.json`. If a task needs exact field
+   names for an external table, tell the user to run
+   `fm-bridge inspect <other.xml> <other-output>` on that source.
+
+### Patterns to look for
+
+- **Web viewer ↔ FM round-trip:** FM scripts that receive
+  `$PG = Get(ScriptParameter)` (a JSON), extract `$callBackFunction` from it,
+  do `ExecuteSQL(...)`, build a response JSON, and end with
+  `Perform JavaScript in Web Viewer [Object: "<name>"; Function: $callBackFunction; ...]`.
+  When the user asks to extend a web viewer, follow this exact shape for any
+  new scripts you author.
+- **Permission gates:** calls to `tienePermiso("PriSegIte_XX")` — when present,
+  preserve the same check in your version.
+- **Layout navigation in scripts:** `Go to Layout ["<name>" #<id>]` — the id
+  is mandatory, see the layout rules in the section above. If you're authoring
+  a brand-new layout, emit without id and add a `# TODO:` comment.
+
+### What the slice does NOT contain
+
+- Field definitions of tables in external `.fmp12` files (only TO + table names
+  are resolved; the schema of those tables lives in the *other* XML exports).
+- Raw HTML / JavaScript of existing `<WebViewer>` objects.
+- CSS / fonts / colors of layout objects (only bounds and type are captured).
+- Value Lists (FM's enum dropdowns).
+
+If any of these are required for the task, say so explicitly instead of
+guessing.

@@ -146,6 +146,67 @@ Lee el clipboard y lo escribe de vuelta sin modificarlo. Sirve para confirmar
 que el problema de transporte (clipboard) está OK y que cualquier bug está en
 nuestro parser/encoder.
 
+### `fm-bridge inspect <archivo.xml> <output-dir>`
+
+Analiza un `FMSaveAsXML` (export completo de la base hecho con *File → Save a
+Copy As → XML*) y genera una carpeta navegable con todo el contexto del
+proyecto. Para archivos grandes (100MB+) trabaja en streaming.
+
+```
+fm-bridge inspect "By_00_Desk.xml" output/
+```
+
+**Salida (`output/`):**
+
+```
+output/
+  manifest.json             ← índice global con contadores
+  scripts/<id>_<name>.fmscript   ← scripts en formato editable (mismo formato que `read`)
+  layouts/<id>_<name>.json       ← cada layout con TO base, partes, objetos
+                                   (fields, buttons → script, portales)
+  layouts.json              ← índice de layouts
+  tables/<Tabla>.json       ← campos por tabla base (solo tablas locales del archivo)
+  table_occurrences.json    ← 800+ TOs resueltas a (archivo externo, tabla)
+  relationships.json        ← relaciones con joins completos
+  external_sources.json     ← archivos externos referenciados (`By_xx.fmp12`)
+  custom_functions/<id>_<name>.fmcalc   ← cuerpo de cada custom function
+  custom_functions.json     ← índice
+  analysis/analysis.json    ← grafo de llamadas, scripts no usados,
+                              triggers de botones, dependencias por archivo externo
+```
+
+Sirve para versionar la base (cada export del XML → diff en git), buscar campos
+o scripts huérfanos, y como fuente para `fm-bridge slice`.
+
+### `fm-bridge slice <output-dir> <slice-dir> <layout-name> [layout-name...]`
+
+A partir de un `inspect` ya hecho, arma una **carpeta enfocada** con sólo lo que
+toca a los layouts pedidos. Pensado para darle a una IA el contexto justo (~30
+archivos, ~500 KB) en vez del export entero (~150 MB).
+
+```
+fm-bridge slice output/ slice_sto/ Sto_Dat_Gen Sto_Dat_Lis
+```
+
+Resuelve el cierre transitivo: scripts disparados por los botones de esos
+layouts → scripts que esos scripts llaman → TOs referenciadas en los layouts y
+en los cuerpos de los scripts → relaciones que tocan esas TOs → custom
+functions efectivamente usadas → archivos externos involucrados.
+
+**Salida (`slice-dir/`):**
+
+```
+slice_dir/
+  slice_summary.md          ← contexto en prosa para la IA (layouts, TOs, joins)
+  layouts/<id>_<name>.json
+  scripts/<id>_<name>.fmscript
+  table_occurrences.json    ← subset
+  relationships.json        ← subset
+  custom_functions/*.fmcalc
+  custom_functions.json
+  external_sources.json
+```
+
 ### `fm-bridge json`
 
 Lee un JSON por stdin y responde un JSON por stdout. Es el modo que va a usar

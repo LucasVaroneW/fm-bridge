@@ -83,6 +83,18 @@ pub struct TableInfo {
     pub fields: Vec<FieldInfo>,
 }
 
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct CustomFunction {
+    pub id: u32,
+    pub name: String,
+    pub access: String,
+    /// Signature shown in the FM UI, e.g. "AUDITLOG ( _action ; _param1 ; _param2 ; _param3 )"
+    pub display: String,
+    pub parameters: Vec<String>,
+    /// Body of the function (FM calculation). Filled from CalcsForCustomFunctions.
+    pub calculation: String,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct ExternalDataSource {
     pub id: u32,
@@ -134,6 +146,7 @@ pub struct Manifest {
     pub table_occurrence_count: usize,
     pub relationship_count: usize,
     pub external_source_count: usize,
+    pub custom_function_count: usize,
     pub scripts: Vec<ScriptSummary>,
     pub layouts: Vec<LayoutInfo>,
 }
@@ -197,6 +210,7 @@ pub struct ParsedDatabase {
     pub external_sources: Vec<ExternalDataSource>,
     pub table_occurrences: Vec<TableOccurrence>,
     pub relationships: Vec<Relationship>,
+    pub custom_functions: Vec<CustomFunction>,
     /// caller_id → Vec<callee_id> (from script body).
     pub script_calls: HashMap<u32, Vec<u32>>,
     /// caller_id → Vec<layout_name> (from Go to Layout / New Window).
@@ -216,6 +230,8 @@ enum Section {
     ExternalDataSourceCatalog { depth: u32 },
     TableOccurrenceCatalog { depth: u32 },
     RelationshipCatalog { depth: u32 },
+    CustomFunctionsCatalog { depth: u32 },
+    CalcsForCustomFunctions { depth: u32 },
 }
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
@@ -258,6 +274,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
     let mut external_sources: Vec<ExternalDataSource> = Vec::new();
     let mut table_occurrences: Vec<TableOccurrence> = Vec::new();
     let mut relationships: Vec<Relationship> = Vec::new();
+    let mut custom_functions: Vec<CustomFunction> = Vec::new();
 
     let mut section = Section::Root;
     let mut depth: u32 = 0;
@@ -294,6 +311,14 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
 
     // TableOccurrence state
     let mut cur_to: Option<TableOccurrence> = None;
+
+    // CustomFunction state
+    let mut cur_cf: Option<CustomFunction> = None;
+    let mut reading_cf_display = false;
+    // CalcsForCustomFunctions state
+    let mut cur_cfcalc_id: Option<u32> = None;
+    let mut cfcalc_inner_start: Option<usize> = None;
+    let mut cfcalc_depth: u32 = 0;
 
     // Relationship state
     let mut cur_rel: Option<Relationship> = None;
@@ -341,6 +366,12 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             section = Section::TableOccurrenceCatalog { depth }
                         }
                         b"RelationshipCatalog" => section = Section::RelationshipCatalog { depth },
+                        b"CustomFunctionsCatalog" => {
+                            section = Section::CustomFunctionsCatalog { depth }
+                        }
+                        b"CalcsForCustomFunctions" => {
+                            section = Section::CalcsForCustomFunctions { depth }
+                        }
                         _ => {}
                     },
 
@@ -756,6 +787,51 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             }
                         }
                     }
+
+                    Section::CustomFunctionsCatalog { .. } => {
+                        if local == b"CustomFunction" {
+                            let mut id = 0u32;
+                            let mut name = String::new();
+                            let mut access = String::new();
+                            for attr in e.attributes().flatten() {
+                                match attr.key.as_ref() {
+                                    b"id" => id = String::from_utf8_lossy(&attr.value).parse().unwrap_or(0),
+                                    b"name" => name = String::from_utf8_lossy(&attr.value).to_string(),
+                                    b"access" => access = String::from_utf8_lossy(&attr.value).to_string(),
+                                    _ => {}
+                                }
+                            }
+                            cur_cf = Some(CustomFunction { id, name, access, ..Default::default() });
+                        } else if let Some(cf) = cur_cf.as_mut() {
+                            if local == b"Display" {
+                                reading_cf_display = true;
+                            } else if local == b"Parameter" {
+                                for attr in e.attributes().flatten() {
+                                    if attr.key.as_ref() == b"name" {
+                                        cf.parameters
+                                            .push(String::from_utf8_lossy(&attr.value).to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Section::CalcsForCustomFunctions { .. } => {
+                        if local == b"CustomFunctionReference" {
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"id" {
+                                    cur_cfcalc_id =
+                                        String::from_utf8_lossy(&attr.value).parse().ok();
+                                }
+                            }
+                        } else if local == b"Calculation"
+                            && cur_cfcalc_id.is_some()
+                            && cfcalc_inner_start.is_none()
+                        {
+                            cfcalc_inner_start = Some(reader.buffer_position() as usize);
+                            cfcalc_depth = depth;
+                        }
+                    }
                 }
             }
 
@@ -945,6 +1021,47 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                         }
                     }
 
+                    Section::CustomFunctionsCatalog { depth: sec_depth } => {
+                        let sec_depth = *sec_depth;
+                        if local == b"Display" {
+                            reading_cf_display = false;
+                        } else if local == b"CustomFunction" {
+                            if let Some(cf) = cur_cf.take() {
+                                custom_functions.push(cf);
+                            }
+                        }
+                        if depth == sec_depth {
+                            section = Section::Root;
+                        }
+                    }
+
+                    Section::CalcsForCustomFunctions { depth: sec_depth } => {
+                        let sec_depth = *sec_depth;
+                        if local == b"Calculation"
+                            && depth == cfcalc_depth
+                            && cfcalc_inner_start.is_some()
+                        {
+                            if let (Some(start), Some(cfid)) =
+                                (cfcalc_inner_start.take(), cur_cfcalc_id)
+                            {
+                                // pos_before is start of </Calculation>. Extract inner.
+                                let inner = &xml_str[start..pos_before];
+                                // Strip <Text>CDATA</Text> wrapper if present.
+                                let body = extract_cdata_or_text(inner);
+                                if let Some(cf) =
+                                    custom_functions.iter_mut().find(|c| c.id == cfid)
+                                {
+                                    cf.calculation = body;
+                                }
+                            }
+                        } else if local == b"CustomFunctionCalc" {
+                            cur_cfcalc_id = None;
+                        }
+                        if depth == sec_depth {
+                            section = Section::Root;
+                        }
+                    }
+
                     Section::Root => {}
                 }
 
@@ -961,6 +1078,11 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                     if let Some(eds) = cur_eds.as_mut() {
                         let text = e.unescape().unwrap_or_default().to_string();
                         eds.file_path.push_str(text.trim());
+                    }
+                } else if reading_cf_display {
+                    if let Some(cf) = cur_cf.as_mut() {
+                        let text = e.unescape().unwrap_or_default().to_string();
+                        cf.display.push_str(text.trim());
                     }
                 }
             }
@@ -986,9 +1108,31 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
         external_sources,
         table_occurrences,
         relationships,
+        custom_functions,
         script_calls,
         script_layouts,
     })
+}
+
+/// Extract the inner text from a snippet like `<Text><![CDATA[…]]></Text>` (FMSaveAsXML
+/// custom function bodies always use this shape). Falls back to the trimmed raw text
+/// if no Text/CDATA wrappers are found.
+fn extract_cdata_or_text(s: &str) -> String {
+    let trimmed = s.trim();
+    let inner = if let Some(stripped) = trimmed.strip_prefix("<Text>") {
+        stripped.strip_suffix("</Text>").unwrap_or(stripped)
+    } else {
+        trimmed
+    };
+    let inner = inner.trim();
+    let cdata = if let Some(stripped) = inner.strip_prefix("<![CDATA[") {
+        stripped.strip_suffix("]]>").unwrap_or(stripped)
+    } else {
+        inner
+    };
+    // FileMaker stores calculation line breaks as bare CR (\r). Normalize to LF so
+    // the resulting .fmcalc file reads correctly in standard editors.
+    cdata.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 // LayoutFull needs a couple of "compat" fields so we can use ..Default::default().
@@ -1092,6 +1236,26 @@ pub fn write_inspection(db: &ParsedDatabase, output_dir: &str) -> Result<Inspect
     std::fs::write(out.join("relationships.json"), &rels_json)
         .map_err(|e| format!("write relationships.json: {}", e))?;
 
+    // ── Custom Functions: one .fmcalc per function + index ──────────────────
+    let cfs_dir = out.join("custom_functions");
+    std::fs::create_dir_all(&cfs_dir).map_err(|e| format!("mkdir custom_functions: {}", e))?;
+    for cf in &db.custom_functions {
+        let safe = sanitize_filename(&cf.name);
+        let filename = format!("{:04}_{}.fmcalc", cf.id, safe);
+        let header = format!(
+            "// {}\n// Parameters: {}\n\n",
+            cf.display,
+            cf.parameters.join(", ")
+        );
+        let body = format!("{}{}", header, cf.calculation);
+        std::fs::write(cfs_dir.join(&filename), &body)
+            .map_err(|e| format!("write {}: {}", filename, e))?;
+    }
+    let cfs_json =
+        serde_json::to_string_pretty(&db.custom_functions).map_err(|e| format!("json: {}", e))?;
+    std::fs::write(out.join("custom_functions.json"), &cfs_json)
+        .map_err(|e| format!("write custom_functions.json: {}", e))?;
+
     // ── Analysis ─────────────────────────────────────────────────────────────
     let analysis = build_analysis(db);
     let analysis_json =
@@ -1113,6 +1277,7 @@ pub fn write_inspection(db: &ParsedDatabase, output_dir: &str) -> Result<Inspect
         table_occurrence_count: db.table_occurrences.len(),
         relationship_count: db.relationships.len(),
         external_source_count: db.external_sources.len(),
+        custom_function_count: db.custom_functions.len(),
         scripts: script_summaries,
         layouts: layout_summaries,
     };
@@ -1129,6 +1294,7 @@ pub fn write_inspection(db: &ParsedDatabase, output_dir: &str) -> Result<Inspect
         table_occurrences: db.table_occurrences.len(),
         relationships: db.relationships.len(),
         external_sources: db.external_sources.len(),
+        custom_functions: db.custom_functions.len(),
         unreferenced_scripts: analysis.unreferenced_scripts.len(),
     })
 }
@@ -1141,6 +1307,7 @@ pub struct InspectionStats {
     pub table_occurrences: usize,
     pub relationships: usize,
     pub external_sources: usize,
+    pub custom_functions: usize,
     pub unreferenced_scripts: usize,
 }
 

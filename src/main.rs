@@ -5,6 +5,7 @@
 mod clipboard;
 mod fmsavexml;
 mod normalization;
+mod slice;
 #[cfg(windows)]
 mod ole_clipboard;
 mod steps;
@@ -132,7 +133,8 @@ fn run_cli_mode() -> Result<(), String> {
             Ok(())
         }
         "inspect" => run_inspect_cli(&args[1..]),
-        _ => Err(format!("Unknown command: {}. Use: read, write, json, debug, test, passthrough, dump-ids, inspect", args[0]))
+        "slice" => run_slice_cli(&args[1..]),
+        _ => Err(format!("Unknown command: {}. Use: read, write, json, debug, test, passthrough, dump-ids, inspect, slice", args[0]))
     }
 }
 
@@ -344,7 +346,7 @@ fn run_inspect_cli(args: &[String]) -> Result<(), String> {
     let stats = fmsavexml::write_inspection(&db, output_dir)?;
 
     println!(
-        "Done.\n  Scripts exported       : {}\n  Layouts indexed        : {}\n  Tables (base) indexed  : {}\n  Fields (base) indexed  : {}\n  Table occurrences      : {}\n  Relationships          : {}\n  External data sources  : {}\n  Unreferenced scripts   : {}",
+        "Done.\n  Scripts exported       : {}\n  Layouts indexed        : {}\n  Tables (base) indexed  : {}\n  Fields (base) indexed  : {}\n  Table occurrences      : {}\n  Relationships          : {}\n  External data sources  : {}\n  Custom functions       : {}\n  Unreferenced scripts   : {}",
         stats.scripts_written,
         stats.layouts,
         stats.tables,
@@ -352,9 +354,23 @@ fn run_inspect_cli(args: &[String]) -> Result<(), String> {
         stats.table_occurrences,
         stats.relationships,
         stats.external_sources,
+        stats.custom_functions,
         stats.unreferenced_scripts,
     );
     Ok(())
+}
+
+fn run_slice_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 3 {
+        return Err(
+            "Usage: fm-bridge slice <output-dir> <slice-dir> <layout-name> [layout-name…]"
+                .to_string(),
+        );
+    }
+    let output_dir = &args[0];
+    let slice_dir = &args[1];
+    let layouts: Vec<String> = args[2..].to_vec();
+    slice::run_slice(output_dir, slice_dir, &layouts)
 }
 
 #[cfg(windows)]

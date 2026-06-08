@@ -344,11 +344,14 @@ fn run_inspect_cli(args: &[String]) -> Result<(), String> {
     let stats = fmsavexml::write_inspection(&db, output_dir)?;
 
     println!(
-        "Done.\n  Scripts exported : {}\n  Layouts indexed  : {}\n  Tables indexed   : {}\n  Fields indexed   : {}\n  Unreferenced scripts (analysis): {}",
+        "Done.\n  Scripts exported       : {}\n  Layouts indexed        : {}\n  Tables (base) indexed  : {}\n  Fields (base) indexed  : {}\n  Table occurrences      : {}\n  Relationships          : {}\n  External data sources  : {}\n  Unreferenced scripts   : {}",
         stats.scripts_written,
         stats.layouts,
         stats.tables,
         stats.fields,
+        stats.table_occurrences,
+        stats.relationships,
+        stats.external_sources,
         stats.unreferenced_scripts,
     );
     Ok(())

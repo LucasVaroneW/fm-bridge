@@ -1,6 +1,7 @@
 // Parser for FileMaker's FMSaveAsXML format (full database export).
-// Distinct from XMSS (clipboard). Uses streaming quick-xml to handle 100MB+ files.
-// Reuses xmss::parse_fmxml_snippet for the step-level parsing inside each script.
+// Distinct from XMSS (clipboard). Streaming, handles 100MB+ files.
+// Extracts: scripts, layouts (with objects), tables, fields, table occurrences,
+// relationships, external data sources — enough to map the entire UI/data graph.
 
 use std::collections::{HashMap, HashSet};
 
@@ -25,11 +26,45 @@ pub struct ScriptInfo {
     pub step_count: usize,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Default)]
 pub struct LayoutInfo {
     pub id: u32,
     pub name: String,
     pub hidden: bool,
+    /// Base TableOccurrence that the layout shows. None for folders.
+    pub table_occurrence: Option<String>,
+    pub table_occurrence_id: Option<u32>,
+    pub is_folder: bool,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct LayoutObjectRef {
+    pub object_type: String,    // "Field", "Button", "Portal", "Text", ...
+    pub bounds: Option<String>, // "top,left,bottom,right"
+    /// For Field objects: the field reference (TO::Field).
+    pub field_table_occurrence: Option<String>,
+    pub field_name: Option<String>,
+    /// For Button objects: script triggered (if any).
+    pub button_script_id: Option<u32>,
+    pub button_script_name: Option<String>,
+    /// For Portal objects: the TO it shows.
+    pub portal_table_occurrence: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct LayoutFull {
+    pub id: u32,
+    pub name: String,
+    pub hidden: bool,
+    pub is_folder: bool,
+    pub width: u32,
+    pub table_occurrence: Option<String>,
+    pub table_occurrence_id: Option<u32>,
+    pub objects: Vec<LayoutObjectRef>,
+    /// Distinct script ids triggered from this layout's buttons.
+    pub triggered_scripts: Vec<u32>,
+    /// Distinct TOs referenced by fields on this layout.
+    pub referenced_tos: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -48,6 +83,47 @@ pub struct TableInfo {
     pub fields: Vec<FieldInfo>,
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct ExternalDataSource {
+    pub id: u32,
+    pub name: String,
+    pub source_type: String, // "FileMaker", "ODBC", ...
+    pub file_path: String,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct TableOccurrence {
+    pub id: u32,
+    pub name: String,
+    /// "External" or "Internal".
+    pub source_type: String,
+    /// Name of the ExternalDataSource (empty for internal).
+    pub data_source: String,
+    /// Name of the base table inside the data source.
+    pub base_table: String,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct JoinPredicate {
+    pub op: String, // "Equal", "NotEqual", "Less", ...
+    pub left_to: String,
+    pub left_field: String,
+    pub right_to: String,
+    pub right_field: String,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct Relationship {
+    pub id: u32,
+    pub left_to: String,
+    pub right_to: String,
+    pub left_cascade_create: bool,
+    pub left_cascade_delete: bool,
+    pub right_cascade_create: bool,
+    pub right_cascade_delete: bool,
+    pub predicates: Vec<JoinPredicate>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Manifest {
     pub file_name: String,
@@ -55,6 +131,9 @@ pub struct Manifest {
     pub layout_count: usize,
     pub table_count: usize,
     pub field_count: usize,
+    pub table_occurrence_count: usize,
+    pub relationship_count: usize,
+    pub external_source_count: usize,
     pub scripts: Vec<ScriptSummary>,
     pub layouts: Vec<LayoutInfo>,
 }
@@ -73,6 +152,12 @@ pub struct ScriptSummary {
 pub struct AnalysisReport {
     pub unreferenced_scripts: Vec<ScriptRef>,
     pub call_graph: Vec<CallGraphEntry>,
+    /// Layouts referenced by Go to Layout / New Window in scripts.
+    pub layouts_used_by_scripts: Vec<LayoutUsage>,
+    /// Scripts triggered from layout buttons.
+    pub scripts_triggered_by_layouts: Vec<LayoutScriptTrigger>,
+    /// TOs grouped by external data source.
+    pub external_dependencies: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,15 +174,33 @@ pub struct CallGraphEntry {
     pub callee_name: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct LayoutUsage {
+    pub layout_name: String,
+    pub used_by_scripts: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LayoutScriptTrigger {
+    pub layout_id: u32,
+    pub layout_name: String,
+    pub script_id: u32,
+    pub script_name: String,
+}
+
 pub struct ParsedDatabase {
     pub file_name: String,
     pub scripts: Vec<ScriptInfo>,
     pub script_steps: HashMap<u32, Vec<ScriptStep>>,
-    pub layouts: Vec<LayoutInfo>,
+    pub layouts: Vec<LayoutFull>,
     pub tables: Vec<TableInfo>,
-    /// caller_id → Vec<callee_id>, extracted directly from raw XML (more reliable than
-    /// relying on parse_fmxml_snippet for FMSaveAsXML's different Perform Script format).
+    pub external_sources: Vec<ExternalDataSource>,
+    pub table_occurrences: Vec<TableOccurrence>,
+    pub relationships: Vec<Relationship>,
+    /// caller_id → Vec<callee_id> (from script body).
     pub script_calls: HashMap<u32, Vec<u32>>,
+    /// caller_id → Vec<layout_name> (from Go to Layout / New Window).
+    pub script_layouts: HashMap<u32, Vec<String>>,
 }
 
 // ─── State machine ────────────────────────────────────────────────────────────
@@ -110,8 +213,9 @@ enum Section {
     LayoutCatalog { depth: u32 },
     BaseTableCatalog { depth: u32 },
     FieldsForTables { depth: u32 },
-    #[allow(dead_code)]
-    Skip,
+    ExternalDataSourceCatalog { depth: u32 },
+    TableOccurrenceCatalog { depth: u32 },
+    RelationshipCatalog { depth: u32 },
 }
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
@@ -122,7 +226,6 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
 
     let owned: String;
     let xml_str: &str = if raw.starts_with(b"\xFF\xFE") {
-        // UTF-16 LE (FileMaker's default on Windows)
         let u16s: Vec<u16> = raw[2..]
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
@@ -130,7 +233,6 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
         owned = String::from_utf16(&u16s).map_err(|e| format!("UTF-16 LE error: {}", e))?;
         &owned
     } else if raw.starts_with(b"\xFE\xFF") {
-        // UTF-16 BE
         let u16s: Vec<u16> = raw[2..]
             .chunks_exact(2)
             .map(|c| u16::from_be_bytes([c[0], c[1]]))
@@ -138,7 +240,6 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
         owned = String::from_utf16(&u16s).map_err(|e| format!("UTF-16 BE error: {}", e))?;
         &owned
     } else if raw.starts_with(b"\xEF\xBB\xBF") {
-        // UTF-8 BOM
         std::str::from_utf8(&raw[3..]).map_err(|e| format!("UTF-8 error: {}", e))?
     } else {
         std::str::from_utf8(&raw).map_err(|e| format!("UTF-8 error: {}", e))?
@@ -152,33 +253,59 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
     let mut file_name = String::new();
     let mut scripts: Vec<ScriptInfo> = Vec::new();
     let mut script_steps: HashMap<u32, Vec<ScriptStep>> = HashMap::new();
-    let mut layouts: Vec<LayoutInfo> = Vec::new();
+    let mut layouts: Vec<LayoutFull> = Vec::new();
     let mut tables: Vec<TableInfo> = Vec::new();
+    let mut external_sources: Vec<ExternalDataSource> = Vec::new();
+    let mut table_occurrences: Vec<TableOccurrence> = Vec::new();
+    let mut relationships: Vec<Relationship> = Vec::new();
 
     let mut section = Section::Root;
     let mut depth: u32 = 0;
-    // caller_id → Vec<callee_id>, extracted directly from the XML (not via parse_fmxml_snippet)
     let mut script_calls: HashMap<u32, Vec<u32>> = HashMap::new();
+    let mut script_layouts: HashMap<u32, Vec<String>> = HashMap::new();
 
-    // Per-section working state
+    // ScriptCatalog state
     let mut cur_script: Option<ScriptInfo> = None;
     let mut reading_script_uuid = false;
     let mut reading_script_options = false;
 
+    // StepsForScripts state
     let mut cur_steps_script_id: Option<u32> = None;
     let mut object_list_inner_start: Option<usize> = None;
     let mut object_list_depth: u32 = 0;
 
-    let mut cur_layout: Option<LayoutInfo> = None;
-    let mut _cur_layout_options_depth: Option<u32> = None;
+    // LayoutCatalog state
+    let mut cur_layout: Option<LayoutFull> = None;
+    let mut layout_started_depth: u32 = 0;
+    let mut in_layout_partslist = false;
+    let mut cur_object: Option<LayoutObjectRef> = None;
+    let mut object_depth: u32 = 0;
+    let mut in_button_action = false;
 
+    // Tables / Fields state
     let mut cur_table: Option<TableInfo> = None;
     let mut cur_field_table_id: Option<u32> = None;
     let mut cur_field_table_name = String::new();
     let mut cur_field: Option<FieldInfo> = None;
 
-    let mut seen_layout_ids: HashSet<u32> = HashSet::new();
+    // ExternalDataSource state
+    let mut cur_eds: Option<ExternalDataSource> = None;
+    let mut reading_eds_path = false;
+
+    // TableOccurrence state
+    let mut cur_to: Option<TableOccurrence> = None;
+
+    // Relationship state
+    let mut cur_rel: Option<Relationship> = None;
+    let mut cur_predicate: Option<JoinPredicate> = None;
+    let mut in_left_field = false;
+    let mut in_right_field = false;
+    let mut in_left_table = false;
+    let mut in_right_table = false;
+
     let mut seen_table_ids: HashSet<u32> = HashSet::new();
+    let mut seen_layout_ids: HashSet<u32> = HashSet::new();
+    let mut seen_to_ids: HashSet<u32> = HashSet::new();
 
     loop {
         let pos_before = reader.buffer_position() as usize;
@@ -190,10 +317,10 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
 
             Ok(Event::Start(ref e)) => {
                 depth += 1;
-                let local = e.name().as_ref().to_vec();
-                let local = local.as_slice();
+                let local_vec = e.name().as_ref().to_vec();
+                let local = local_vec.as_slice();
 
-                match section {
+                match &section {
                     Section::Root => match local {
                         b"FMSaveAsXML" => {
                             for attr in e.attributes().flatten() {
@@ -207,10 +334,18 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                         b"LayoutCatalog" => section = Section::LayoutCatalog { depth },
                         b"BaseTableCatalog" => section = Section::BaseTableCatalog { depth },
                         b"FieldsForTables" => section = Section::FieldsForTables { depth },
+                        b"ExternalDataSourceCatalog" => {
+                            section = Section::ExternalDataSourceCatalog { depth }
+                        }
+                        b"TableOccurrenceCatalog" => {
+                            section = Section::TableOccurrenceCatalog { depth }
+                        }
+                        b"RelationshipCatalog" => section = Section::RelationshipCatalog { depth },
                         _ => {}
                     },
 
                     Section::ScriptCatalog { depth: sec_depth } => {
+                        let sec_depth = *sec_depth;
                         if local == b"Script" {
                             let (id, name, is_folder, is_sep) = parse_script_attrs(e);
                             cur_script = Some(ScriptInfo {
@@ -225,9 +360,13 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             });
                             reading_script_uuid = false;
                             reading_script_options = false;
-                        } else if local == b"UUID" && cur_script.is_some() && depth == sec_depth + 2 {
+                        } else if local == b"UUID" && cur_script.is_some() && depth == sec_depth + 2
+                        {
                             reading_script_uuid = true;
-                        } else if local == b"Options" && cur_script.is_some() && depth == sec_depth + 2 {
+                        } else if local == b"Options"
+                            && cur_script.is_some()
+                            && depth == sec_depth + 2
+                        {
                             reading_script_options = true;
                             for attr in e.attributes().flatten() {
                                 match attr.key.as_ref() {
@@ -248,10 +387,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                     }
 
                     Section::StepsForScripts { depth: sec_depth } => {
-                        // Only capture ScriptReference that is a direct child of <Script>
-                        // (depth == sec_depth + 2). Nested <ScriptReference> elements appear
-                        // inside Perform Script step parameters at greater depth and must be
-                        // ignored to avoid overwriting cur_steps_script_id.
+                        let sec_depth = *sec_depth;
                         if local == b"ScriptReference" && depth == sec_depth + 2 {
                             let mut id = 0u32;
                             for attr in e.attributes().flatten() {
@@ -272,16 +408,125 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                     }
 
                     Section::LayoutCatalog { depth: sec_depth } => {
-                        if local == b"Layout" {
+                        let sec_depth = *sec_depth;
+                        if local == b"Layout" && cur_layout.is_none() {
                             let (id, name) = parse_id_name_attrs(e);
+                            let width = parse_u32_attr(e, "width").unwrap_or(0);
+                            let is_folder = parse_bool_attr(e, "isFolder");
                             if !seen_layout_ids.contains(&id) {
-                                cur_layout = Some(LayoutInfo { id, name, hidden: false });
+                                cur_layout = Some(LayoutFull {
+                                    id,
+                                    name,
+                                    hidden: false,
+                                    width,
+                                    is_folder,
+                                    ..Default::default()
+                                });
+                                layout_started_depth = depth;
                             }
-                        } else if local == b"Options" && cur_layout.is_some() {
-                            _cur_layout_options_depth = Some(depth);
-                            for attr in e.attributes().flatten() {
-                                if attr.key.as_ref() == b"hidden" {
-                                    if let Some(l) = cur_layout.as_mut() {
+                        } else if let Some(l) = cur_layout.as_mut() {
+                            // Direct child of <Layout> at depth sec_depth+2
+                            if depth == layout_started_depth + 1
+                                && local == b"TableOccurrenceReference"
+                            {
+                                let (id, name) = parse_id_name_attrs(e);
+                                if id != 0 {
+                                    l.table_occurrence_id = Some(id);
+                                }
+                                if !name.is_empty() {
+                                    l.table_occurrence = Some(name);
+                                }
+                            } else if local == b"PartsList" {
+                                in_layout_partslist = true;
+                            } else if in_layout_partslist && local == b"LayoutObject" {
+                                if cur_object.is_none() {
+                                    let mut obj = LayoutObjectRef::default();
+                                    for attr in e.attributes().flatten() {
+                                        if attr.key.as_ref() == b"type" {
+                                            obj.object_type =
+                                                String::from_utf8_lossy(&attr.value).to_string();
+                                        }
+                                    }
+                                    cur_object = Some(obj);
+                                    object_depth = depth;
+                                }
+                            } else if cur_object.is_some() {
+                                if local == b"Bounds" {
+                                    let mut bounds = String::new();
+                                    let mut t = "";
+                                    let mut le = "";
+                                    let mut b = "";
+                                    let mut r = "";
+                                    let mut t_s = String::new();
+                                    let mut l_s = String::new();
+                                    let mut b_s = String::new();
+                                    let mut r_s = String::new();
+                                    for attr in e.attributes().flatten() {
+                                        let v = String::from_utf8_lossy(&attr.value).to_string();
+                                        match attr.key.as_ref() {
+                                            b"top" => {
+                                                t_s = v;
+                                                t = &t_s;
+                                            }
+                                            b"left" => {
+                                                l_s = v;
+                                                le = &l_s;
+                                            }
+                                            b"bottom" => {
+                                                b_s = v;
+                                                b = &b_s;
+                                            }
+                                            b"right" => {
+                                                r_s = v;
+                                                r = &r_s;
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    bounds.push_str(t);
+                                    bounds.push(',');
+                                    bounds.push_str(le);
+                                    bounds.push(',');
+                                    bounds.push_str(b);
+                                    bounds.push(',');
+                                    bounds.push_str(r);
+                                    if let Some(o) = cur_object.as_mut() {
+                                        o.bounds = Some(bounds);
+                                    }
+                                } else if local == b"FieldReference" {
+                                    // Field reference inside a Field-type object.
+                                    let (_, name) = parse_id_name_attrs(e);
+                                    if let Some(o) = cur_object.as_mut() {
+                                        if o.field_name.is_none() {
+                                            o.field_name = Some(name);
+                                        }
+                                    }
+                                } else if local == b"TableOccurrenceReference" {
+                                    // TO reference inside a Field/Portal object.
+                                    let (_, name) = parse_id_name_attrs(e);
+                                    if let Some(o) = cur_object.as_mut() {
+                                        if o.object_type == "Portal"
+                                            && o.portal_table_occurrence.is_none()
+                                        {
+                                            o.portal_table_occurrence = Some(name);
+                                        } else if o.field_table_occurrence.is_none() {
+                                            o.field_table_occurrence = Some(name);
+                                        }
+                                    }
+                                } else if local == b"action" {
+                                    in_button_action = true;
+                                } else if in_button_action && local == b"ScriptReference" {
+                                    let (id, name) = parse_id_name_attrs(e);
+                                    if let Some(o) = cur_object.as_mut() {
+                                        o.button_script_id = Some(id);
+                                        o.button_script_name = Some(name);
+                                    }
+                                }
+                            }
+                            // Hidden flag from Options on the Layout itself.
+                            if local == b"Options" && depth == layout_started_depth + 1 {
+                                for attr in e.attributes().flatten() {
+                                    if attr.key.as_ref() == b"hidden" {
                                         l.hidden = &attr.value[..] == b"True";
                                     }
                                 }
@@ -294,7 +539,11 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                         if local == b"BaseTable" {
                             let (id, name) = parse_id_name_attrs(e);
                             if !seen_table_ids.contains(&id) {
-                                cur_table = Some(TableInfo { id, name, fields: Vec::new() });
+                                cur_table = Some(TableInfo {
+                                    id,
+                                    name,
+                                    fields: Vec::new(),
+                                });
                             }
                         }
                     }
@@ -345,20 +594,178 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                     _ => {}
                                 }
                             }
-                            cur_field = Some(FieldInfo { id, name, field_type, data_type, comment });
+                            cur_field = Some(FieldInfo {
+                                id,
+                                name,
+                                field_type,
+                                data_type,
+                                comment,
+                            });
                         }
                     }
 
-                    Section::Skip => {}
+                    Section::ExternalDataSourceCatalog { .. } => {
+                        if local == b"ExternalDataSource" {
+                            let mut id = 0u32;
+                            let mut name = String::new();
+                            let mut source_type = String::new();
+                            for attr in e.attributes().flatten() {
+                                match attr.key.as_ref() {
+                                    b"id" => {
+                                        id = String::from_utf8_lossy(&attr.value)
+                                            .parse()
+                                            .unwrap_or(0)
+                                    }
+                                    b"name" => {
+                                        name = String::from_utf8_lossy(&attr.value).to_string()
+                                    }
+                                    b"type" => {
+                                        source_type =
+                                            String::from_utf8_lossy(&attr.value).to_string()
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            cur_eds = Some(ExternalDataSource {
+                                id,
+                                name,
+                                source_type,
+                                file_path: String::new(),
+                            });
+                        } else if local == b"UniversalPathList" && cur_eds.is_some() {
+                            reading_eds_path = true;
+                        }
+                    }
+
+                    Section::TableOccurrenceCatalog { .. } => {
+                        if local == b"TableOccurrence" {
+                            let (id, name) = parse_id_name_attrs(e);
+                            let mut source_type = String::new();
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"type" {
+                                    source_type =
+                                        String::from_utf8_lossy(&attr.value).to_string();
+                                }
+                            }
+                            if !seen_to_ids.contains(&id) {
+                                cur_to = Some(TableOccurrence {
+                                    id,
+                                    name,
+                                    source_type,
+                                    data_source: String::new(),
+                                    base_table: String::new(),
+                                });
+                            }
+                        } else if let Some(to) = cur_to.as_mut() {
+                            if local == b"DataSourceReference" {
+                                for attr in e.attributes().flatten() {
+                                    if attr.key.as_ref() == b"name" {
+                                        to.data_source =
+                                            String::from_utf8_lossy(&attr.value).to_string();
+                                    }
+                                }
+                            } else if local == b"BaseTableReference" {
+                                for attr in e.attributes().flatten() {
+                                    if attr.key.as_ref() == b"name" {
+                                        to.base_table =
+                                            String::from_utf8_lossy(&attr.value).to_string();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Section::RelationshipCatalog { .. } => {
+                        if local == b"Relationship" {
+                            let mut id = 0u32;
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"id" {
+                                    id = String::from_utf8_lossy(&attr.value)
+                                        .parse()
+                                        .unwrap_or(0);
+                                }
+                            }
+                            cur_rel = Some(Relationship {
+                                id,
+                                ..Default::default()
+                            });
+                        } else if let Some(r) = cur_rel.as_mut() {
+                            if local == b"LeftTable" {
+                                in_left_table = true;
+                                for attr in e.attributes().flatten() {
+                                    match attr.key.as_ref() {
+                                        b"cascadeCreate" => {
+                                            r.left_cascade_create = &attr.value[..] == b"True"
+                                        }
+                                        b"cascadeDelete" => {
+                                            r.left_cascade_delete = &attr.value[..] == b"True"
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            } else if local == b"RightTable" {
+                                in_right_table = true;
+                                for attr in e.attributes().flatten() {
+                                    match attr.key.as_ref() {
+                                        b"cascadeCreate" => {
+                                            r.right_cascade_create = &attr.value[..] == b"True"
+                                        }
+                                        b"cascadeDelete" => {
+                                            r.right_cascade_delete = &attr.value[..] == b"True"
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            } else if local == b"JoinPredicate" {
+                                let mut op = String::new();
+                                for attr in e.attributes().flatten() {
+                                    if attr.key.as_ref() == b"type" {
+                                        op = String::from_utf8_lossy(&attr.value).to_string();
+                                    }
+                                }
+                                cur_predicate = Some(JoinPredicate {
+                                    op,
+                                    ..Default::default()
+                                });
+                            } else if local == b"LeftField" {
+                                in_left_field = true;
+                            } else if local == b"RightField" {
+                                in_right_field = true;
+                            } else if local == b"TableOccurrenceReference" {
+                                let (_, name) = parse_id_name_attrs(e);
+                                if in_left_table && r.left_to.is_empty() {
+                                    r.left_to = name;
+                                } else if in_right_table && r.right_to.is_empty() {
+                                    r.right_to = name;
+                                } else if let Some(p) = cur_predicate.as_mut() {
+                                    if in_left_field && p.left_to.is_empty() {
+                                        p.left_to = name;
+                                    } else if in_right_field && p.right_to.is_empty() {
+                                        p.right_to = name;
+                                    }
+                                }
+                            } else if local == b"FieldReference" {
+                                let (_, name) = parse_id_name_attrs(e);
+                                if let Some(p) = cur_predicate.as_mut() {
+                                    if in_left_field && p.left_field.is_empty() {
+                                        p.left_field = name;
+                                    } else if in_right_field && p.right_field.is_empty() {
+                                        p.right_field = name;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
             Ok(Event::End(ref e)) => {
-                let local = e.name().as_ref().to_vec();
-                let local = local.as_slice();
+                let local_vec = e.name().as_ref().to_vec();
+                let local = local_vec.as_slice();
 
                 match &section {
                     Section::ScriptCatalog { depth: sec_depth } => {
+                        let sec_depth = *sec_depth;
                         if local == b"UUID" && reading_script_uuid {
                             reading_script_uuid = false;
                         } else if local == b"Options" && reading_script_options {
@@ -368,12 +775,13 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 scripts.push(s);
                             }
                         }
-                        if depth == *sec_depth {
+                        if depth == sec_depth {
                             section = Section::Root;
                         }
                     }
 
                     Section::StepsForScripts { depth: sec_depth } => {
+                        let sec_depth = *sec_depth;
                         if local == b"ObjectList"
                             && depth == object_list_depth
                             && object_list_inner_start.is_some()
@@ -382,20 +790,19 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 (object_list_inner_start.take(), cur_steps_script_id)
                             {
                                 let inner_xml = &xml_str[inner_start..pos_before];
-
-                                // Extract call targets directly from the raw XML.
-                                // FMSaveAsXML wraps Perform Script targets in
-                                // <Parameter type="List"><List><ScriptReference id="X">
-                                // which parse_fmxml_snippet doesn't handle.
+                                // Call graph (Perform Script targets).
                                 let calls = extract_script_refs(inner_xml);
                                 if !calls.is_empty() {
                                     script_calls.insert(script_id, calls);
                                 }
-
-                                // Normalize FMSaveAsXML's double-nested Calculation wrapper
-                                // before passing to parse_fmxml_snippet (which expects XMSS format).
+                                // Layout refs (Go to Layout, New Window).
+                                let lays = extract_layout_refs(inner_xml);
+                                if !lays.is_empty() {
+                                    script_layouts.insert(script_id, lays);
+                                }
                                 let normalized = normalize_calculations(inner_xml);
-                                let wrapped = format!("<FMScriptStep>{}</FMScriptStep>", normalized);
+                                let wrapped =
+                                    format!("<FMScriptStep>{}</FMScriptStep>", normalized);
                                 if let Ok(parsed) = parse_fmxml_snippet(&wrapped) {
                                     script_steps.insert(script_id, parsed.steps);
                                 }
@@ -403,38 +810,67 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                         } else if local == b"Script" {
                             cur_steps_script_id = None;
                         }
-                        if depth == *sec_depth {
+                        if depth == sec_depth {
                             section = Section::Root;
                         }
                     }
 
                     Section::LayoutCatalog { depth: sec_depth } => {
-                        if local == b"Options" {
-                            _cur_layout_options_depth = None;
-                        } else if local == b"Layout" {
-                            if let Some(l) = cur_layout.take() {
+                        let sec_depth = *sec_depth;
+                        if local == b"PartsList" {
+                            in_layout_partslist = false;
+                        } else if local == b"action" {
+                            in_button_action = false;
+                        } else if local == b"LayoutObject" && depth == object_depth {
+                            if let Some(o) = cur_object.take() {
+                                if let Some(l) = cur_layout.as_mut() {
+                                    l.objects.push(o);
+                                }
+                            }
+                        } else if local == b"Layout" && depth == layout_started_depth {
+                            if let Some(mut l) = cur_layout.take() {
+                                // Aggregate triggered scripts & referenced TOs.
+                                let mut triggered: HashSet<u32> = HashSet::new();
+                                let mut tos: HashSet<String> = HashSet::new();
+                                for o in &l.objects {
+                                    if let Some(sid) = o.button_script_id {
+                                        triggered.insert(sid);
+                                    }
+                                    if let Some(ref t) = o.field_table_occurrence {
+                                        tos.insert(t.clone());
+                                    }
+                                    if let Some(ref t) = o.portal_table_occurrence {
+                                        tos.insert(t.clone());
+                                    }
+                                }
+                                l.triggered_scripts = triggered.into_iter().collect();
+                                l.triggered_scripts.sort();
+                                l.referenced_tos = tos.into_iter().collect();
+                                l.referenced_tos.sort();
                                 seen_layout_ids.insert(l.id);
                                 layouts.push(l);
                             }
                         }
-                        if depth == *sec_depth {
+                        if depth == sec_depth {
                             section = Section::Root;
                         }
                     }
 
                     Section::BaseTableCatalog { depth: sec_depth } => {
+                        let sec_depth = *sec_depth;
                         if local == b"BaseTable" {
                             if let Some(t) = cur_table.take() {
                                 seen_table_ids.insert(t.id);
                                 tables.push(t);
                             }
                         }
-                        if depth == *sec_depth {
+                        if depth == sec_depth {
                             section = Section::Root;
                         }
                     }
 
                     Section::FieldsForTables { depth: sec_depth } => {
+                        let sec_depth = *sec_depth;
                         if local == b"Field" {
                             if let Some(f) = cur_field.take() {
                                 if let Some(tid) = cur_field_table_id {
@@ -450,13 +886,66 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 }
                             }
                         }
-                        if depth == *sec_depth {
+                        if depth == sec_depth {
                             section = Section::Root;
                             cur_field_table_id = None;
                         }
                     }
 
-                    Section::Root | Section::Skip => {}
+                    Section::ExternalDataSourceCatalog { depth: sec_depth } => {
+                        let sec_depth = *sec_depth;
+                        if local == b"UniversalPathList" {
+                            reading_eds_path = false;
+                        } else if local == b"ExternalDataSource" {
+                            if let Some(eds) = cur_eds.take() {
+                                external_sources.push(eds);
+                            }
+                        }
+                        if depth == sec_depth {
+                            section = Section::Root;
+                        }
+                    }
+
+                    Section::TableOccurrenceCatalog { depth: sec_depth } => {
+                        let sec_depth = *sec_depth;
+                        if local == b"TableOccurrence" {
+                            if let Some(to) = cur_to.take() {
+                                seen_to_ids.insert(to.id);
+                                table_occurrences.push(to);
+                            }
+                        }
+                        if depth == sec_depth {
+                            section = Section::Root;
+                        }
+                    }
+
+                    Section::RelationshipCatalog { depth: sec_depth } => {
+                        let sec_depth = *sec_depth;
+                        if local == b"LeftTable" {
+                            in_left_table = false;
+                        } else if local == b"RightTable" {
+                            in_right_table = false;
+                        } else if local == b"LeftField" {
+                            in_left_field = false;
+                        } else if local == b"RightField" {
+                            in_right_field = false;
+                        } else if local == b"JoinPredicate" {
+                            if let Some(p) = cur_predicate.take() {
+                                if let Some(r) = cur_rel.as_mut() {
+                                    r.predicates.push(p);
+                                }
+                            }
+                        } else if local == b"Relationship" {
+                            if let Some(r) = cur_rel.take() {
+                                relationships.push(r);
+                            }
+                        }
+                        if depth == sec_depth {
+                            section = Section::Root;
+                        }
+                    }
+
+                    Section::Root => {}
                 }
 
                 depth -= 1;
@@ -468,6 +957,11 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                         let text = e.unescape().unwrap_or_default().to_string();
                         s.uuid = text.trim().to_string();
                     }
+                } else if reading_eds_path {
+                    if let Some(eds) = cur_eds.as_mut() {
+                        let text = e.unescape().unwrap_or_default().to_string();
+                        eds.file_path.push_str(text.trim());
+                    }
                 }
             }
 
@@ -477,14 +971,30 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
         buf.clear();
     }
 
-    // Attach step counts to script metadata.
     for s in &mut scripts {
         if let Some(steps) = script_steps.get(&s.id) {
             s.step_count = steps.len();
         }
     }
 
-    Ok(ParsedDatabase { file_name, scripts, script_steps, layouts, tables, script_calls })
+    Ok(ParsedDatabase {
+        file_name,
+        scripts,
+        script_steps,
+        layouts,
+        tables,
+        external_sources,
+        table_occurrences,
+        relationships,
+        script_calls,
+        script_layouts,
+    })
+}
+
+// LayoutFull needs a couple of "compat" fields so we can use ..Default::default().
+// Keep them out of the public Default by using #[serde(skip)] for the compat-only field.
+impl LayoutFull {
+    // (placeholder for future use; intentionally empty)
 }
 
 // ─── Output generation ────────────────────────────────────────────────────────
@@ -494,30 +1004,29 @@ pub fn write_inspection(db: &ParsedDatabase, output_dir: &str) -> Result<Inspect
     std::fs::create_dir_all(out).map_err(|e| format!("Cannot create {}: {}", output_dir, e))?;
 
     let scripts_dir = out.join("scripts");
+    let layouts_dir = out.join("layouts");
     let tables_dir = out.join("tables");
     let analysis_dir = out.join("analysis");
-
-    std::fs::create_dir_all(&scripts_dir)
-        .map_err(|e| format!("Cannot create scripts dir: {}", e))?;
-    std::fs::create_dir_all(&tables_dir)
-        .map_err(|e| format!("Cannot create tables dir: {}", e))?;
-    std::fs::create_dir_all(&analysis_dir)
-        .map_err(|e| format!("Cannot create analysis dir: {}", e))?;
+    std::fs::create_dir_all(&scripts_dir).map_err(|e| format!("mkdir scripts: {}", e))?;
+    std::fs::create_dir_all(&layouts_dir).map_err(|e| format!("mkdir layouts: {}", e))?;
+    std::fs::create_dir_all(&tables_dir).map_err(|e| format!("mkdir tables: {}", e))?;
+    std::fs::create_dir_all(&analysis_dir).map_err(|e| format!("mkdir analysis: {}", e))?;
 
     // ── Scripts ──────────────────────────────────────────────────────────────
     let mut scripts_written = 0usize;
     let mut script_summaries: Vec<ScriptSummary> = Vec::new();
-
     for script in &db.scripts {
         let file = if !script.is_folder && !script.is_separator {
             if let Some(steps) = db.script_steps.get(&script.id) {
-                let fmscript = crate::xmss::FmScript { steps: steps.clone() };
+                let fmscript = crate::xmss::FmScript {
+                    steps: steps.clone(),
+                };
                 let text = format_script(&fmscript);
                 let safe_name = sanitize_filename(&script.name);
                 let filename = format!("{:04}_{}.fmscript", script.id, safe_name);
                 let path = scripts_dir.join(&filename);
                 std::fs::write(&path, &text)
-                    .map_err(|e| format!("Cannot write {}: {}", path.display(), e))?;
+                    .map_err(|e| format!("write {}: {}", path.display(), e))?;
                 scripts_written += 1;
                 Some(filename)
             } else {
@@ -526,7 +1035,6 @@ pub fn write_inspection(db: &ParsedDatabase, output_dir: &str) -> Result<Inspect
         } else {
             None
         };
-
         script_summaries.push(ScriptSummary {
             id: script.id,
             name: script.name.clone(),
@@ -537,50 +1045,90 @@ pub fn write_inspection(db: &ParsedDatabase, output_dir: &str) -> Result<Inspect
         });
     }
 
-    // ── Layouts ───────────────────────────────────────────────────────────────
-    let layouts_json = serde_json::to_string_pretty(&db.layouts)
-        .map_err(|e| format!("JSON error: {}", e))?;
-    std::fs::write(out.join("layouts.json"), &layouts_json)
-        .map_err(|e| format!("Cannot write layouts.json: {}", e))?;
+    // ── Layouts (one JSON per layout + summary) ──────────────────────────────
+    let mut layout_summaries: Vec<LayoutInfo> = Vec::new();
+    for layout in &db.layouts {
+        layout_summaries.push(LayoutInfo {
+            id: layout.id,
+            name: layout.name.clone(),
+            hidden: layout.hidden,
+            table_occurrence: layout.table_occurrence.clone(),
+            table_occurrence_id: layout.table_occurrence_id,
+            is_folder: layout.is_folder,
+        });
+        let safe = sanitize_filename(&layout.name);
+        let filename = format!("{:04}_{}.json", layout.id, safe);
+        let path = layouts_dir.join(filename);
+        let json = serde_json::to_string_pretty(layout).map_err(|e| format!("json: {}", e))?;
+        std::fs::write(&path, &json).map_err(|e| format!("write {}: {}", path.display(), e))?;
+    }
+    let layouts_index =
+        serde_json::to_string_pretty(&layout_summaries).map_err(|e| format!("json: {}", e))?;
+    std::fs::write(out.join("layouts.json"), &layouts_index)
+        .map_err(|e| format!("write layouts.json: {}", e))?;
 
     // ── Tables ────────────────────────────────────────────────────────────────
     let total_fields: usize = db.tables.iter().map(|t| t.fields.len()).sum();
     for table in &db.tables {
         let safe = sanitize_filename(&table.name);
         let path = tables_dir.join(format!("{}.json", safe));
-        let json = serde_json::to_string_pretty(table)
-            .map_err(|e| format!("JSON error: {}", e))?;
-        std::fs::write(&path, &json)
-            .map_err(|e| format!("Cannot write {}: {}", path.display(), e))?;
+        let json = serde_json::to_string_pretty(table).map_err(|e| format!("json: {}", e))?;
+        std::fs::write(&path, &json).map_err(|e| format!("write {}: {}", path.display(), e))?;
     }
+
+    // ── External sources, TOs, relationships ─────────────────────────────────
+    let eds_json =
+        serde_json::to_string_pretty(&db.external_sources).map_err(|e| format!("json: {}", e))?;
+    std::fs::write(out.join("external_sources.json"), &eds_json)
+        .map_err(|e| format!("write external_sources.json: {}", e))?;
+
+    let tos_json =
+        serde_json::to_string_pretty(&db.table_occurrences).map_err(|e| format!("json: {}", e))?;
+    std::fs::write(out.join("table_occurrences.json"), &tos_json)
+        .map_err(|e| format!("write table_occurrences.json: {}", e))?;
+
+    let rels_json =
+        serde_json::to_string_pretty(&db.relationships).map_err(|e| format!("json: {}", e))?;
+    std::fs::write(out.join("relationships.json"), &rels_json)
+        .map_err(|e| format!("write relationships.json: {}", e))?;
 
     // ── Analysis ─────────────────────────────────────────────────────────────
     let analysis = build_analysis(db);
-    let analysis_json = serde_json::to_string_pretty(&analysis)
-        .map_err(|e| format!("JSON error: {}", e))?;
+    let analysis_json =
+        serde_json::to_string_pretty(&analysis).map_err(|e| format!("json: {}", e))?;
     std::fs::write(analysis_dir.join("analysis.json"), &analysis_json)
-        .map_err(|e| format!("Cannot write analysis.json: {}", e))?;
+        .map_err(|e| format!("write analysis.json: {}", e))?;
 
     // ── Manifest ──────────────────────────────────────────────────────────────
     let manifest = Manifest {
         file_name: db.file_name.clone(),
-        script_count: db.scripts.iter().filter(|s| !s.is_folder && !s.is_separator).count(),
+        script_count: db
+            .scripts
+            .iter()
+            .filter(|s| !s.is_folder && !s.is_separator)
+            .count(),
         layout_count: db.layouts.len(),
         table_count: db.tables.len(),
         field_count: total_fields,
+        table_occurrence_count: db.table_occurrences.len(),
+        relationship_count: db.relationships.len(),
+        external_source_count: db.external_sources.len(),
         scripts: script_summaries,
-        layouts: db.layouts.clone(),
+        layouts: layout_summaries,
     };
-    let manifest_json = serde_json::to_string_pretty(&manifest)
-        .map_err(|e| format!("JSON error: {}", e))?;
+    let manifest_json =
+        serde_json::to_string_pretty(&manifest).map_err(|e| format!("json: {}", e))?;
     std::fs::write(out.join("manifest.json"), &manifest_json)
-        .map_err(|e| format!("Cannot write manifest.json: {}", e))?;
+        .map_err(|e| format!("write manifest.json: {}", e))?;
 
     Ok(InspectionStats {
         scripts_written,
         layouts: db.layouts.len(),
         tables: db.tables.len(),
         fields: total_fields,
+        table_occurrences: db.table_occurrences.len(),
+        relationships: db.relationships.len(),
+        external_sources: db.external_sources.len(),
         unreferenced_scripts: analysis.unreferenced_scripts.len(),
     })
 }
@@ -590,6 +1138,9 @@ pub struct InspectionStats {
     pub layouts: usize,
     pub tables: usize,
     pub fields: usize,
+    pub table_occurrences: usize,
+    pub relationships: usize,
+    pub external_sources: usize,
     pub unreferenced_scripts: usize,
 }
 
@@ -606,17 +1157,11 @@ fn build_analysis(db: &ParsedDatabase) -> AnalysisReport {
     let id_to_name: HashMap<u32, &str> =
         db.scripts.iter().map(|s| (s.id, s.name.as_str())).collect();
 
-    // Use the directly-extracted call graph (more reliable than parse_fmxml_snippet
-    // for FMSaveAsXML's Perform Script parameter format).
     let mut referenced_ids: HashSet<u32> = HashSet::new();
     let mut call_graph: Vec<CallGraphEntry> = Vec::new();
 
     for (caller_id, callees) in &db.script_calls {
-        let caller_name = id_to_name
-            .get(caller_id)
-            .copied()
-            .unwrap_or("")
-            .to_string();
+        let caller_name = id_to_name.get(caller_id).copied().unwrap_or("").to_string();
         for callee_id in callees {
             if all_ids.contains(callee_id) {
                 referenced_ids.insert(*callee_id);
@@ -624,11 +1169,25 @@ fn build_analysis(db: &ParsedDatabase) -> AnalysisReport {
                     caller_id: *caller_id,
                     caller_name: caller_name.clone(),
                     callee_id: *callee_id,
-                    callee_name: id_to_name
-                        .get(callee_id)
-                        .copied()
-                        .unwrap_or("")
-                        .to_string(),
+                    callee_name: id_to_name.get(callee_id).copied().unwrap_or("").to_string(),
+                });
+            }
+        }
+    }
+
+    // Scripts triggered from layout buttons also count as "referenced".
+    let mut scripts_triggered_by_layouts: Vec<LayoutScriptTrigger> = Vec::new();
+    for layout in &db.layouts {
+        for o in &layout.objects {
+            if let (Some(sid), Some(sname)) = (o.button_script_id, &o.button_script_name) {
+                if all_ids.contains(&sid) {
+                    referenced_ids.insert(sid);
+                }
+                scripts_triggered_by_layouts.push(LayoutScriptTrigger {
+                    layout_id: layout.id,
+                    layout_name: layout.name.clone(),
+                    script_id: sid,
+                    script_name: sname.clone(),
                 });
             }
         }
@@ -646,7 +1205,48 @@ fn build_analysis(db: &ParsedDatabase) -> AnalysisReport {
         .collect();
     unreferenced_scripts.sort_by_key(|s| s.id);
 
-    AnalysisReport { unreferenced_scripts, call_graph }
+    // Layouts referenced by scripts (Go to Layout / New Window).
+    let mut layout_to_scripts: HashMap<String, HashSet<String>> = HashMap::new();
+    for (caller_id, layouts) in &db.script_layouts {
+        let caller_name = id_to_name.get(caller_id).copied().unwrap_or("").to_string();
+        for lname in layouts {
+            layout_to_scripts
+                .entry(lname.clone())
+                .or_default()
+                .insert(caller_name.clone());
+        }
+    }
+    let mut layouts_used_by_scripts: Vec<LayoutUsage> = layout_to_scripts
+        .into_iter()
+        .map(|(lname, scripts)| {
+            let mut v: Vec<String> = scripts.into_iter().collect();
+            v.sort();
+            LayoutUsage {
+                layout_name: lname,
+                used_by_scripts: v,
+            }
+        })
+        .collect();
+    layouts_used_by_scripts.sort_by(|a, b| a.layout_name.cmp(&b.layout_name));
+
+    // External dependencies: TOs grouped by data source file.
+    let mut external_dependencies: HashMap<String, Vec<String>> = HashMap::new();
+    for to in &db.table_occurrences {
+        if !to.data_source.is_empty() {
+            external_dependencies
+                .entry(to.data_source.clone())
+                .or_default()
+                .push(to.name.clone());
+        }
+    }
+
+    AnalysisReport {
+        unreferenced_scripts,
+        call_graph,
+        layouts_used_by_scripts,
+        scripts_triggered_by_layouts,
+        external_dependencies,
+    }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -681,6 +1281,26 @@ fn parse_id_name_attrs(e: &quick_xml::events::BytesStart) -> (u32, String) {
     (id, name)
 }
 
+fn parse_u32_attr(e: &quick_xml::events::BytesStart, name: &str) -> Option<u32> {
+    let nb = name.as_bytes();
+    for attr in e.attributes().flatten() {
+        if attr.key.as_ref() == nb {
+            return String::from_utf8_lossy(&attr.value).parse().ok();
+        }
+    }
+    None
+}
+
+fn parse_bool_attr(e: &quick_xml::events::BytesStart, name: &str) -> bool {
+    let nb = name.as_bytes();
+    for attr in e.attributes().flatten() {
+        if attr.key.as_ref() == nb {
+            return &attr.value[..] == b"True";
+        }
+    }
+    false
+}
+
 fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| match c {
@@ -693,8 +1313,7 @@ fn sanitize_filename(name: &str) -> String {
         .to_string()
 }
 
-/// Extract all ScriptReference id values from the inner XML of an ObjectList.
-/// These are the script call targets (Perform Script, etc.) embedded in step parameters.
+/// Extract all ScriptReference id values from a chunk of XML.
 fn extract_script_refs(xml: &str) -> Vec<u32> {
     let mut refs = Vec::new();
     let mut pos = 0;
@@ -716,7 +1335,28 @@ fn extract_script_refs(xml: &str) -> Vec<u32> {
     refs
 }
 
-/// Extract a named attribute value from a raw XML tag string (e.g. `<Step id="5" name="Foo">`).
+/// Extract layout names referenced in a chunk of XML (LayoutReference name="...").
+fn extract_layout_refs(xml: &str) -> Vec<String> {
+    let mut refs = Vec::new();
+    let mut pos = 0;
+    while let Some(i) = xml[pos..].find("<LayoutReference ") {
+        let tag_start = pos + i;
+        let after = &xml[tag_start..];
+        if let Some(gt) = after.find('>') {
+            let tag = &after[..gt];
+            if let Some(name) = extract_xml_attr(tag, "name") {
+                if !name.is_empty() {
+                    refs.push(name.to_string());
+                }
+            }
+            pos = tag_start + gt + 1;
+        } else {
+            break;
+        }
+    }
+    refs
+}
+
 fn extract_xml_attr<'a>(tag: &'a str, attr_name: &str) -> Option<&'a str> {
     let needle = format!(" {}=\"", attr_name);
     let start = tag.find(&needle)? + needle.len();
@@ -724,47 +1364,28 @@ fn extract_xml_attr<'a>(tag: &'a str, attr_name: &str) -> Option<&'a str> {
     Some(&tag[start..end])
 }
 
-/// Normalize FMSaveAsXML's double-nested Calculation elements to the single-level
-/// form that parse_fmxml_snippet (built for the XMSS clipboard format) expects.
-///
-/// FMSaveAsXML:  <Calculation datatype="1" position="0"><Calculation><Text>…</Text></Calculation></Calculation>
-/// XMSS expects: <Calculation><Text>…</Text></Calculation>
-///
-/// Strategy: strip the outer opening tag (which has `datatype` attribute) and the
-/// corresponding extra closing tag. We walk the string tracking Calculation depth
-/// so we only collapse the outer wrapper, not legitimate inner nesting.
+/// Collapse FMSaveAsXML's double-nested Calculation wrapper to XMSS single-level form.
 fn normalize_calculations(xml: &str) -> String {
     let bytes = xml.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
 
     while i < bytes.len() {
-        // Look for '<' to inspect tags.
         if bytes[i] != b'<' {
             out.push(bytes[i]);
             i += 1;
             continue;
         }
-
-        // Find the end of this tag.
         let tag_start = i;
         let mut j = i + 1;
         while j < bytes.len() && bytes[j] != b'>' {
             j += 1;
         }
-        // j points to '>' or end of string.
         let tag_end = if j < bytes.len() { j + 1 } else { j };
         let tag = &xml[tag_start..tag_end];
 
-        // Check if this is an outer Calculation wrapper:
-        // <Calculation  (with space — meaning it has attributes like datatype/position).
         if tag.starts_with("<Calculation ") && !tag.starts_with("</") {
-            // Skip this opening tag entirely (collapse outer wrapper).
             i = tag_end;
-            // Now skip the matching closing </Calculation>.
-            // We need to skip the LAST </Calculation> in this outer Calculation element.
-            // Since the inner <Calculation> is a single level, after emitting the
-            // inner content we'll encounter one extra </Calculation>. Track depth.
             let mut depth = 1i32;
             while i < bytes.len() && depth > 0 {
                 if bytes[i] == b'<' {
@@ -778,14 +1399,14 @@ fn normalize_calculations(xml: &str) -> String {
                     if inner_tag.starts_with("</Calculation") {
                         depth -= 1;
                         if depth == 0 {
-                            // Skip this extra closing tag (it matched the outer wrapper we removed).
                             i = k_end;
                             break;
                         }
-                    } else if inner_tag.starts_with("<Calculation") && !inner_tag.starts_with("</") {
+                    } else if inner_tag.starts_with("<Calculation")
+                        && !inner_tag.starts_with("</")
+                    {
                         depth += 1;
                     }
-                    // Emit this inner tag.
                     out.extend_from_slice(inner_tag.as_bytes());
                     i = k_end;
                 } else {
@@ -798,6 +1419,5 @@ fn normalize_calculations(xml: &str) -> String {
             i = tag_end;
         }
     }
-
     String::from_utf8_lossy(&out).into_owned()
 }

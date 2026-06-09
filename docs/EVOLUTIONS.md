@@ -42,6 +42,27 @@ Propuesta: `fm-bridge inspect-workspace <carpeta-xmls> <output>` que:
 - En las TOs externas, resuelve el schema del archivo correspondiente.
 - Una sola `analysis/` global con dependencias cross-file reales.
 
+## Auto-enter + Validation extraction (alta prioridad detectada en `fm-batch-import`)
+
+Hoy el `tables/<Table>.json` reporta `field_type` y `data_type` pero **no**:
+- `<AutoEnter type="ConstantData|Calculated|CreationTimestamp|ModificationTimestamp|CreationAccountName|ModificationAccountName|SerialNumber">`
+- El `<ConstantData>` o `<Calculation>` interno
+- `<Validation type=... notEmpty unique existing allowOverride>`
+
+Para el proyecto `fm-batch-import` (Java pre-calcula auto-enters para usar
+`Import Records [doAutoEntry=False]`) esto es CRÍTICO. Hoy lo sacamos a mano
+con grep al XML. Propuesta: agregar al parser de `<Field>` la captura de
+`<AutoEnter>` y `<Validation>` como sub-objetos. ~80 líneas.
+
+Estructura propuesta para el JSON:
+```json
+{
+  "id": 4, "name": "Ofe_PK", "field_type": "Normal", "data_type": "Text",
+  "auto_enter": { "type": "Calculated", "expression": "GetAsString(Get(UUID))", "overwrite_existing": true },
+  "validation": { "type": "Always", "not_empty": true, "unique": true, "allow_override": false }
+}
+```
+
 ## Cosas menores
 
 - Algunos `Go to Layout` salen sin `[name #id]` cuando el target está roto

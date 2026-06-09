@@ -13,3 +13,4 @@ scripts/
 built_*.xml
 decoded_*.fmscript
 clipboard_*.fmscript
+.output

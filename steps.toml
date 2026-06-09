@@ -1467,7 +1467,7 @@ kind = "SendMail"
 id = 63
 en = "Send Mail"
 es = "Enviar correo"
-shape = "plain"
+shape = "send_mail"
 opens_block = false
 closes_block = false
 

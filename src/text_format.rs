@@ -105,6 +105,28 @@ pub fn format_step(step: &ScriptStep) -> String {
                 line.push_str(&format!(" [{}]", parts.join("; ")));
             }
         }
+        Some(StepShape::SendMail) => {
+            // Field reuse: To→var_name, CC→object_name, BCC→function_name,
+            // Subject→dialog_title, Message→dialog_message.
+            let mut parts = Vec::new();
+            for (label, val) in [
+                ("To", &step.var_name),
+                ("CC", &step.object_name),
+                ("BCC", &step.function_name),
+                ("Subject", &step.dialog_title),
+                ("Message", &step.dialog_message),
+            ] {
+                if let Some(v) = val {
+                    let t = v.trim();
+                    if !t.is_empty() {
+                        parts.push(format!("{}: {}", label, t));
+                    }
+                }
+            }
+            if !parts.is_empty() {
+                line.push_str(&format!(" [{}]", parts.join("; ")));
+            }
+        }
         Some(StepShape::WebViewerJs) => {
             let mut parts = Vec::new();
             if let Some(obj) = &step.object_name {
@@ -648,6 +670,18 @@ fn build_step_from_name(name: &str, content: Option<&str>, enabled: bool, id: u3
                 indent_level: indent,
             }
         }
+        Some(StepShape::SendMail) => {
+            // Field reuse: To→var_name, CC→object_name, BCC→function_name,
+            // Subject→dialog_title, Message→dialog_message.
+            let (to, cc, bcc, subject, message) = parse_sendmail_content(content.unwrap_or(""));
+            ScriptStep {
+                name: name.to_string(), enable: enabled, id,
+                var_name: to, object_name: cc, function_name: bcc,
+                dialog_title: subject, dialog_message: message,
+                indent_level: indent,
+                ..Default::default()
+            }
+        }
         Some(StepShape::FieldByName) => {
             let (result, target) = parse_field_content(content);
             ScriptStep {
@@ -1002,6 +1036,76 @@ fn parse_dialog_content(content: Option<&str>) -> (Option<String>, Option<String
     }
 
     (title, message, buttons)
+}
+
+/// Parse Send Mail content: `To: <calc>; CC: <calc>; BCC: <calc>; Subject: <calc>; Message: <calc>`.
+/// Returns (to, cc, bcc, subject, message), each a FileMaker calc expression.
+///
+/// Field boundaries are detected only at top-level `Key:` markers — a known key
+/// followed by `:` sitting at bracket/paren depth 0, outside any string, and either
+/// at the content start or right after a top-level `;`. This keeps a `;` inside a
+/// calc string (e.g. "a;b") or a function call (e.g. Case ( x ; y ; z )) from
+/// splitting in the wrong place. Content with no recognized marker (e.g. a bare
+/// address typed by hand) is taken entirely as `To`.
+fn parse_sendmail_content(content: &str) -> (Option<String>, Option<String>, Option<String>, Option<String>, Option<String>) {
+    let content = content.trim();
+    if content.is_empty() {
+        return (None, None, None, None, None);
+    }
+
+    // (key-with-colon, slot index). Each carries its own `:` so prefixes don't clash.
+    const KEYS: [(&str, usize); 5] = [
+        ("To:", 0), ("CC:", 1), ("BCC:", 2), ("Subject:", 3), ("Message:", 4),
+    ];
+
+    // Collect (slot, key_start_byte, value_start_byte) for each top-level marker, in order.
+    let mut markers: Vec<(usize, usize, usize)> = Vec::new();
+    let mut in_string = false;
+    let mut depth: i32 = 0;
+    let mut at_boundary = true; // content start counts as a boundary
+
+    for (pos, ch) in content.char_indices() {
+        match ch {
+            '"' => { in_string = !in_string; at_boundary = false; }
+            '[' | '(' if !in_string => { depth += 1; at_boundary = false; }
+            ']' | ')' if !in_string => { depth -= 1; at_boundary = false; }
+            ';' if !in_string && depth == 0 => { at_boundary = true; }
+            c if c.is_whitespace() => { /* whitespace keeps the boundary state */ }
+            _ => {
+                if at_boundary {
+                    let rest = &content[pos..];
+                    if let Some(&(key, slot)) = KEYS.iter().find(|(k, _)| rest.starts_with(k)) {
+                        markers.push((slot, pos, pos + key.len()));
+                    }
+                }
+                at_boundary = false;
+            }
+        }
+    }
+
+    // No recognized field markers: treat the whole thing as the To address/calc.
+    if markers.is_empty() {
+        return (Some(content.to_string()), None, None, None, None);
+    }
+
+    let mut slots: [Option<String>; 5] = [None, None, None, None, None];
+    for (i, &(slot, _key_start, val_start)) in markers.iter().enumerate() {
+        let val_end = markers
+            .get(i + 1)
+            .map(|&(_, next_key_start, _)| next_key_start)
+            .unwrap_or(content.len());
+        let mut value = content[val_start..val_end].trim();
+        // Drop the single trailing top-level `;` that separates this field from the next.
+        if value.ends_with(';') {
+            value = value[..value.len() - 1].trim_end();
+        }
+        if !value.is_empty() {
+            slots[slot] = Some(value.to_string());
+        }
+    }
+
+    let [to, cc, bcc, subject, message] = slots;
+    (to, cc, bcc, subject, message)
 }
 
 /// Parse Execute FileMaker Data API content: `$target; query_calc` or just `query_calc`.
@@ -1500,6 +1604,57 @@ mod tests {
 
         let text = super::format_script(&script);
         assert_eq!(text, "Replace Field Contents [Cli_d_Sesiones::g__END__; \"pruebas\"; Dialog: Off]");
+    }
+
+    // Real capture from FileMaker (debug_raw.xml), with the step name normalized to
+    // the English canonical so the round-trip below is an exact string match. The old
+    // `plain` shape glued To+Subject into one field (producing a stray `""`) and lost
+    // the Message entirely; the SendMail shape keeps all three separate.
+    const SEND_MAIL: &str = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"63\" name=\"Send Mail\"><NoInteract state=\"True\"></NoInteract><To UseFoundSet=\"False\"><Calculation><![CDATA[\"lucas.varone@by.com.es\"]]></Calculation></To><Subject><Calculation><![CDATA[\"Albarán Servicio \" &  $AlbSerRef & \" fecha \" & $AlbSerFec]]></Calculation></Subject><Message><Calculation><![CDATA[\"Tienes un albarán con la referencia \" & $AlbSerRef]]></Calculation></Message><MultipleEmails state=\"False\"></MultipleEmails><SendViaSMTP state=\"False\"></SendViaSMTP><SendViaOAuthAuthentication state=\"False\"></SendViaOAuthAuthentication><SMTPEncryptionType type=\"SMTPEncryptionNone\"></SMTPEncryptionType><SMTPAuthenticationType type=\"SMTPAuthenticationNone\"></SMTPAuthenticationType><OAuthProvider type=\"OAuthProviderGoogle\"></OAuthProvider></Step></fmxmlsnippet>";
+
+    #[test]
+    fn send_mail_decodes_to_structured_text() {
+        let script = xmss::parse_fmxml_snippet(SEND_MAIL).unwrap();
+        let s = &script.steps[0];
+        // Field reuse: To→var_name, Subject→dialog_title, Message→dialog_message.
+        assert_eq!(s.var_name.as_deref(), Some("\"lucas.varone@by.com.es\""));
+        assert_eq!(s.dialog_title.as_deref(), Some("\"Albarán Servicio \" &  $AlbSerRef & \" fecha \" & $AlbSerFec"));
+        assert_eq!(s.dialog_message.as_deref(), Some("\"Tienes un albarán con la referencia \" & $AlbSerRef"));
+
+        let text = super::format_script(&script);
+        assert_eq!(
+            text,
+            "Send Mail [To: \"lucas.varone@by.com.es\"; Subject: \"Albarán Servicio \" &  $AlbSerRef & \" fecha \" & $AlbSerFec; Message: \"Tienes un albarán con la referencia \" & $AlbSerRef]"
+        );
+    }
+
+    #[test]
+    fn send_mail_roundtrips() {
+        let script = xmss::parse_fmxml_snippet(SEND_MAIL).unwrap();
+        let text = super::format_script(&script);
+        let script2 = super::parse_text_to_script(&text).unwrap();
+        let rebuilt = xmss::build_xml_from_script(&script2).unwrap();
+        assert_eq!(rebuilt, SEND_MAIL);
+    }
+
+    #[test]
+    fn send_mail_semicolons_in_calc_dont_split() {
+        // A `;` inside a calc (Case args, JSON, strings) must NOT split a field.
+        let text = "Send Mail [To: \"a@b.com\"; Subject: Case ( $x = 1 ; \"Uno\" ; \"Otro\" ); Message: \"x;y;z\" & $m]";
+        let script = super::parse_text_to_script(text).unwrap();
+        let s = &script.steps[0];
+        assert_eq!(s.var_name.as_deref(), Some("\"a@b.com\""));
+        assert_eq!(s.dialog_title.as_deref(), Some("Case ( $x = 1 ; \"Uno\" ; \"Otro\" )"));
+        assert_eq!(s.dialog_message.as_deref(), Some("\"x;y;z\" & $m"));
+    }
+
+    #[test]
+    fn send_mail_bare_address_is_treated_as_to() {
+        // No `Key:` marker → the whole content is the To recipient.
+        let script = super::parse_text_to_script("Send Mail [\"soporte@empresa.com\"]").unwrap();
+        let s = &script.steps[0];
+        assert_eq!(s.var_name.as_deref(), Some("\"soporte@empresa.com\""));
+        assert_eq!(s.dialog_title, None);
     }
 
     #[test]

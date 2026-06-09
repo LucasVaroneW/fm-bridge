@@ -71,6 +71,17 @@ pub enum StepShape {
     /// + <Calculation>url</Calculation> + <Text/> + <Field>$var</Field> or <Field name=.../>.
     /// Used by Insert from URL.
     InsertFromUrl,
+    /// Send Mail: <To>/<CC>/<BCC>/<Subject>/<Message>, each wrapped in
+    /// <Calculation><![CDATA[...]]></Calculation>. The remaining send-method flags
+    /// (MultipleEmails, SendViaSMTP, OAuth, encryption) are emitted on encode as the
+    /// common "send through the user's email client" defaults.
+    /// Field reuse (no new struct fields): To→var_name, CC→object_name,
+    /// BCC→function_name, Subject→dialog_title, Message→dialog_message.
+    /// Text form: `[To: <calc>; CC: <calc>; BCC: <calc>; Subject: <calc>; Message: <calc>]`
+    /// where each <calc> is a FileMaker calc expression (string literals keep their
+    /// quotes). Field splits happen only at top-level `;` markers, so `;` inside
+    /// calc strings/parens is preserved.
+    SendMail,
     /// Whole inner XML preserved verbatim — no structured parsing.
     /// Used by steps whose FM config is too rich for a flat text line
     /// (Import/Export Records: <Profile>, <TargetFields> with N field maps, etc.).

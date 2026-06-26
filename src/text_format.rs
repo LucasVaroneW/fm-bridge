@@ -386,6 +386,21 @@ fn preprocess_block_comments(text: &str) -> String {
 
         if !in_block {
             if let Some(after_open) = body.strip_prefix("/* ").or_else(|| body.strip_prefix("/*")) {
+                // A `/* ... */` that disables a whole step (the only shape this tool
+                // ever generates, see `format_step` above) always has the step name
+                // right after `/* `, e.g. `/* Perform Script [...] */`. A calculation
+                // can also contain a *literal*, hand-authored FileMaker in-formula
+                // comment nested inside an already-open, still-active step (e.g. to
+                // comment out a couple of JSONSetElement rows while keeping the call
+                // itself live) — that shape starts with `[` right after `/* `, with no
+                // step name. Treat that case as plain text: leave it untouched so the
+                // enclosing step's own bracket-matching finds its real closing `]`,
+                // instead of misreading it as a step-disable marker and swallowing
+                // whatever follows the closing `*/` on its last line.
+                if after_open.trim_start().starts_with('[') {
+                    out.push(raw.to_string());
+                    continue;
+                }
                 in_block = true;
                 // Check for `*/` on the same line (single-line block comment).
                 if let Some(close_idx) = after_open.rfind("*/") {
@@ -1938,5 +1953,24 @@ mod tests {
         assert_eq!(text, "Mystery Step #42");
         let script2 = super::parse_text_to_script(&text).unwrap();
         assert_eq!(xmss::build_xml_from_script(&script2).unwrap(), xml);
+    }
+
+    #[test]
+    fn nested_inline_block_comment_inside_open_step_does_not_eat_closing_bracket() {
+        // Hand-authored FileMaker calcs can have a literal `/* ... */` comment
+        // nested inside an otherwise-active, still-open multi-line step (e.g. to
+        // disable a couple of extra JSONSetElement rows while keeping the call
+        // itself live) — as opposed to the `/* StepName [...] */` shape this tool
+        // generates for disabling a *whole* step. The two are told apart by what
+        // follows `/* `: a step name (disable-whole-step) vs. `[` directly
+        // (in-formula comment). The closing `]` may sit right after `*/` on the
+        // same line; that `]` belongs to the enclosing step and must not be eaten.
+        let text = "Set Variable [$$BF_Model = JSONSetElement ( $$BF_Model ; [\"a\" ; 1 ; 2] )\n\n/* [\"conf_mail\" ; $Conf_API_Graph ; 3 ];\n [\"plantillaMailQr\" ; $plantillaMailQr ; 1 ]*/]";
+        let script = super::parse_text_to_script(text).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        let calc = script.steps[0].calculation.as_deref().unwrap();
+        assert!(calc.contains("JSONSetElement ( $$BF_Model ; [\"a\" ; 1 ; 2] )"));
+        assert!(calc.contains("/* [\"conf_mail\""));
+        assert!(calc.ends_with("*/"));
     }
 }

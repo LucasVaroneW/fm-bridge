@@ -109,6 +109,7 @@ fn run_cli_mode() -> Result<(), String> {
         "test" => run_test_cli(),
         "passthrough" => run_passthrough_cli(),
         "dump-ids" => run_dump_ids_cli(),
+        "steps" => run_steps_cli(),
         "encode-text" => {
             if args.len() < 3 { return Err("Usage: fm-bridge encode-text <in.fmscript> <out.xml>".to_string()); }
             let text = read_file_to_string(&args[1])?;
@@ -130,7 +131,7 @@ fn run_cli_mode() -> Result<(), String> {
             }
             Ok(())
         }
-        _ => Err(format!("Unknown command: {}. Use: read, write, json, debug, test, passthrough, dump-ids", args[0]))
+        _ => Err(format!("Unknown command: {}. Use: read, write, json, steps, debug, test, passthrough, dump-ids", args[0]))
     }
 }
 
@@ -232,6 +233,17 @@ fn run_dump_ids_cli() -> Result<(), String> {
     for step in &script.steps {
         println!("{}\t{}", step.id, step.name);
     }
+    Ok(())
+}
+
+/// Emit the full step catalog as JSON. This is the single source of truth the
+/// VS Code extension reads for autocomplete (step names, shapes, block
+/// behavior), so the extension never drifts from the installed binary.
+fn run_steps_cli() -> Result<(), String> {
+    let catalog = steps::catalog();
+    let json = serde_json::to_string_pretty(&catalog)
+        .map_err(|e| format!("Cannot serialize step catalog: {}", e))?;
+    println!("{}", json);
     Ok(())
 }
 

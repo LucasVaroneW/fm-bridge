@@ -130,6 +130,18 @@ descubrir el ID numérico de un tipo de step nuevo que aún no esté en
 fm-bridge dump-ids
 ```
 
+### `fm-bridge steps`
+
+Imprime el catálogo completo de tipos de step en JSON: nombre (EN/ES), `shape`,
+si abre/cierra bloque y si tiene ID registrado. Es la fuente de verdad que
+consume la extensión de VSCode para el autocompletado (así nunca sugiere un
+step que el binario instalado no soporta).
+
+```bash
+fm-bridge steps          # JSON a stdout
+fm-bridge steps > catalog.json
+```
+
 ### `fm-bridge debug`
 
 Vuelca a la carpeta actual:

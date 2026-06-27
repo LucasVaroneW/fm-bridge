@@ -1108,7 +1108,8 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
 /// Returns raw XML bytes (no framing). The clipboard layer adds platform-specific
 /// framing: Windows prepends a 4-byte LE length; macOS NSPasteboard takes raw XML.
 pub fn encode_xmss(text: &str) -> Result<Vec<u8>, String> {
-    let script = crate::text_format::parse_text_to_script(text)?;
+    let script = crate::text_format::parse_text_to_script(text)
+        .map_err(|e| e.to_string())?;
     let xml = build_xml_from_script(&script)?;
     Ok(xml.into_bytes())
 }

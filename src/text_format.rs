@@ -399,9 +399,36 @@ fn preprocess_block_comments(text: &str) -> String {
     out.join("\n")
 }
 
+/// A parse failure with the 1-based source line it occurred on (`0` = unknown).
+/// Carries structured position info so the VS Code extension can place a
+/// diagnostic on the right line, not just show a flat message.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ParseError {
+    pub line: usize,
+    pub message: String,
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.line > 0 {
+            write!(f, "Line {}: {}", self.line, self.message)
+        } else {
+            write!(f, "{}", self.message)
+        }
+    }
+}
+
+/// String errors (e.g. from `resolve_id`) become line-less ParseErrors; call
+/// sites that know the line override it explicitly via `map_err`.
+impl From<String> for ParseError {
+    fn from(message: String) -> Self {
+        ParseError { line: 0, message }
+    }
+}
+
 /// Parse plain text into a structured script.
 /// Handles multiline bracket content by collecting lines until `]` is found.
-pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
+pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
     let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     let preprocessed = preprocess_block_comments(text);
     let text = preprocessed.as_str();
@@ -485,6 +512,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
         // `[...]` pairs (JSONSetElement rows, List() literals, etc.) don't terminate
         // the step's bracket. We close only when an unmatched `]` is found.
         if let Some(idx) = content.find(" [") {
+            let step_line = i; // 0-based line where this step (and its `[`) begins
             // Accept Spanish step names too: translate to the English canonical
             // name before any shape/id lookup (decode does the same for XML).
             // English names pass through unchanged.
@@ -522,7 +550,10 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
                 if terminated { break; }
                 i += 1;
                 if i >= lines.len() {
-                    return Err(format!("Unclosed `[` in step '{}'", step_name));
+                    return Err(ParseError {
+                        line: step_line + 1,
+                        message: format!("Unclosed `[` in step '{}'", step_name),
+                    });
                 }
                 bracket_content.push('\n');
                 let raw_line = lines[i];
@@ -538,12 +569,16 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, String> {
             }
             i += 1;
 
-            let step = build_step_from_name(&step_name, Some(&bracket_content), enabled, resolve_id(&step_name)?, indent);
+            let id = resolve_id(&step_name)
+                .map_err(|m| ParseError { line: step_line + 1, message: m })?;
+            let step = build_step_from_name(&step_name, Some(&bracket_content), enabled, id, indent);
             steps.push(step);
         } else {
             // No bracket content. Translate Spanish → English canonical first.
             let step_name = steps::translate_to_en(content);
-            let step = build_step_from_name(&step_name, None, enabled, resolve_id(&step_name)?, indent);
+            let id = resolve_id(&step_name)
+                .map_err(|m| ParseError { line: i + 1, message: m })?;
+            let step = build_step_from_name(&step_name, None, enabled, id, indent);
             steps.push(step);
             i += 1;
         }
@@ -1552,5 +1587,23 @@ mod tests {
     fn write_accepts_spanish_step_name_without_brackets() {
         let script = super::parse_text_to_script("Fin Si").unwrap();
         assert_eq!(script.steps[0].name, "End If");
+    }
+
+    #[test]
+    fn parse_error_reports_line_for_unknown_step() {
+        let text = "Set Variable [$x = 1]\nShow All Records\nNoSuchStep [foo]";
+        let err = super::parse_text_to_script(text).unwrap_err();
+        assert_eq!(err.line, 3);
+        assert!(err.message.contains("NoSuchStep"));
+        assert_eq!(err.to_string(), format!("Line 3: {}", err.message));
+    }
+
+    #[test]
+    fn parse_error_reports_line_for_unclosed_bracket() {
+        // `[` opens on line 2 and never closes.
+        let text = "Set Variable [$x = 1]\nSet Variable [$y = oops";
+        let err = super::parse_text_to_script(text).unwrap_err();
+        assert_eq!(err.line, 2);
+        assert!(err.message.contains("Unclosed"));
     }
 }

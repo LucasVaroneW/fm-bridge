@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Gate bloqueante: el tool es cross-platform (código específico de Windows y
+  # macOS), así que compilamos y testeamos en ambos. Un PR que rompa en una
+  # plataforma se caza acá antes del merge.
+  test:
+    name: build & test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --verbose
+      - name: Test
+        run: cargo test --verbose
+
+  # Lint informativo: NO bloquea el merge (continue-on-error). Muestra el estado
+  # de rustfmt/clippy para ir limpiando de a poco. Cuando el código esté limpio,
+  # se puede promover a bloqueante quitando continue-on-error.
+  lint:
+    name: lint (non-blocking)
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --check
+      - name: clippy
+        run: cargo clippy --all-targets

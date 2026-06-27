@@ -2,11 +2,11 @@
 // This is the single source of truth for step names, shapes, and block behavior.
 // Uses include_str! + toml crate for zero-runtime TOML parsing.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// How a step's data is stored in the FM XML.
 /// Determines which XML elements to read/write.
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum StepShape {
     /// No content elements (Halt Script, End If, etc.)
@@ -129,6 +129,37 @@ pub fn all_steps() -> &'static [StepDef] {
     STEPS.get_or_init(parse_steps)
 }
 
+/// Serializable view of a step for the `fm-bridge steps` command.
+/// This is the single source of truth the VS Code extension reads for
+/// autocomplete: step name (EN/ES), its shape, and block behavior. Keeping
+/// it in the binary (instead of duplicating steps.toml in the extension)
+/// means the extension can never suggest a step the installed binary lacks.
+#[derive(Serialize)]
+pub struct StepInfo {
+    pub en: String,
+    pub es: String,
+    pub shape: StepShape,
+    pub opens_block: bool,
+    pub closes_block: bool,
+    /// Whether this step has a FileMaker ID recorded (i.e. it can be written).
+    pub has_id: bool,
+}
+
+/// The full step catalog as a serializable list.
+pub fn catalog() -> Vec<StepInfo> {
+    all_steps()
+        .iter()
+        .map(|s| StepInfo {
+            en: s.en.clone(),
+            es: s.es.clone(),
+            shape: s.shape.clone(),
+            opens_block: s.opens_block,
+            closes_block: s.closes_block,
+            has_id: s.id.is_some(),
+        })
+        .collect()
+}
+
 /// Look up a step definition by its English name.
 /// Returns None if the name is not recognized.
 pub fn lookup_by_en(name: &str) -> Option<&'static StepDef> {
@@ -230,5 +261,24 @@ mod tests {
         assert_eq!(shape_for_en("Halt Script"), Some(&StepShape::Plain));
         assert_eq!(shape_for_en("Show Custom Dialog"), Some(&StepShape::Dialog));
         assert_eq!(shape_for_en("# (comment)"), Some(&StepShape::Comment));
+    }
+
+    #[test]
+    fn catalog_includes_known_steps_and_serializes() {
+        let cat = catalog();
+        assert!(!cat.is_empty());
+
+        let set_var = cat.iter().find(|s| s.en == "Set Variable").unwrap();
+        assert_eq!(set_var.shape, StepShape::ValueCalcName);
+        assert!(set_var.has_id);
+        assert!(!set_var.opens_block);
+
+        let if_step = cat.iter().find(|s| s.en == "If").unwrap();
+        assert!(if_step.opens_block);
+
+        // Shape serializes as snake_case; names are present.
+        let json = serde_json::to_string(&cat).unwrap();
+        assert!(json.contains("\"value_calc_name\""));
+        assert!(json.contains("\"Set Variable\""));
     }
 }

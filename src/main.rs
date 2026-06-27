@@ -33,46 +33,58 @@ struct Response {
     error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     version: Option<String>,
+    /// 1-based source line of a parse error, for the editor to place a squiggle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_line: Option<usize>,
+}
+
+impl Response {
+    fn ok() -> Self {
+        Response { status: "ok".to_string(), script_text: None, error: None, version: None, error_line: None }
+    }
+    fn ok_text(text: String) -> Self {
+        Response { status: "ok".to_string(), script_text: Some(text), error: None, version: None, error_line: None }
+    }
+    fn version(v: String) -> Self {
+        Response { status: "ok".to_string(), script_text: None, error: None, version: Some(v), error_line: None }
+    }
+    fn error(message: String) -> Self {
+        Response { status: "error".to_string(), script_text: None, error: Some(message), version: None, error_line: None }
+    }
+    fn error_at(message: String, line: usize) -> Self {
+        Response { status: "error".to_string(), script_text: None, error: Some(message), version: None, error_line: Some(line) }
+    }
 }
 
 fn handle_command(cmd: &Command) -> Response {
     match cmd.command.as_str() {
-        "version" => Response {
-            status: "ok".to_string(),
-            script_text: None,
-            error: None,
-            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        "version" => Response::version(env!("CARGO_PKG_VERSION").to_string()),
+        "read" => match clipboard::read_fm_clipboard() {
+            Ok(data) => match xmss::decode_xmss(&data) {
+                Ok(script) => Response::ok_text(text_format::format_script(&script)),
+                Err(e) => Response::error(e),
+            },
+            Err(e) => Response::error(e),
         },
-        "read" => {
-            match clipboard::read_fm_clipboard() {
-                Ok(data) => {
-                    match xmss::decode_xmss(&data) {
-                        Ok(script) => {
-                            let text = text_format::format_script(&script);
-                            Response { status: "ok".to_string(), script_text: Some(text), error: None, version: None }
-                        }
-                        Err(e) => Response { status: "error".to_string(), script_text: None, error: Some(e), version: None }
-                    }
-                }
-                Err(e) => Response { status: "error".to_string(), script_text: None, error: Some(e), version: None }
-            }
-        }
         "write" => {
             let script_text = match &cmd.script_text {
                 Some(t) => t,
-                None => return Response { status: "error".to_string(), script_text: None, error: Some("No script_text provided".to_string()), version: None }
+                None => return Response::error("No script_text provided".to_string()),
             };
+            // Parse first so a format error surfaces its line number to the editor
+            // (encode_xmss flattens it to a string; here we keep the structure).
+            if let Err(pe) = text_format::parse_text_to_script(script_text) {
+                return Response::error_at(pe.to_string(), pe.line);
+            }
             match xmss::encode_xmss(script_text) {
-                Ok(xmss_data) => {
-                    match clipboard::write_fm_clipboard(&xmss_data) {
-                        Ok(()) => Response { status: "ok".to_string(), script_text: None, error: None, version: None },
-                        Err(e) => Response { status: "error".to_string(), script_text: None, error: Some(e), version: None }
-                    }
-                }
-                Err(e) => Response { status: "error".to_string(), script_text: None, error: Some(e), version: None }
+                Ok(xmss_data) => match clipboard::write_fm_clipboard(&xmss_data) {
+                    Ok(()) => Response::ok(),
+                    Err(e) => Response::error(e),
+                },
+                Err(e) => Response::error(e),
             }
         }
-        _ => Response { status: "error".to_string(), script_text: None, error: Some(format!("Unknown command: {}", cmd.command)), version: None }
+        _ => Response::error(format!("Unknown command: {}", cmd.command)),
     }
 }
 

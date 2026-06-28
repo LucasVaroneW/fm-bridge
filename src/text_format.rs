@@ -327,7 +327,7 @@ pub fn format_step(step: &ScriptStep) -> String {
                 line.push(']');
             }
         }
-        Some(StepShape::Comment) | Some(StepShape::Plain) | Some(StepShape::Opaque) | None => {
+        Some(StepShape::Comment) | Some(StepShape::Plain) | Some(StepShape::Opaque) => {
             // Fallback: show any calc or text we have.
             // Opaque steps carry their full inner FM XML verbatim in `calculation`.
             if let Some(calc) = &step.calculation {
@@ -337,6 +337,19 @@ pub fn format_step(step: &ScriptStep) -> String {
                 }
             } else if let Some(text) = &step.text {
                 let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    line.push_str(&format!(" [{}]", trimmed));
+                }
+            }
+        }
+        None => {
+            // Unrecognized step → opaque by default. It isn't in steps.toml, so we
+            // carry its FM step id inline (`Name #id`) for the round-trip, followed
+            // by its raw inner XML verbatim in brackets. parse_text_to_script reads
+            // the inline id back; the linter treats it as valid (not an error).
+            line.push_str(&format!(" #{}", step.id));
+            if let Some(calc) = &step.calculation {
+                let trimmed = calc.trim();
                 if !trimmed.is_empty() {
                     line.push_str(&format!(" [{}]", trimmed));
                 }
@@ -511,7 +524,8 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
             // Accept Spanish step names too: translate to the English canonical
             // name before any shape/id lookup (decode does the same for XML).
             // English names pass through unchanged.
-            let step_name = steps::translate_to_en(&content[..idx]);
+            let (name_token, inline_id) = split_inline_step_id(&content[..idx]);
+            let step_name = steps::translate_to_en(name_token);
             let first_chunk = &content[idx + 2..];
 
             // The formatter adds `indent + 2` leading spaces to continuation lines
@@ -564,14 +578,21 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
             }
             i += 1;
 
-            let id = resolve_id(&step_name)
+            // Known steps resolve via steps.toml; an unrecognized step falls back
+            // to its inline `#id` (opaque-by-default) instead of erroring.
+            let id = steps::id_for_en(&step_name)
+                .or(inline_id)
+                .ok_or_else(|| unknown_step_message(&step_name))
                 .map_err(|m| ParseError { line: step_line + 1, message: m })?;
             let step = build_step_from_name(&step_name, Some(&bracket_content), enabled, id, indent);
             steps.push(step);
         } else {
             // No bracket content. Translate Spanish → English canonical first.
-            let step_name = steps::translate_to_en(content);
-            let id = resolve_id(&step_name)
+            let (name_token, inline_id) = split_inline_step_id(content);
+            let step_name = steps::translate_to_en(name_token);
+            let id = steps::id_for_en(&step_name)
+                .or(inline_id)
+                .ok_or_else(|| unknown_step_message(&step_name))
                 .map_err(|m| ParseError { line: i + 1, message: m })?;
             let step = build_step_from_name(&step_name, None, enabled, id, indent);
             steps.push(step);
@@ -596,6 +617,24 @@ fn unknown_step_message(name: &str) -> String {
          then add `id = N` to its entry in steps.toml.",
         name
     )
+}
+
+/// Split a trailing ` #<digits>` step-id off a step-name token. Unrecognized
+/// (opaque) steps carry their FileMaker step id inline because steps.toml has no
+/// entry to resolve it from. Returns (name_without_id, Some(id)) when the suffix
+/// is present and numeric, else (original, None). Known steps never use this —
+/// their `#id` (Perform Script, Go to Layout) lives inside the brackets instead.
+fn split_inline_step_id(name_part: &str) -> (&str, Option<u32>) {
+    let trimmed = name_part.trim_end();
+    if let Some(hash) = trimmed.rfind(" #") {
+        let digits = &trimmed[hash + 2..];
+        if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+            if let Ok(id) = digits.parse::<u32>() {
+                return (trimmed[..hash].trim_end(), Some(id));
+            }
+        }
+    }
+    (name_part, None)
 }
 
 /// Validate text and return **every** error found, not just the first — so the
@@ -640,14 +679,18 @@ pub fn lint(text: &str) -> Vec<ParseError> {
 
         let step_line = i; // 0-based; reported as +1
         let bracket_at = content.find(" [");
-        let step_name = match bracket_at {
-            Some(idx) => steps::translate_to_en(&content[..idx]),
-            None => steps::translate_to_en(content),
+        let name_part = match bracket_at {
+            Some(idx) => &content[..idx],
+            None => content,
         };
+        let (name_token, inline_id) = split_inline_step_id(name_part);
+        let step_name = steps::translate_to_en(name_token);
 
         check_block(&step_name, step_line + 1, &mut block_stack, &mut errors);
 
-        if steps::id_for_en(&step_name).is_none() {
+        // Unknown steps are only an error when they lack an inline `#id` — with one
+        // they're valid opaque-by-default steps that round-trip verbatim.
+        if steps::id_for_en(&step_name).is_none() && inline_id.is_none() {
             errors.push(ParseError {
                 line: step_line + 1,
                 message: unknown_step_message(&step_name),
@@ -1852,5 +1895,48 @@ mod tests {
         // calc body must not be parsed as steps (no false "unknown step").
         let text = "Set Variable [$x = Let ( [\n    a = 1\n  ] ; a )]\nShow All Records";
         assert!(super::lint(text).is_empty());
+    }
+
+    // ── Opaque-by-default for unrecognized steps (#2) ──
+
+    // A genuinely uncatalogued step (not in steps.toml) with arbitrary children.
+    const UNKNOWN_STEP: &str = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"99999\" name=\"Totally Made Up Step\"><SomeWeirdChild foo=\"bar\"></SomeWeirdChild><Calculation><![CDATA[\"x\"]]></Calculation></Step></fmxmlsnippet>";
+
+    #[test]
+    fn unknown_step_roundtrips_xml_verbatim() {
+        // decode → encode must reproduce the inner XML byte-for-byte.
+        let script = xmss::parse_fmxml_snippet(UNKNOWN_STEP).unwrap();
+        let rebuilt = xmss::build_xml_from_script(&script).unwrap();
+        assert_eq!(rebuilt, UNKNOWN_STEP);
+    }
+
+    #[test]
+    fn unknown_step_roundtrips_through_text() {
+        // The full tool path: decode → format (.fmscript) → parse → encode.
+        let script = xmss::parse_fmxml_snippet(UNKNOWN_STEP).unwrap();
+        let text = super::format_script(&script);
+        // The step id is carried inline because steps.toml can't supply it.
+        assert!(text.contains("Totally Made Up Step #99999"));
+        let script2 = super::parse_text_to_script(&text).unwrap();
+        let rebuilt = xmss::build_xml_from_script(&script2).unwrap();
+        assert_eq!(rebuilt, UNKNOWN_STEP);
+    }
+
+    #[test]
+    fn lint_accepts_unknown_step_with_inline_id() {
+        // With its inline #id it's a valid opaque step…
+        assert!(super::lint("Totally Made Up Step #99999 [<Foo></Foo>]").is_empty());
+        // …without one it's still flagged as unknown.
+        assert!(!super::lint("Totally Made Up Step [<Foo></Foo>]").is_empty());
+    }
+
+    #[test]
+    fn unknown_step_without_body_roundtrips() {
+        let xml = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"42\" name=\"Mystery Step\"></Step></fmxmlsnippet>";
+        let script = xmss::parse_fmxml_snippet(xml).unwrap();
+        let text = super::format_script(&script);
+        assert_eq!(text, "Mystery Step #42");
+        let script2 = super::parse_text_to_script(&text).unwrap();
+        assert_eq!(xmss::build_xml_from_script(&script2).unwrap(), xml);
     }
 }

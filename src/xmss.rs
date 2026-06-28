@@ -245,10 +245,17 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                                 _ => {}
                             }
                         }
-                        // Opaque steps: remember where the inner XML starts so the
-                        // whole thing can be captured verbatim at the </Step> end.
+                        // Opaque steps AND unrecognized steps (not in steps.toml):
+                        // remember where the inner XML starts so the whole thing can
+                        // be captured verbatim at </Step>. Opaque-by-default means
+                        // anything we don't model structurally is preserved as-is
+                        // rather than silently dropped.
                         let en = steps::translate_to_en(&parser.name);
-                        opaque_inner_start = if steps::shape_for_en(&en) == Some(&StepShape::Opaque) {
+                        let capture_verbatim = matches!(
+                            steps::shape_for_en(&en),
+                            Some(&StepShape::Opaque) | None
+                        );
+                        opaque_inner_start = if capture_verbatim {
                             Some(reader.buffer_position() as usize)
                         } else {
                             None
@@ -1083,15 +1090,18 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                 xml.push_str("</Query>");
             }
         }
-        Some(StepShape::Opaque) => {
-            // The raw inner XML was captured verbatim on decode — emit it as-is.
-            // Already valid, entity-escaped XML; must NOT be re-escaped or wrapped.
+        Some(StepShape::Opaque) | None => {
+            // Opaque-by-default: both catalogued opaque steps and steps we don't
+            // recognize carry their raw inner XML verbatim in `calculation` (set on
+            // decode, or authored inline). It's already valid, entity-escaped XML —
+            // emit as-is, never re-escape or wrap.
             if let Some(raw) = &step.calculation {
                 xml.push_str(raw);
             }
         }
-        Some(StepShape::Plain) | None => {
-            // Unknown or plain steps: output whatever data we have as fallback
+        Some(StepShape::Plain) => {
+            // Catalogued parameterless steps (Halt Script, End If, …). Normally no
+            // body, but emit any stray calc/text we were given as a safe fallback.
             if let Some(calc) = &step.calculation {
                 xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
             } else if let Some(text) = &step.text {

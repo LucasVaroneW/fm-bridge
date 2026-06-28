@@ -36,23 +36,33 @@ struct Response {
     /// 1-based source line of a parse error, for the editor to place a squiggle.
     #[serde(skip_serializing_if = "Option::is_none")]
     error_line: Option<usize>,
+    /// All validation errors found (linter). Each carries its own line + message,
+    /// so the editor can squiggle every problem at once. `error`/`error_line`
+    /// mirror the first entry for older single-error consumers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    errors: Option<Vec<text_format::ParseError>>,
 }
 
 impl Response {
     fn ok() -> Self {
-        Response { status: "ok".to_string(), script_text: None, error: None, version: None, error_line: None }
+        Response { status: "ok".to_string(), script_text: None, error: None, version: None, error_line: None, errors: None }
     }
     fn ok_text(text: String) -> Self {
-        Response { status: "ok".to_string(), script_text: Some(text), error: None, version: None, error_line: None }
+        Response { status: "ok".to_string(), script_text: Some(text), error: None, version: None, error_line: None, errors: None }
     }
     fn version(v: String) -> Self {
-        Response { status: "ok".to_string(), script_text: None, error: None, version: Some(v), error_line: None }
+        Response { status: "ok".to_string(), script_text: None, error: None, version: Some(v), error_line: None, errors: None }
     }
     fn error(message: String) -> Self {
-        Response { status: "error".to_string(), script_text: None, error: Some(message), version: None, error_line: None }
+        Response { status: "error".to_string(), script_text: None, error: Some(message), version: None, error_line: None, errors: None }
     }
-    fn error_at(message: String, line: usize) -> Self {
-        Response { status: "error".to_string(), script_text: None, error: Some(message), version: None, error_line: Some(line) }
+    /// Build an error response from a full list of validation errors. The first
+    /// error is also mirrored into `error`/`error_line` for single-error clients.
+    fn errors(errors: Vec<text_format::ParseError>) -> Self {
+        let first = errors.first();
+        let error = first.map(|e| e.to_string());
+        let error_line = first.map(|e| e.line);
+        Response { status: "error".to_string(), script_text: None, error, version: None, error_line, errors: Some(errors) }
     }
 }
 
@@ -66,15 +76,31 @@ fn handle_command(cmd: &Command) -> Response {
             },
             Err(e) => Response::error(e),
         },
+        // Validate-only: parse the text and report a positioned error, but do
+        // NOT touch the clipboard. The editor calls this on every change (with a
+        // debounce) to drive diagnostics, so it must be side-effect free.
+        "parse" => {
+            let script_text = match &cmd.script_text {
+                Some(t) => t,
+                None => return Response::error("No script_text provided".to_string()),
+            };
+            let errors = text_format::lint(script_text);
+            if errors.is_empty() {
+                Response::ok()
+            } else {
+                Response::errors(errors)
+            }
+        }
         "write" => {
             let script_text = match &cmd.script_text {
                 Some(t) => t,
                 None => return Response::error("No script_text provided".to_string()),
             };
-            // Parse first so a format error surfaces its line number to the editor
-            // (encode_xmss flattens it to a string; here we keep the structure).
-            if let Err(pe) = text_format::parse_text_to_script(script_text) {
-                return Response::error_at(pe.to_string(), pe.line);
+            // Lint first: surface every format/structure error to the editor and
+            // refuse to write a broken script to the clipboard.
+            let errors = text_format::lint(script_text);
+            if !errors.is_empty() {
+                return Response::errors(errors);
             }
             match xmss::encode_xmss(script_text) {
                 Ok(xmss_data) => match clipboard::write_fm_clipboard(&xmss_data) {

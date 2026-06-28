@@ -1,0 +1,11 @@
+.vscode/**
+src/**
+scripts/**
+node_modules/**
+esbuild.js
+tsconfig.json
+**/*.map
+**/*.ts
+.gitignore
+.vscodeignore
+# Keep bin/** — it holds the bundled fm-bridge binary the extension runs.

@@ -1,0 +1,72 @@
+{
+  "Set Variable": {
+    "prefix": "setv",
+    "body": "Set Variable [${1:\\$var} = ${2:value}]",
+    "description": "Set Variable [$var = value]"
+  },
+  "Set Field": {
+    "prefix": "setf",
+    "body": "Set Field [${1:Table::Field}; ${2:value}]",
+    "description": "Set Field [Table::Field; value]"
+  },
+  "If / End If": {
+    "prefix": "if",
+    "body": ["If [${1:condition}]", "\t$0", "End If"],
+    "description": "If [...] ... End If"
+  },
+  "If / Else / End If": {
+    "prefix": "ifelse",
+    "body": ["If [${1:condition}]", "\t$2", "Else", "\t$3", "End If"],
+    "description": "If [...] ... Else ... End If"
+  },
+  "Else If": {
+    "prefix": "elseif",
+    "body": "Else If [${1:condition}]",
+    "description": "Else If [...]"
+  },
+  "Loop / End Loop": {
+    "prefix": "loop",
+    "body": ["Loop", "\t$0", "\tExit Loop If [${1:condition}]", "End Loop"],
+    "description": "Loop ... Exit Loop If ... End Loop"
+  },
+  "Comment": {
+    "prefix": "comment",
+    "body": "# ${1:comment}",
+    "description": "# comment"
+  },
+  "Show Custom Dialog": {
+    "prefix": "dialog",
+    "body": "Show Custom Dialog [Title: ${1:\"Title\"}; Message: ${2:\"Message\"}; Buttons: ${3:\"OK\"}]",
+    "description": "Show Custom Dialog [Title; Message; Buttons]"
+  },
+  "Perform Script": {
+    "prefix": "perform",
+    "body": "Perform Script [${1:\"ScriptName\"} #${2:id}; ${3:parameter}]",
+    "description": "Perform Script [\"Name\" #id; param]"
+  },
+  "Go to Layout": {
+    "prefix": "gotolayout",
+    "body": "Go to Layout [${1:\"LayoutName\"} #${2:id}]",
+    "description": "Go to Layout [\"Name\" #id]"
+  },
+  "Perform Find": {
+    "prefix": "find",
+    "body": ["Perform Find [", "\tFind: ${1:Table::Field} => ${2:value}", "]"],
+    "description": "Perform Find [ Find: T::F => value ]"
+  },
+  "Insert from URL": {
+    "prefix": "inserturl",
+    "body": "Insert from URL [Target: ${1:\\$response}; URL: ${2:\"https://...\"}; Dialog: Off; VerifySSL]",
+    "description": "Insert from URL [Target; URL; Dialog: Off; VerifySSL]"
+  },
+  "Set Error Capture": {
+    "prefix": "errorcapture",
+    "body": "Set Error Capture [${1|True,False|}]",
+    "description": "Set Error Capture [True|False]"
+  },
+  "Exit Script": {
+    "prefix": "exit",
+    "body": "Exit Script [${1:result}]",
+    "description": "Exit Script [result]"
+  }
+}

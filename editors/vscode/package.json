@@ -1,0 +1,109 @@
+{
+  "name": "fm-bridge",
+  "displayName": "fm-bridge — FileMaker scripts",
+  "description": "Edit FileMaker scripts as plain-text .fmscript files: syntax highlighting, snippets, clipboard read/write, diagnostics and step autocomplete. Backed by the fm-bridge Rust binary.",
+  "version": "0.1.0",
+  "publisher": "lucasvarone",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LucasVaroneW/fm-bridge.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "filemaker",
+    "fmscript",
+    "claris",
+    "script"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:fmscript"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "fmscript",
+        "aliases": [
+          "FileMaker Script",
+          "fmscript"
+        ],
+        "extensions": [
+          ".fmscript"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "fmscript",
+        "scopeName": "source.fmscript",
+        "path": "./syntaxes/fmscript.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "fmscript",
+        "path": "./snippets/fmscript.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "fm-bridge.readFromClipboard",
+        "title": "fm-bridge: Read script from clipboard",
+        "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.writeToClipboard",
+        "title": "fm-bridge: Write script to clipboard",
+        "category": "fm-bridge"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "fm-bridge.writeToClipboard",
+          "when": "resourceLangId == fmscript",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "fm-bridge",
+      "properties": {
+        "fmBridge.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the fm-bridge binary. Leave empty to autodetect (~/.cargo/bin/fm-bridge, then PATH). Supports a leading ~ for the home directory."
+        },
+        "fmBridge.validateOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Validate .fmscript files as you type (debounced) and underline format errors. Disable to validate only on save."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "npx --yes @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.2",
+    "typescript": "^5.4.0"
+  }
+}

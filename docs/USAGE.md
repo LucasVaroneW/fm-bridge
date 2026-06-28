@@ -167,12 +167,17 @@ la futura extensión de VSCode. Formato:
 // stdin
 {"command": "read"}
 {"command": "write", "script_text": "Set Variable [$x = 1]"}
+{"command": "parse", "script_text": "Set Variable [$x = 1]"}
 {"command": "version"}
 
 // stdout
 {"status": "ok", "script_text": "..."}
-{"status": "error", "error": "..."}
+{"status": "error", "error": "...", "error_line": 3}
 ```
+
+`parse` valida el texto y devuelve el error con su línea (`error_line`, 1-based)
+**sin tocar el clipboard** — es lo que usa la extensión de VSCode para subrayar
+errores mientras editás. `write` valida igual pero además escribe al clipboard.
 
 ---
 

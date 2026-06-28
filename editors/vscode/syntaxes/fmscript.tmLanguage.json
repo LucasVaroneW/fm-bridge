@@ -1,0 +1,115 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "FileMaker Script",
+  "scopeName": "source.fmscript",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#disabled-block" },
+    { "include": "#disabled-line" },
+    { "include": "#block-keyword" },
+    { "include": "#step-with-args" },
+    { "include": "#plain-step" },
+    { "include": "#calc" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "^\\s*(#).*$",
+      "name": "comment.line.number-sign.fmscript",
+      "captures": {
+        "1": { "name": "punctuation.definition.comment.fmscript" }
+      }
+    },
+    "disabled-block": {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "name": "comment.block.fmscript",
+      "captures": {
+        "0": { "name": "punctuation.definition.comment.fmscript" }
+      }
+    },
+    "disabled-line": {
+      "match": "^\\s*(//).*$",
+      "name": "comment.line.double-slash.fmscript",
+      "captures": {
+        "1": { "name": "punctuation.definition.comment.fmscript" }
+      }
+    },
+    "block-keyword": {
+      "match": "^\\s*(If|Else If|Else|End If|Loop|End Loop|Exit Loop If|Exit Script|Halt Script)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.fmscript" }
+      }
+    },
+    "step-with-args": {
+      "begin": "^\\s*([A-Z][A-Za-z0-9/ ]*?)\\s*(\\[)",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.step.fmscript" },
+        "2": { "name": "punctuation.section.brackets.begin.fmscript" }
+      },
+      "end": "(\\])\\s*$|(?=^\\S)",
+      "endCaptures": {
+        "1": { "name": "punctuation.section.brackets.end.fmscript" }
+      },
+      "patterns": [
+        { "include": "#section-label" },
+        { "include": "#calc" }
+      ]
+    },
+    "plain-step": {
+      "match": "^\\s*([A-Z][A-Za-z0-9/ ]+?)\\s*$",
+      "captures": {
+        "1": { "name": "entity.name.function.step.fmscript" }
+      }
+    },
+    "section-label": {
+      "match": "\\b(Title|Message|Buttons|Find|Omit|Target|URL|cURL|Style|Layout|Object|Function|Height|Width|Top|Left|Dialog|Rep|Param|Style)\\b(?:\\[[0-9]+\\])?\\s*(:)",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name.fmscript" },
+        "2": { "name": "punctuation.separator.key-value.fmscript" }
+      }
+    },
+    "calc": {
+      "patterns": [
+        { "include": "#string" },
+        { "include": "#variable" },
+        { "include": "#id-ref" },
+        { "include": "#number" },
+        { "include": "#constant" },
+        { "include": "#function" },
+        { "include": "#operator" }
+      ]
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.fmscript",
+      "patterns": [
+        { "match": "\\\\.", "name": "constant.character.escape.fmscript" }
+      ]
+    },
+    "variable": {
+      "match": "\\$\\$?[A-Za-z_][A-Za-z0-9_]*",
+      "name": "variable.other.fmscript"
+    },
+    "id-ref": {
+      "match": "#[0-9]+",
+      "name": "constant.numeric.id.fmscript"
+    },
+    "number": {
+      "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b",
+      "name": "constant.numeric.fmscript"
+    },
+    "constant": {
+      "match": "\\b(True|False|On|Off|First|Last|Next|Previous|Current|original|Document|Floating|Dialog|Card|ResizeToFit|Maximize|Minimize|Restore|Hide|VerifySSL|SelectAll|DontEncode)\\b",
+      "name": "constant.language.fmscript"
+    },
+    "function": {
+      "match": "\\b([A-Za-z][A-Za-z0-9]*)\\s*(?=\\()",
+      "name": "support.function.fmscript"
+    },
+    "operator": {
+      "match": "=>|[-+*/&^=<>≠≤≥]|\\b(and|or|not|xor)\\b",
+      "name": "keyword.operator.fmscript"
+    }
+  }
+}

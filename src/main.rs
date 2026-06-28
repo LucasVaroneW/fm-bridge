@@ -66,6 +66,19 @@ fn handle_command(cmd: &Command) -> Response {
             },
             Err(e) => Response::error(e),
         },
+        // Validate-only: parse the text and report a positioned error, but do
+        // NOT touch the clipboard. The editor calls this on every change (with a
+        // debounce) to drive diagnostics, so it must be side-effect free.
+        "parse" => {
+            let script_text = match &cmd.script_text {
+                Some(t) => t,
+                None => return Response::error("No script_text provided".to_string()),
+            };
+            match text_format::parse_text_to_script(script_text) {
+                Ok(_) => Response::ok(),
+                Err(pe) => Response::error_at(pe.to_string(), pe.line),
+            }
+        }
         "write" => {
             let script_text = match &cmd.script_text {
                 Some(t) => t,

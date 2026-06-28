@@ -173,6 +173,24 @@ pub fn lookup_by_es(name: &str) -> Option<&'static StepDef> {
     all_steps().iter().find(|s| !s.es.is_empty() && s.es == name)
 }
 
+/// Find the canonical English step name closest to `name` for a "did you mean"
+/// hint — the common authoring slips of wrong casing and missing spaces:
+///   1. case-insensitive exact match (`if` → `If`, `set variable` → `Set Variable`)
+///   2. case-insensitive ignoring whitespace (`setvariable` → `Set Variable`)
+/// Returns None when nothing plausibly matches (a genuinely unknown step).
+pub fn closest_en(name: &str) -> Option<&'static str> {
+    let lower = name.to_lowercase();
+    if let Some(s) = all_steps().iter().find(|s| s.en.to_lowercase() == lower) {
+        return Some(s.en.as_str());
+    }
+    let strip_ws = |s: &str| -> String { s.chars().filter(|c| !c.is_whitespace()).collect() };
+    let compact = strip_ws(&lower);
+    all_steps()
+        .iter()
+        .find(|s| strip_ws(&s.en.to_lowercase()) == compact)
+        .map(|s| s.en.as_str())
+}
+
 /// Translate a step name to English.
 /// If the name is already English, returns it as-is.
 /// If it's a known Spanish name, returns the English equivalent.

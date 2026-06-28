@@ -14,13 +14,25 @@ import {
   parseScript,
   readClipboard,
   resetBinaryCache,
+  resolveBinaryPath,
   writeClipboard,
 } from "./bridge";
 import { StepCompletionProvider, resetCatalogCache } from "./completion";
+import { StepFixProvider } from "./quickfix";
 
 const LANGUAGE = "fmscript";
 
+/** Diagnostic log, visible in Output → "fm-bridge". Set in activate(). */
+let output: vscode.OutputChannel | undefined;
+function log(message: string): void {
+  output?.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
+}
+
 export function activate(context: vscode.ExtensionContext): void {
+  output = vscode.window.createOutputChannel("fm-bridge");
+  context.subscriptions.push(output);
+  log(`activated · binary: ${resolveBinaryPath() ?? "NOT FOUND"}`);
+
   const diagnostics = vscode.languages.createDiagnosticCollection(LANGUAGE);
   context.subscriptions.push(diagnostics);
 
@@ -33,10 +45,14 @@ export function activate(context: vscode.ExtensionContext): void {
       "fm-bridge.writeToClipboard",
       writeToClipboard,
     ),
+    vscode.commands.registerCommand("fm-bridge.showLog", () => output?.show()),
     vscode.languages.registerCompletionItemProvider(
       LANGUAGE,
       new StepCompletionProvider(),
     ),
+    vscode.languages.registerCodeActionsProvider(LANGUAGE, new StepFixProvider(), {
+      providedCodeActionKinds: StepFixProvider.kinds,
+    }),
   );
 
   registerDiagnostics(context, diagnostics);
@@ -148,10 +164,12 @@ function registerDiagnostics(
     if (doc.languageId !== LANGUAGE) {
       return;
     }
+    const name = doc.uri.path.split("/").pop() ?? doc.uri.path;
     try {
       const resp = await parseScript(doc.getText());
       if (resp.status === "ok") {
         collection.delete(doc.uri);
+        log(`validated ${name}: ok`);
         return;
       }
       // Prefer the full errors[] list (one squiggle per problem); fall back to
@@ -164,10 +182,13 @@ function registerDiagnostics(
         doc.uri,
         items.map((e) => toDiagnostic(doc, e.message, e.line)),
       );
-    } catch {
+      log(`validated ${name}: ${items.length} error(s)`);
+    } catch (err) {
       // Binary missing / unreachable: don't spam diagnostics. The explicit
       // read/write commands surface that error with actionable guidance.
       collection.delete(doc.uri);
+      const message = err instanceof Error ? err.message : String(err);
+      log(`validate ${name} failed: ${message}`);
     }
   };
 
@@ -203,7 +224,15 @@ function registerDiagnostics(
   );
 
   // Validate already-open .fmscript documents on activation.
-  for (const doc of vscode.workspace.textDocuments) {
+  const open = vscode.workspace.textDocuments;
+  const fmDocs = open.filter((d) => d.languageId === LANGUAGE);
+  log(
+    `open documents: ${open.length}, of which fmscript: ${fmDocs.length}` +
+      (fmDocs.length === 0 && open.length > 0
+        ? " — if your .fmscript shows nothing, check the language mode (bottom-right) says 'FileMaker Script'"
+        : ""),
+  );
+  for (const doc of fmDocs) {
     void validate(doc);
   }
 }

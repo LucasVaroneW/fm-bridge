@@ -584,7 +584,12 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
 
 /// The actionable message for a step name that isn't in steps.toml (or lacks an
 /// id). Shared by the parser and the linter so both speak the same language.
+/// When the name looks like a casing/spacing slip of a real step, it points at
+/// the likely intended one ("did you mean 'If'?") so the editor can offer a fix.
 fn unknown_step_message(name: &str) -> String {
+    if let Some(suggestion) = steps::closest_en(name) {
+        return format!("Unknown step '{}' — did you mean '{}'?", name, suggestion);
+    }
     format!(
         "Step '{}' has no FileMaker ID in steps.toml. \
          Copy this step in FileMaker and run `fm-bridge dump-ids` to discover its id, \
@@ -1827,6 +1832,18 @@ mod tests {
     fn lint_accepts_nested_blocks_and_else() {
         let text = "Loop\n  If [$x = 1]\n    Exit Loop If [$y = 2]\n  Else\n    Show All Records\n  End If\nEnd Loop";
         assert!(super::lint(text).is_empty());
+    }
+
+    #[test]
+    fn lint_suggests_correct_casing() {
+        // Lowercase `if` and a spaced/cased slip both get a "did you mean" hint.
+        let errs = super::lint("if [$x = 1]\nEnd If");
+        assert!(errs.iter().any(|e| e.message.contains("did you mean 'If'")));
+
+        let errs = super::lint("setvariable [ $x ; Value: 1 ]");
+        assert!(errs
+            .iter()
+            .any(|e| e.message.contains("did you mean 'Set Variable'")));
     }
 
     #[test]

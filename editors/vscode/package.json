@@ -66,6 +66,11 @@
         "command": "fm-bridge.writeToClipboard",
         "title": "fm-bridge: Write script to clipboard",
         "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.showLog",
+        "title": "fm-bridge: Show log",
+        "category": "fm-bridge"
       }
     ],
     "menus": {

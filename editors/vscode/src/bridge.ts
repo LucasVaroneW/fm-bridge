@@ -16,14 +16,22 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 
+/** One validation error: a 1-based line and a message. */
+export interface BridgeError {
+  line: number;
+  message: string;
+}
+
 /** Shape of the JSON-mode response (see `Response` in src/main.rs). */
 export interface BridgeResponse {
   status: "ok" | "error";
   script_text?: string;
   error?: string;
   version?: string;
-  /** 1-based source line of a parse error, when present. */
+  /** 1-based source line of the first error (mirrors errors[0]). */
   error_line?: number;
+  /** All validation errors found by the linter, when present. */
+  errors?: BridgeError[];
 }
 
 /** One entry of the step catalog (see `StepInfo` in src/steps.rs). */

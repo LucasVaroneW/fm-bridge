@@ -154,7 +154,16 @@ function registerDiagnostics(
         collection.delete(doc.uri);
         return;
       }
-      collection.set(doc.uri, [toDiagnostic(doc, resp.error, resp.error_line)]);
+      // Prefer the full errors[] list (one squiggle per problem); fall back to
+      // the single error/error_line for older binaries.
+      const items =
+        resp.errors && resp.errors.length > 0
+          ? resp.errors
+          : [{ line: resp.error_line ?? 0, message: resp.error ?? "Invalid .fmscript" }];
+      collection.set(
+        doc.uri,
+        items.map((e) => toDiagnostic(doc, e.message, e.line)),
+      );
     } catch {
       // Binary missing / unreachable: don't spam diagnostics. The explicit
       // read/write commands surface that error with actionable guidance.
@@ -206,7 +215,13 @@ function toDiagnostic(
 ): vscode.Diagnostic {
   const lineIndex =
     line && line > 0 ? Math.min(line - 1, doc.lineCount - 1) : 0;
-  const range = doc.lineAt(lineIndex).range;
+  const textLine = doc.lineAt(lineIndex);
+  // Squiggle from the first non-blank char to end of line (skip indentation).
+  const start = new vscode.Position(
+    lineIndex,
+    textLine.isEmptyOrWhitespace ? 0 : textLine.firstNonWhitespaceCharacterIndex,
+  );
+  const range = new vscode.Range(start, textLine.range.end);
   const diag = new vscode.Diagnostic(
     range,
     message ?? "Invalid .fmscript",

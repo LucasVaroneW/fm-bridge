@@ -437,12 +437,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
     let mut i = 0;
 
     let resolve_id = |name: &str| -> Result<u32, String> {
-        steps::id_for_en(name).ok_or_else(|| format!(
-            "Step '{}' has no FileMaker ID in steps.toml. \
-             Copy this step in FileMaker and run `fm-bridge dump-ids` to discover its id, \
-             then add `id = N` to its entry in steps.toml.",
-            name
-        ))
+        steps::id_for_en(name).ok_or_else(|| unknown_step_message(name))
     };
 
     while i < lines.len() {
@@ -585,6 +580,175 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
     }
 
     Ok(FmScript { steps })
+}
+
+/// The actionable message for a step name that isn't in steps.toml (or lacks an
+/// id). Shared by the parser and the linter so both speak the same language.
+fn unknown_step_message(name: &str) -> String {
+    format!(
+        "Step '{}' has no FileMaker ID in steps.toml. \
+         Copy this step in FileMaker and run `fm-bridge dump-ids` to discover its id, \
+         then add `id = N` to its entry in steps.toml.",
+        name
+    )
+}
+
+/// Validate text and return **every** error found, not just the first — so the
+/// editor can squiggle all problems at once. This is the linter behind the
+/// `parse` JSON command and the VS Code diagnostics. It never touches the
+/// clipboard and never bails early.
+///
+/// Catches:
+///   - unknown / unsupported steps (no FileMaker ID in steps.toml)
+///   - unclosed `[` brackets
+///   - unbalanced blocks: `End If`/`End Loop`/`Else`/`Else If` with no open
+///     block, `Exit Loop If` outside any loop, and `If`/`Loop` left unclosed.
+///
+/// Line tracking mirrors `parse_text_to_script` (same BOM/block-comment
+/// preprocessing and the same depth-aware bracket scan) so the reported lines
+/// line up with the source the user sees.
+pub fn lint(text: &str) -> Vec<ParseError> {
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+    let preprocessed = preprocess_block_comments(text);
+    let text = preprocessed.as_str();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut errors: Vec<ParseError> = Vec::new();
+    // (block-opener canonical name, 1-based line) for structure validation.
+    let mut block_stack: Vec<(&'static str, usize)> = Vec::new();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i];
+        if line.trim().is_empty() {
+            i += 1;
+            continue;
+        }
+        let trimmed = line.trim();
+        // The `// ` disable marker is stripped only to read the step name —
+        // disabled steps still participate in block structure (FM keeps them
+        // nested), matching how the parser builds them.
+        let content = if trimmed.starts_with("// ") { &trimmed[3..] } else { trimmed };
+        if content.starts_with('#') {
+            i += 1;
+            continue;
+        }
+
+        let step_line = i; // 0-based; reported as +1
+        let bracket_at = content.find(" [");
+        let step_name = match bracket_at {
+            Some(idx) => steps::translate_to_en(&content[..idx]),
+            None => steps::translate_to_en(content),
+        };
+
+        check_block(&step_name, step_line + 1, &mut block_stack, &mut errors);
+
+        if steps::id_for_en(&step_name).is_none() {
+            errors.push(ParseError {
+                line: step_line + 1,
+                message: unknown_step_message(&step_name),
+            });
+        }
+
+        if let Some(idx) = bracket_at {
+            // Depth-aware scan to the unmatched `]`, identical to the parser, so
+            // continuation lines of multi-line calcs aren't mistaken for steps.
+            let mut depth: i32 = 0;
+            let mut in_string = false;
+            let mut terminated = false;
+            let mut current_text = &content[idx + 2..];
+            loop {
+                for ch in current_text.chars() {
+                    match ch {
+                        '"' => in_string = !in_string,
+                        '[' if !in_string => depth += 1,
+                        ']' if !in_string => {
+                            if depth == 0 {
+                                terminated = true;
+                                break;
+                            }
+                            depth -= 1;
+                        }
+                        _ => {}
+                    }
+                }
+                if terminated {
+                    break;
+                }
+                i += 1;
+                if i >= lines.len() {
+                    errors.push(ParseError {
+                        line: step_line + 1,
+                        message: format!("Unclosed `[` in step '{}'", step_name),
+                    });
+                    break;
+                }
+                current_text = lines[i];
+            }
+        }
+        i += 1;
+    }
+
+    // Anything still open at EOF was never closed.
+    for (name, line) in block_stack {
+        errors.push(ParseError {
+            line,
+            message: format!("`{}` is never closed (missing `End {}`)", name, name),
+        });
+    }
+
+    errors.sort_by_key(|e| e.line);
+    errors
+}
+
+/// Apply one step's effect on the block stack, recording any imbalance.
+fn check_block(
+    name: &str,
+    line: usize,
+    stack: &mut Vec<(&'static str, usize)>,
+    errors: &mut Vec<ParseError>,
+) {
+    let top = |s: &[(&'static str, usize)]| s.last().map(|(n, _)| *n);
+    match name {
+        "If" => stack.push(("If", line)),
+        "Loop" => stack.push(("Loop", line)),
+        "Else" | "Else If" => {
+            if top(stack) != Some("If") {
+                errors.push(ParseError {
+                    line,
+                    message: format!("`{}` without a matching `If`", name),
+                });
+            }
+        }
+        "End If" => {
+            if top(stack) == Some("If") {
+                stack.pop();
+            } else {
+                errors.push(ParseError {
+                    line,
+                    message: "`End If` without a matching `If`".to_string(),
+                });
+            }
+        }
+        "End Loop" => {
+            if top(stack) == Some("Loop") {
+                stack.pop();
+            } else {
+                errors.push(ParseError {
+                    line,
+                    message: "`End Loop` without a matching `Loop`".to_string(),
+                });
+            }
+        }
+        "Exit Loop If" => {
+            if !stack.iter().any(|(n, _)| *n == "Loop") {
+                errors.push(ParseError {
+                    line,
+                    message: "`Exit Loop If` outside of a `Loop`".to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Build a ScriptStep from a name and optional bracket content.
@@ -1605,5 +1769,71 @@ mod tests {
         let err = super::parse_text_to_script(text).unwrap_err();
         assert_eq!(err.line, 2);
         assert!(err.message.contains("Unclosed"));
+    }
+
+    #[test]
+    fn lint_accepts_a_valid_script() {
+        let text = "Set Variable [$x = 1]\nIf [$x = 1]\n  Show All Records\nEnd If";
+        assert!(super::lint(text).is_empty());
+    }
+
+    #[test]
+    fn lint_reports_all_errors_at_once() {
+        // Two independent unknown steps on lines 1 and 3 — both must be reported,
+        // not just the first (unlike parse_text_to_script which bails).
+        let text = "BogusOne [a]\nShow All Records\nBogusTwo [b]";
+        let errs = super::lint(text);
+        assert_eq!(errs.len(), 2);
+        assert_eq!(errs[0].line, 1);
+        assert_eq!(errs[1].line, 3);
+    }
+
+    #[test]
+    fn lint_flags_unclosed_if() {
+        let text = "If [$x = 1]\n  Show All Records";
+        let errs = super::lint(text);
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].line, 1);
+        assert!(errs[0].message.contains("never closed"));
+    }
+
+    #[test]
+    fn lint_flags_orphan_end_if() {
+        let text = "Show All Records\nEnd If";
+        let errs = super::lint(text);
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].line, 2);
+        assert!(errs[0].message.contains("End If"));
+    }
+
+    #[test]
+    fn lint_flags_else_without_if() {
+        let text = "Show All Records\nElse\n  Halt Script";
+        let errs = super::lint(text);
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].line, 2);
+        assert!(errs[0].message.contains("Else"));
+    }
+
+    #[test]
+    fn lint_flags_exit_loop_if_outside_loop() {
+        let text = "Exit Loop If [$x = 1]";
+        let errs = super::lint(text);
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("Exit Loop If"));
+    }
+
+    #[test]
+    fn lint_accepts_nested_blocks_and_else() {
+        let text = "Loop\n  If [$x = 1]\n    Exit Loop If [$y = 2]\n  Else\n    Show All Records\n  End If\nEnd Loop";
+        assert!(super::lint(text).is_empty());
+    }
+
+    #[test]
+    fn lint_ignores_brackets_inside_multiline_calc() {
+        // The `]` inside the calc must not be read as the step's closer, and the
+        // calc body must not be parsed as steps (no false "unknown step").
+        let text = "Set Variable [$x = Let ( [\n    a = 1\n  ] ; a )]\nShow All Records";
+        assert!(super::lint(text).is_empty());
     }
 }

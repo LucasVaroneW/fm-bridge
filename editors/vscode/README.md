@@ -25,15 +25,19 @@ from what the binary actually supports.
 
 ## Requirements
 
-The `fm-bridge` binary must be installed. From the repo root:
+**None for the released `.vsix`** — the `fm-bridge` binary ships *inside* the
+extension, so installing the `.vsix` gives you everything. No Rust, no separate
+install. The extension picks the right binary for your OS/arch at runtime.
 
-```bash
-cargo install --path .
-```
+How it finds the binary, in order:
 
-That puts `fm-bridge` in `~/.cargo/bin`, which the extension autodetects. If your
-binary lives elsewhere, set **`fmBridge.binaryPath`** in Settings to its absolute
-path (a leading `~` is expanded).
+1. `fmBridge.binaryPath` setting (if you set it — a leading `~` is expanded).
+2. The bundled binary (`bin/<platform>-<arch>/` inside the extension).
+3. `~/.cargo/bin/fm-bridge` (handy when developing from source).
+4. `fm-bridge` anywhere on `PATH`.
+
+> If you build the extension yourself, the bundled binary is produced by
+> `npm run bundle:native` (your platform) or by CI (all platforms). See below.
 
 ## Commands
 
@@ -64,9 +68,17 @@ files.
 ```bash
 cd editors/vscode
 npm install
-npm run build        # bundle to dist/extension.js
-npm run package      # produce fm-bridge-<version>.vsix
+npm run package:bundled   # build the native binary + produce a self-contained .vsix
 ```
+
+`package:bundled` runs `cargo build --release`, copies the binary into
+`bin/<your-platform>/`, and packages it — so the resulting `.vsix` works on your
+machine with no separate install. (`npm run package` alone skips the binary and
+relies on `~/.cargo/bin`/`PATH`.)
+
+For a **universal** `.vsix` that works on macOS (arm64/x64), Windows and Linux,
+push a `v*` tag (or run the *Package extension* workflow): CI builds every
+platform's binary, bundles them all, and attaches the `.vsix` to the release.
 
 Install the resulting `.vsix`:
 

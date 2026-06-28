@@ -82,11 +82,38 @@ function findOnPath(exe: string): string | undefined {
 
 let cachedAutodetect: string | undefined;
 
+/** The binary bundled inside the extension for this OS/arch, if present. */
+function bundledBinary(): string | undefined {
+  const exe = process.platform === "win32" ? "fm-bridge.exe" : "fm-bridge";
+  // At runtime this file is dist/extension.js, so the binary sits one level up
+  // in bin/<platform>-<arch>/ — laid down at package time (locally or by CI).
+  const candidate = path.join(
+    __dirname,
+    "..",
+    "bin",
+    `${process.platform}-${process.arch}`,
+    exe,
+  );
+  if (!fs.existsSync(candidate)) {
+    return undefined;
+  }
+  // The vsix should preserve the +x bit, but make sure (zip extraction quirks).
+  if (process.platform !== "win32") {
+    try {
+      fs.chmodSync(candidate, 0o755);
+    } catch {
+      /* best effort */
+    }
+  }
+  return candidate;
+}
+
 /**
  * Resolve the fm-bridge binary path. Order:
  *   1. fmBridge.binaryPath setting (trusted as-is, ~ expanded).
- *   2. ~/.cargo/bin/fm-bridge[.exe]  (the documented install location).
- *   3. fm-bridge[.exe] anywhere on PATH.
+ *   2. binary bundled inside the extension (zero-install, works without Rust).
+ *   3. ~/.cargo/bin/fm-bridge[.exe]  (the documented dev install location).
+ *   4. fm-bridge[.exe] anywhere on PATH.
  * Returns undefined if none resolve.
  */
 export function resolveBinaryPath(): string | undefined {
@@ -99,6 +126,12 @@ export function resolveBinaryPath(): string | undefined {
 
   if (cachedAutodetect && fs.existsSync(cachedAutodetect)) {
     return cachedAutodetect;
+  }
+
+  const bundled = bundledBinary();
+  if (bundled) {
+    cachedAutodetect = bundled;
+    return bundled;
   }
 
   const exe = process.platform === "win32" ? "fm-bridge.exe" : "fm-bridge";

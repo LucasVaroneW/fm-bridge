@@ -1,3 +1,5 @@
 node_modules/
 dist/
 *.vsix
+# Bundled binaries are build output (produced by scripts/bundle-native.js or CI).
+bin/

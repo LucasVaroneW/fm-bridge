@@ -9,7 +9,7 @@ debug_raw.xml
 debug_raw.hex
 debug_built.xml
 test_roundtrip.xml
-scripts/
+/scripts/
 
 # Local working copies of FM scripts (read/edit/write workflow output)
 *.fmscript

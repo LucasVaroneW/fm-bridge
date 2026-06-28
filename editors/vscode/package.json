@@ -26,9 +26,6 @@
     "script"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [
-    "onLanguage:fmscript"
-  ],
   "contributes": {
     "languages": [
       {
@@ -103,7 +100,9 @@
     "build": "node esbuild.js --production",
     "watch": "node esbuild.js --watch",
     "typecheck": "tsc --noEmit",
-    "package": "npx --yes @vscode/vsce package --no-dependencies"
+    "bundle:native": "node scripts/bundle-native.js",
+    "package": "npx --yes @vscode/vsce package --no-dependencies",
+    "package:bundled": "npm run bundle:native && npm run package"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

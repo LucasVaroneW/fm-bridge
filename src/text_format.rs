@@ -393,7 +393,25 @@ pub fn format_step(step: &ScriptStep) -> String {
             if let Some(calc) = &step.calculation {
                 let trimmed = calc.trim();
                 if !trimmed.is_empty() {
-                    line.push_str(&format!(" [{}]", trimmed));
+                    // Import/Export Records: render the readable DSL instead of the
+                    // raw XML blob, but only when it round-trips exactly (else keep
+                    // the verbatim XML so we never lose data).
+                    let dsl = if matches!(step.name.as_str(), "Import Records" | "Export Records") {
+                        crate::import_records::xml_to_dsl(trimmed)
+                    } else {
+                        None
+                    };
+                    match dsl {
+                        Some(dsl) => {
+                            // Indent the DSL block under the step for readability;
+                            // parse_text trims each line, so it's purely cosmetic.
+                            let pad = format!("{}  ", indent);
+                            let body: String =
+                                dsl.lines().map(|l| format!("{}{}\n", pad, l)).collect();
+                            line.push_str(&format!(" [\n{}{}]", body, indent));
+                        }
+                        None => line.push_str(&format!(" [{}]", trimmed)),
+                    }
                 }
             } else if let Some(text) = &step.text {
                 let trimmed = text.trim();
@@ -1917,7 +1935,17 @@ fn build_step_from_name(
                 enable: enabled,
                 id,
                 text: None,
-                calculation: content.map(|c| c.to_string()),
+                // Import/Export Records may carry the readable DSL instead of raw
+                // XML; convert it back to the exact FM payload. Raw XML (starts
+                // with `<`) and everything else pass through unchanged.
+                calculation: content.map(|c| {
+                    let t = c.trim();
+                    if matches!(name, "Import Records" | "Export Records") && !t.starts_with('<') {
+                        crate::import_records::dsl_to_xml(t).unwrap_or_else(|| c.to_string())
+                    } else {
+                        c.to_string()
+                    }
+                }),
                 var_name: None,
                 repetition: None,
                 object_name: None,

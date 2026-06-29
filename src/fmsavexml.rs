@@ -1927,6 +1927,26 @@ fn transform_step_tags(xml: &str) -> String {
             // Unknown shape — fall through and emit raw.
         }
 
+        // ── DataSourceReference → DataSource (cross-file Perform Script) ──
+        // In `<List name="From list"><DataSourceReference/><ScriptReference/></List>`
+        // the DataSourceReference names the external file the target script lives
+        // in. Keep it (as <DataSource name>) so the decoder can show "de dónde se
+        // llama"; without it a cross-file call looks local.
+        if tag.starts_with("<DataSourceReference") {
+            let name = extract_xml_attr(tag, "name").unwrap_or("");
+            if name.is_empty() {
+                i = tag_end;
+                continue;
+            }
+            out.push_str(&format!("<DataSource name=\"{}\"/>", xml_escape_attr(name)));
+            i = tag_end;
+            continue;
+        }
+        if tag == "</DataSourceReference>" {
+            i = tag_end;
+            continue;
+        }
+
         // ── ScriptReference → Script (Perform Script target) ─────────────
         if tag.starts_with("<ScriptReference") {
             let id = extract_xml_attr(tag, "id").unwrap_or("");
@@ -2196,5 +2216,27 @@ mod tests {
         assert_eq!(c.indexed, Some(true));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A cross-file Perform Script (`<DataSourceReference>`) keeps the target
+    /// file, so the decoded `.fmscript` shows "de dónde se llama".
+    #[test]
+    fn cross_file_perform_script_keeps_target_file() {
+        let raw = r#"<fmxmlsnippet type="FMObjectList"><Step enable="True" id="1" name="Perform Script"><ParameterValues membercount="1"><Parameter type="List"><List name="From list" value="1"><DataSourceReference id="28" name="By_99_Import_MTs" UUID="X"></DataSourceReference><ScriptReference id="56" name="Imp_ImasD_1_Inicial" UUID="Y"></ScriptReference></List></Parameter></ParameterValues></Step></fmxmlsnippet>"#;
+
+        let xmss = fmsavexml_to_xmss(raw);
+        assert!(
+            xmss.contains(r#"<DataSource name="By_99_Import_MTs"/>"#),
+            "{}",
+            xmss
+        );
+
+        let script = crate::xmss::parse_fmxml_snippet(&xmss).unwrap();
+        let text = crate::text_format::format_script(&script);
+        assert!(
+            text.contains(r#"#56 from "By_99_Import_MTs""#),
+            "rendered: {}",
+            text
+        );
     }
 }

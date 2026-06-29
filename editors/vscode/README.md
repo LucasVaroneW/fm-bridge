@@ -88,5 +88,17 @@ code --install-extension fm-bridge-0.1.0.vsix
 
 or in VS Code: **Extensions** panel → `…` menu → **Install from VSIX…**
 
+### Installing in Antigravity (or other VS Code forks)
+
+Antigravity is a VS Code fork, so the same `.vsix` works there too — but its
+`code`-style CLI binary is named `antigravity-ide`, not `code`:
+
+```bash
+"/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide" \
+  --install-extension fm-bridge-0.1.0.vsix
+```
+
+or from the GUI: **Extensions** panel → `…` menu → **Install from VSIX…**.
+
 To iterate: open `editors/vscode` in VS Code and press **F5** (Run Extension) —
 or run `npm run watch` and reload the Extension Development Host.

@@ -1711,49 +1711,79 @@ fn parse_bool_attr(e: &quick_xml::events::BytesStart, name: &str) -> bool {
 /// Walk a layout's object tree (top-level objects + nested portal children)
 /// and aggregate every script id triggered and every TO referenced — by any
 /// kind of attachment: button action, object ScriptTrigger, field, portal.
-/// Build a Mermaid `erDiagram` document from relationships. Each TO becomes
-/// a node, each relationship an edge labelled with the join predicates.
-/// Sanitizes names because Mermaid IDs can't have special chars.
+/// Map a FileMaker JoinPredicate `type` to its operator symbol. Unknown types
+/// fall back to the raw string so nothing is silently lost.
+fn op_symbol(op: &str) -> &str {
+    match op {
+        "Equal" => "=",
+        "NotEqual" => "≠",
+        "LessThan" => "<",
+        "LessThanOrEqual" => "≤",
+        "GreaterThan" => ">",
+        "GreaterThanOrEqual" => "≥",
+        "Cartesian" | "Cross" => "×",
+        other => other,
+    }
+}
+
+/// Edge label for one relationship: each predicate as `field <op> field`, with
+/// the *real* operator (a `≠`/`<`/`×` relationship no longer looks like `=`).
+/// Caps at 3 keys to keep the label readable on multi-key relationships.
+fn relationship_label(r: &Relationship) -> String {
+    if r.predicates.is_empty() {
+        return "rel".to_string();
+    }
+    let mut parts: Vec<String> = r
+        .predicates
+        .iter()
+        .take(3)
+        .map(|p| format!("{} {} {}", p.left_field, op_symbol(&p.op), p.right_field))
+        .collect();
+    if r.predicates.len() > 3 {
+        parts.push(format!("+{} more", r.predicates.len() - 3));
+    }
+    mermaid_label(&parts.join(", "))
+}
+
+/// Build a Mermaid `erDiagram` from relationships. Each table occurrence is a
+/// node; each relationship an edge labelled with its join predicates (operators
+/// included). FileMaker matches can return many records on either side, so edges
+/// use a zero-or-more / zero-or-more cardinality. Occurrences whose name differs
+/// from their base table show the base table (so aliases are legible).
 fn build_mermaid_diagram(rels: &[Relationship], tos: &[TableOccurrence]) -> String {
     let mut out = String::from("erDiagram\n");
-    // Track which TOs participate so we can show their base table as a comment.
+    let to_by_name: HashMap<&str, &TableOccurrence> =
+        tos.iter().map(|t| (t.name.as_str(), t)).collect();
     let mut used: HashSet<String> = HashSet::new();
+
     for r in rels {
         used.insert(r.left_to.clone());
         used.insert(r.right_to.clone());
+        out.push_str(&format!(
+            "    {} }}o--o{{ {} : \"{}\"\n",
+            mermaid_id(&r.left_to),
+            mermaid_id(&r.right_to),
+            relationship_label(r),
+        ));
     }
-    let to_by_name: HashMap<&str, &TableOccurrence> =
-        tos.iter().map(|t| (t.name.as_str(), t)).collect();
-    for r in rels {
-        let l = mermaid_id(&r.left_to);
-        let rt = mermaid_id(&r.right_to);
-        let label = if r.predicates.is_empty() {
-            "rel".to_string()
-        } else {
-            let p = &r.predicates[0];
-            let extra = if r.predicates.len() > 1 {
-                format!(" +{}", r.predicates.len() - 1)
-            } else {
-                String::new()
-            };
-            mermaid_label(&format!("{}={}{}", p.left_field, p.right_field, extra))
-        };
-        out.push_str(&format!("    {} ||--o{{ {} : \"{}\"\n", l, rt, label));
-    }
-    // Node decorations: show base table name for each TO used.
-    for to_name in &used {
+
+    // Decorate only aliases (TO name != base table) to cut noise.
+    let mut names: Vec<&String> = used.iter().collect();
+    names.sort();
+    for to_name in names {
         if let Some(to) = to_by_name.get(to_name.as_str()) {
-            let id = mermaid_id(to_name);
-            let table = if to.data_source.is_empty() {
+            let base = if to.data_source.is_empty() {
                 to.base_table.clone()
             } else {
-                format!("{}__{}", to.data_source, to.base_table)
+                format!("{}::{}", to.data_source, to.base_table)
             };
-            out.push_str(&format!(
-                "    {} {{\n        string {}\n    }}\n",
-                id,
-                mermaid_id(&table)
-            ));
+            if !base.is_empty() && &base != to_name {
+                out.push_str(&format!(
+                    "    {} {{\n        base_table {}\n    }}\n",
+                    mermaid_id(to_name),
+                    mermaid_id(&base),
+                ));
+            }
         }
     }
     out
@@ -2440,5 +2470,53 @@ mod tests {
             "rendered: {}",
             text
         );
+    }
+
+    #[test]
+    fn mermaid_shows_real_operators_and_aliases() {
+        let tos = vec![
+            TableOccurrence {
+                id: 1,
+                name: "Contacts".to_string(),
+                base_table: "Contacts".to_string(),
+                ..Default::default()
+            },
+            TableOccurrence {
+                id: 2,
+                name: "Contacts_byCity".to_string(),
+                base_table: "Contacts".to_string(),
+                ..Default::default()
+            },
+        ];
+        let rels = vec![Relationship {
+            id: 1,
+            left_to: "Contacts".to_string(),
+            right_to: "Contacts_byCity".to_string(),
+            predicates: vec![
+                JoinPredicate {
+                    op: "NotEqual".to_string(),
+                    left_field: "id".to_string(),
+                    right_field: "id".to_string(),
+                    ..Default::default()
+                },
+                JoinPredicate {
+                    op: "Equal".to_string(),
+                    left_field: "city".to_string(),
+                    right_field: "city".to_string(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }];
+
+        let m = build_mermaid_diagram(&rels, &tos);
+        // Real operator, not a misleading '='; multi-key shown; FM cardinality.
+        assert!(m.contains("id ≠ id"), "diagram: {}", m);
+        assert!(m.contains("city = city"));
+        assert!(m.contains("}o--o{"));
+        // The alias shows its base table; the 1:1 occurrence stays undecorated.
+        assert!(m.contains("Contacts_byCity {"));
+        assert!(m.contains("base_table Contacts"));
+        assert!(!m.contains("Contacts {\n"));
     }
 }

@@ -82,10 +82,15 @@ el esquema (ej.: un `Set Field` que apunta a un campo inexistente).
 - Pendiente menor: campos de tablas **externas** viven en el `inspect` de su
   propio archivo, no dentro del slice (hay que cruzar dos exports).
 
-### Fase 3 — El oro: bugs con contexto
-- Tools que **cruzan** script + esquema (referencias rotas, campos inexistentes,
-  scripts huérfanos, `who-calls`/`who-uses-field`, etc.). Hoy se hace **a mano**
-  con inspect/slice (ej.: el diagnóstico del bug de las SX); falta automatizarlo.
+### Fase 3 — El oro: bugs con contexto — 🟡 en marcha
+- ✅ **`audit`** — detecta **referencias rotas** automáticamente cruzando scripts
+  × esquema: Perform Script / Go to Layout colgados, relaciones y layouts que
+  apuntan a table occurrences borradas, TOs sin tabla base, campos fantasma en
+  layouts. CLI (`fm-bridge audit <export.xml>`) + JSON + tool MCP `audit_database`.
+- Falta: `who-calls` / `who-uses-field` como tools, y referencias **dentro de
+  cálculos** (requiere parsear el lenguaje de cálculo de FM).
+- 🔭 **OData** (futuro): una tool MCP que consulte datos reales de la base y los
+  cruce con el esquema del export para entender errores con datos en vivo.
 
 ### Fidelidad del core (en paralelo, cuando convenga)
 - #4 Show Custom Dialog (input fields). #5 Import/Export con DSL legible ✅.

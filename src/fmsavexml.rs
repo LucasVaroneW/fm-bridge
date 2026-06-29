@@ -258,6 +258,7 @@ pub struct LayoutScriptTrigger {
     pub script_name: String,
 }
 
+#[derive(Default)]
 pub struct ParsedDatabase {
     pub file_name: String,
     pub scripts: Vec<ScriptInfo>,

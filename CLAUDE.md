@@ -39,6 +39,9 @@ interchangeable.
   shapes, block behavior). `steps.toml` is the data; add steps there.
 - `src/fmsavexml.rs` + `src/slice.rs` — schema parser (`inspect`/`slice`, #6):
   FMSaveAsXML → navigable dirs of tables/fields/layouts/TOs/relations/scripts.
+- `src/audit.rs` — referential-integrity audit (`audit`, Phase 3): crosses
+  scripts × schema to flag broken references (dangling Perform Script / Go to
+  Layout, relationships/layouts to missing TOs, ghost fields).
 - `src/mcp.rs` — the **AI front door**: `fm-bridge mcp` serves MCP (JSON-RPC over
   stdio), exposing engine commands as tools. Forwards to `handle_command`.
 - `editors/vscode/` — the VS Code extension (TypeScript).

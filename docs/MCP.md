@@ -50,6 +50,7 @@ args = `["mcp"]`.
 | `script_to_json` | Árbol estructurado del script (steps, calcs, campos) | `script_text` |
 | `inspect_database` | Parsea un export `FMSaveAsXML` → directorio navegable + conteos | `xml_path`, `output_dir?` |
 | `slice_inspect` | Subconjunto enfocado por layout (cierre transitivo) | `output_dir`, `slice_dir`, `layouts[]` |
+| `audit_database` | Busca **referencias rotas** (Perform Script / Go to Layout colgados, relaciones/layouts a TOs borradas, campos fantasma) | `xml_path` |
 | `list_steps` | Catálogo de tipos de step soportados | — |
 
 Cada tool devuelve un bloque de texto con el JSON de la respuesta del motor

@@ -2,6 +2,7 @@
 // Core: XMSS ↔ plain text parsing, clipboard I/O, JSON protocol over stdio.
 // No UI, no HTTP, no async. Procedural and minimal.
 
+mod audit;
 mod clipboard;
 mod fmsavexml;
 mod import_records;
@@ -233,6 +234,21 @@ fn handle_command(cmd: &Command) -> Response {
                 Err(e) => Response::error(e),
             }
         }
+        // Audit a FMSaveAsXML export for broken references (dangling Perform
+        // Script / Go to Layout targets, relationships and layouts pointing at
+        // missing table occurrences, etc.). Returns the structured report for AI.
+        "audit" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => Response::ok_data(
+                    serde_json::to_value(audit::audit(&db)).unwrap_or(serde_json::Value::Null),
+                ),
+                Err(e) => Response::error(e),
+            }
+        }
         // Build a focused slice from an existing inspect output. Returns the
         // closure counts + the slice_summary.md path for the AI to read next.
         "slice" => {
@@ -328,9 +344,10 @@ fn run_cli_mode() -> Result<(), String> {
         }
         "inspect" => run_inspect_cli(&args[1..]),
         "slice" => run_slice_cli(&args[1..]),
+        "audit" => run_audit_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice",
+            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit",
             args[0]
         )),
     }
@@ -406,6 +423,37 @@ fn run_slice_cli(args: &[String]) -> Result<(), String> {
         stats.custom_functions,
         stats.external_sources,
     );
+    Ok(())
+}
+
+/// Audit a FMSaveAsXML export for broken references and print a human report.
+/// Exit is still 0 (it's a report, not a failure); the issues are the output.
+fn run_audit_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("Usage: fm-bridge audit <FMSaveAsXML.xml>".to_string());
+    }
+    println!("Parsing {}...", args[0]);
+    let db = fmsavexml::parse(&args[0])?;
+    let report = audit::audit(&db);
+
+    if report.issue_count == 0 {
+        println!("No broken references found in {}. ✓", report.file_name);
+        return Ok(());
+    }
+
+    println!(
+        "\n{} issue(s) in {}:",
+        report.issue_count, report.file_name
+    );
+    let mut kinds: Vec<(&String, &usize)> = report.by_kind.iter().collect();
+    kinds.sort();
+    for (kind, n) in kinds {
+        println!("  {:4}  {}", n, kind);
+    }
+    println!();
+    for issue in &report.issues {
+        println!("  [{}] {} — {}", issue.kind, issue.location, issue.detail);
+    }
     Ok(())
 }
 

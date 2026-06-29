@@ -300,9 +300,7 @@ pub fn run_slice(
     // ── Relationships: include if either side is in the TO set ──────────────
     let wanted_rels: Vec<Relationship> = all_rels
         .iter()
-        .filter(|r| {
-            wanted_to_names.contains(&r.left_to) || wanted_to_names.contains(&r.right_to)
-        })
+        .filter(|r| wanted_to_names.contains(&r.left_to) || wanted_to_names.contains(&r.right_to))
         .cloned()
         .collect();
 
@@ -323,8 +321,7 @@ pub fn run_slice(
             let src = cfs_dir.join(&filename);
             let dst = slice_cfs_dir.join(&filename);
             if let Ok(content) = fs::read_to_string(&src) {
-                fs::write(&dst, &content)
-                    .map_err(|e| format!("write {}: {}", dst.display(), e))?;
+                fs::write(&dst, &content).map_err(|e| format!("write {}: {}", dst.display(), e))?;
             }
         }
     }
@@ -350,8 +347,7 @@ pub fn run_slice(
         let src = layouts_dir.join(&filename);
         let dst = slice_layouts_dir.join(&filename);
         if let Ok(content) = fs::read_to_string(&src) {
-            fs::write(&dst, &content)
-                .map_err(|e| format!("write {}: {}", dst.display(), e))?;
+            fs::write(&dst, &content).map_err(|e| format!("write {}: {}", dst.display(), e))?;
         }
     }
 
@@ -447,7 +443,13 @@ fn slice_mermaid(tos: &[TableOccurrence], rels: &[Relationship]) -> String {
 
 fn mermaid_id(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -476,9 +478,7 @@ fn build_summary(
 ) -> String {
     let mut s = String::new();
     s.push_str("# Slice Summary\n\n");
-    s.push_str(
-        "Focused subset of a FileMaker database, extracted around the requested layouts.\n",
-    );
+    s.push_str("Focused subset of a FileMaker database, extracted around the requested layouts.\n");
     s.push_str("Includes their triggered scripts (transitively), referenced table occurrences,\n");
     s.push_str("joining relationships, and any custom functions actually used in the scripts.\n\n");
     s.push_str(
@@ -545,21 +545,36 @@ fn build_summary(
             let preds: Vec<String> = r
                 .predicates
                 .iter()
-                .map(|p| format!("{}.{} {} {}.{}", p.left_to, p.left_field, p.op, p.right_to, p.right_field))
+                .map(|p| {
+                    format!(
+                        "{}.{} {} {}.{}",
+                        p.left_to, p.left_field, p.op, p.right_to, p.right_field
+                    )
+                })
                 .collect();
             s.push_str(&format!(" — {}", preds.join(" AND ")));
         }
         s.push('\n');
     }
     if rels.len() > 50 {
-        s.push_str(&format!("…and {} more (see relationships.json).\n", rels.len() - 50));
+        s.push_str(&format!(
+            "…and {} more (see relationships.json).\n",
+            rels.len() - 50
+        ));
     }
     s.push('\n');
 
     if !cfs.is_empty() {
         s.push_str(&format!("## Custom functions ({})\n\n", cfs.len()));
         for cf in cfs {
-            s.push_str(&format!("- `{}`", if cf.display.is_empty() { &cf.name } else { &cf.display }));
+            s.push_str(&format!(
+                "- `{}`",
+                if cf.display.is_empty() {
+                    &cf.name
+                } else {
+                    &cf.display
+                }
+            ));
             s.push('\n');
         }
         s.push_str("\nBodies are in `custom_functions/`.\n\n");
@@ -568,7 +583,10 @@ fn build_summary(
     if !eds.is_empty() {
         s.push_str(&format!("## External data sources ({})\n\n", eds.len()));
         for e in eds {
-            s.push_str(&format!("- `{}` ({}): {}\n", e.name, e.source_type, e.file_path));
+            s.push_str(&format!(
+                "- `{}` ({}): {}\n",
+                e.name, e.source_type, e.file_path
+            ));
         }
     }
 

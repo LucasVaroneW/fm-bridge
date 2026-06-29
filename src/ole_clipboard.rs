@@ -8,7 +8,6 @@
 
 #![cfg(windows)]
 
-use windows::core::{implement, HRESULT, Result as WResult};
 use windows::Win32::Foundation::{
     BOOL, DV_E_FORMATETC, DV_E_TYMED, E_NOTIMPL, OLE_E_ADVISENOTSUPPORTED, S_OK,
 };
@@ -16,8 +15,9 @@ use windows::Win32::System::Com::{
     DVASPECT_CONTENT, FORMATETC, IAdviseSink, IDataObject, IDataObject_Impl, IEnumFORMATETC,
     IEnumSTATDATA, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
 };
-use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::UI::Shell::SHCreateStdEnumFmtEtc;
+use windows::core::{HRESULT, Result as WResult, implement};
 
 const DATADIR_GET: u32 = 1;
 
@@ -73,11 +73,7 @@ impl IDataObject_Impl for FmDataObject_Impl {
         }
     }
 
-    fn GetCanonicalFormatEtc(
-        &self,
-        _: *const FORMATETC,
-        pformatetcout: *mut FORMATETC,
-    ) -> HRESULT {
+    fn GetCanonicalFormatEtc(&self, _: *const FORMATETC, pformatetcout: *mut FORMATETC) -> HRESULT {
         unsafe {
             (*pformatetcout).ptd = std::ptr::null_mut();
         }
@@ -102,12 +98,7 @@ impl IDataObject_Impl for FmDataObject_Impl {
         unsafe { SHCreateStdEnumFmtEtc(&fmts) }
     }
 
-    fn DAdvise(
-        &self,
-        _: *const FORMATETC,
-        _: u32,
-        _: Option<&IAdviseSink>,
-    ) -> WResult<u32> {
+    fn DAdvise(&self, _: *const FORMATETC, _: u32, _: Option<&IAdviseSink>) -> WResult<u32> {
         Err(OLE_E_ADVISENOTSUPPORTED.into())
     }
 

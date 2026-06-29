@@ -19,7 +19,9 @@ pub fn read_fm_clipboard() -> Result<Vec<u8>, String> {
         };
         if let Ok(ptr) = get_clipboard_data(fmt.get()) {
             let fmt_size = size(fmt.get()).map(|s| s.get()).unwrap_or(0);
-            if fmt_size == 0 { continue; }
+            if fmt_size == 0 {
+                continue;
+            }
             let data = unsafe { std::slice::from_raw_parts(ptr.as_ptr() as *const u8, fmt_size) };
             return Ok(data.to_vec());
         }
@@ -36,9 +38,9 @@ pub fn write_fm_clipboard(data: &[u8]) -> Result<(), String> {
     // own minimal IDataObject (see ole_clipboard.rs) mirroring what .NET's
     // System.Windows.Forms.DataObject does internally.
 
+    use windows::Win32::System::Com::IDataObject;
     use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
     use windows::Win32::System::Ole::{OleFlushClipboard, OleInitialize, OleSetClipboard};
-    use windows::Win32::System::Com::IDataObject;
 
     unsafe {
         // OleInitialize is required before any OLE clipboard calls. Safe to
@@ -60,13 +62,11 @@ pub fn write_fm_clipboard(data: &[u8]) -> Result<(), String> {
         let inner = crate::ole_clipboard::FmDataObject::new(fmt_id as u16, framed);
         let data_obj: IDataObject = inner.into();
 
-        OleSetClipboard(Some(&data_obj))
-            .map_err(|e| format!("OleSetClipboard failed: {:?}", e))?;
+        OleSetClipboard(Some(&data_obj)).map_err(|e| format!("OleSetClipboard failed: {:?}", e))?;
 
         // Persist data after our process exits — otherwise the IDataObject
         // pointer becomes dangling once we drop it.
-        OleFlushClipboard()
-            .map_err(|e| format!("OleFlushClipboard failed: {:?}", e))?;
+        OleFlushClipboard().map_err(|e| format!("OleFlushClipboard failed: {:?}", e))?;
 
         Ok(())
     }
@@ -74,7 +74,7 @@ pub fn write_fm_clipboard(data: &[u8]) -> Result<(), String> {
 
 #[cfg(windows)]
 pub fn list_clipboard_formats() -> Vec<(u32, String, usize)> {
-    use clipboard_win::raw::{format_name_big, size, EnumFormats};
+    use clipboard_win::raw::{EnumFormats, format_name_big, size};
 
     let _clip = match clipboard_win::Clipboard::new_attempts(30) {
         Ok(c) => c,
@@ -110,7 +110,7 @@ pub fn read_fm_clipboard() -> Result<Vec<u8>, String> {
         "dyn.ah62d4rv4gk8zuxn0mu", // Value List (XMVL)
         "dyn.ah62d4rv4gk8zuxnqm6", // Layout Object fp7 (XMLO)
         "dyn.ah62d4rv4gk8zuxnqgk", // Layout Object fmp12 (XML2)
-        "dyn.agk8u",                 // Theme (FM 17-2023)
+        "dyn.agk8u",               // Theme (FM 17-2023)
         "dyn.ah62d4rv4gk8zuxnyma", // Theme (FM 2024)
     ];
 
@@ -119,7 +119,9 @@ pub fn read_fm_clipboard() -> Result<Vec<u8>, String> {
         let ns_type = NSString::from_str(uti);
         if let Some(data) = pb.dataForType(&ns_type) {
             let len = data.length();
-            if len == 0 { continue; }
+            if len == 0 {
+                continue;
+            }
             let slice = nsdata_to_bytes(&data, len);
             return Ok(slice);
         }
@@ -131,7 +133,9 @@ pub fn read_fm_clipboard() -> Result<Vec<u8>, String> {
         if type_str.starts_with("dyn.ah62d4rv4gk8zuxn") || type_str == "dyn.agk8u" {
             if let Some(data) = pb.dataForType(&ns_type) {
                 let len = data.length();
-                if len == 0 { continue; }
+                if len == 0 {
+                    continue;
+                }
                 let slice = nsdata_to_bytes(&data, len);
                 return Ok(slice);
             }
@@ -143,9 +147,7 @@ pub fn read_fm_clipboard() -> Result<Vec<u8>, String> {
 
 #[cfg(target_os = "macos")]
 fn nsdata_to_bytes(data: &objc2_foundation::NSData, len: usize) -> Vec<u8> {
-    let bytes_ptr: *const std::ffi::c_void = unsafe {
-        objc2::msg_send![data, bytes]
-    };
+    let bytes_ptr: *const std::ffi::c_void = unsafe { objc2::msg_send![data, bytes] };
     if bytes_ptr.is_null() {
         Vec::new()
     } else {
@@ -156,7 +158,7 @@ fn nsdata_to_bytes(data: &objc2_foundation::NSData, len: usize) -> Vec<u8> {
 #[cfg(target_os = "macos")]
 pub fn write_fm_clipboard(data: &[u8]) -> Result<(), String> {
     use objc2_app_kit::NSPasteboard;
-    use objc2_foundation::{NSData, NSString, NSArray};
+    use objc2_foundation::{NSArray, NSData, NSString};
 
     let pb = NSPasteboard::generalPasteboard();
     pb.clearContents();
@@ -204,7 +206,10 @@ pub fn list_clipboard_formats() -> Vec<(u32, String, usize)> {
     let mut result = Vec::new();
     for (i, ns_type) in types.iter().enumerate() {
         let type_str = ns_type.to_string();
-        let size = pb.dataForType(&ns_type).map(|d| d.length() as usize).unwrap_or(0);
+        let size = pb
+            .dataForType(&ns_type)
+            .map(|d| d.length() as usize)
+            .unwrap_or(0);
         result.push((i as u32, type_str, size));
     }
     result

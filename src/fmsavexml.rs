@@ -5,12 +5,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 use serde::Serialize;
 
 use crate::text_format::format_script;
-use crate::xmss::{parse_fmxml_snippet, ScriptStep};
+use crate::xmss::{ScriptStep, parse_fmxml_snippet};
 
 // ─── Data types ──────────────────────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ pub struct ScriptTriggerRef {
 
 #[derive(Debug, Serialize, Clone, Default)]
 pub struct LayoutObjectRef {
-    pub object_type: String,    // "Field", "Button", "Portal", "Text", ...
+    pub object_type: String, // "Field", "Button", "Portal", "Text", ...
     /// Optional object name (FM lets you name objects for Go to Object etc.)
     #[serde(skip_serializing_if = "String::is_empty")]
     pub object_name: String,
@@ -270,8 +270,7 @@ enum Section {
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
 pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
-    let raw = std::fs::read(xml_path)
-        .map_err(|e| format!("Cannot read {}: {}", xml_path, e))?;
+    let raw = std::fs::read(xml_path).map_err(|e| format!("Cannot read {}: {}", xml_path, e))?;
 
     let owned: String;
     let xml_str: &str = if raw.starts_with(b"\xFF\xFE") {
@@ -473,9 +472,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             let mut id = 0u32;
                             for attr in e.attributes().flatten() {
                                 if attr.key.as_ref() == b"id" {
-                                    id = String::from_utf8_lossy(&attr.value)
-                                        .parse()
-                                        .unwrap_or(0);
+                                    id = String::from_utf8_lossy(&attr.value).parse().unwrap_or(0);
                                 }
                             }
                             cur_steps_script_id = Some(id);
@@ -532,8 +529,12 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 // Layout's base TO (direct child of <Layout>).
                                 let (id, name) = parse_id_name_attrs(e);
                                 if let Some(l) = cur_layout.as_mut() {
-                                    if id != 0 { l.table_occurrence_id = Some(id); }
-                                    if !name.is_empty() { l.table_occurrence = Some(name); }
+                                    if id != 0 {
+                                        l.table_occurrence_id = Some(id);
+                                    }
+                                    if !name.is_empty() {
+                                        l.table_occurrence = Some(name);
+                                    }
                                 }
                             } else if local == b"ScriptTriggers" {
                                 // Distinguish layout-level vs object-level: if there's
@@ -546,7 +547,8 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 for attr in e.attributes().flatten() {
                                     match attr.key.as_ref() {
                                         b"action" => {
-                                            event = String::from_utf8_lossy(&attr.value).to_string();
+                                            event =
+                                                String::from_utf8_lossy(&attr.value).to_string();
                                         }
                                         b"browseMode" if &attr.value[..] == b"True" => {
                                             modes.push("browseMode".to_string());
@@ -686,12 +688,10 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                             String::from_utf8_lossy(&attr.value).to_string()
                                     }
                                     b"datatype" => {
-                                        data_type =
-                                            String::from_utf8_lossy(&attr.value).to_string()
+                                        data_type = String::from_utf8_lossy(&attr.value).to_string()
                                     }
                                     b"comment" => {
-                                        comment =
-                                            String::from_utf8_lossy(&attr.value).to_string()
+                                        comment = String::from_utf8_lossy(&attr.value).to_string()
                                     }
                                     _ => {}
                                 }
@@ -745,8 +745,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             let mut source_type = String::new();
                             for attr in e.attributes().flatten() {
                                 if attr.key.as_ref() == b"type" {
-                                    source_type =
-                                        String::from_utf8_lossy(&attr.value).to_string();
+                                    source_type = String::from_utf8_lossy(&attr.value).to_string();
                                 }
                             }
                             if !seen_to_ids.contains(&id) {
@@ -782,9 +781,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             let mut id = 0u32;
                             for attr in e.attributes().flatten() {
                                 if attr.key.as_ref() == b"id" {
-                                    id = String::from_utf8_lossy(&attr.value)
-                                        .parse()
-                                        .unwrap_or(0);
+                                    id = String::from_utf8_lossy(&attr.value).parse().unwrap_or(0);
                                 }
                             }
                             cur_rel = Some(Relationship {
@@ -866,13 +863,26 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             let mut access = String::new();
                             for attr in e.attributes().flatten() {
                                 match attr.key.as_ref() {
-                                    b"id" => id = String::from_utf8_lossy(&attr.value).parse().unwrap_or(0),
-                                    b"name" => name = String::from_utf8_lossy(&attr.value).to_string(),
-                                    b"access" => access = String::from_utf8_lossy(&attr.value).to_string(),
+                                    b"id" => {
+                                        id = String::from_utf8_lossy(&attr.value)
+                                            .parse()
+                                            .unwrap_or(0)
+                                    }
+                                    b"name" => {
+                                        name = String::from_utf8_lossy(&attr.value).to_string()
+                                    }
+                                    b"access" => {
+                                        access = String::from_utf8_lossy(&attr.value).to_string()
+                                    }
                                     _ => {}
                                 }
                             }
-                            cur_cf = Some(CustomFunction { id, name, access, ..Default::default() });
+                            cur_cf = Some(CustomFunction {
+                                id,
+                                name,
+                                access,
+                                ..Default::default()
+                            });
                         } else if let Some(cf) = cur_cf.as_mut() {
                             if local == b"Display" {
                                 reading_cf_display = true;
@@ -970,7 +980,8 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             in_button_action = false;
                         } else if local == b"Tooltip" {
                             in_tooltip = false;
-                        } else if local == b"Calculation" && in_tooltip
+                        } else if local == b"Calculation"
+                            && in_tooltip
                             && depth == tooltip_calc_depth
                         {
                             if let (Some(start), Some((o, _))) =
@@ -979,7 +990,8 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 let inner = &xml_str[start..pos_before];
                                 o.tooltip = Some(extract_cdata_or_text(inner));
                             }
-                        } else if local == b"Calculation" && in_trigger_calc
+                        } else if local == b"Calculation"
+                            && in_trigger_calc
                             && depth == trigger_calc_depth
                         {
                             if let (Some(start), Some(t)) =
@@ -1157,8 +1169,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 let inner = &xml_str[start..pos_before];
                                 // Strip <Text>CDATA</Text> wrapper if present.
                                 let body = extract_cdata_or_text(inner);
-                                if let Some(cf) =
-                                    custom_functions.iter_mut().find(|c| c.id == cfid)
+                                if let Some(cf) = custom_functions.iter_mut().find(|c| c.id == cfid)
                                 {
                                     cf.calculation = body;
                                 }
@@ -1625,7 +1636,11 @@ fn build_mermaid_diagram(rels: &[Relationship], tos: &[TableOccurrence]) -> Stri
             } else {
                 format!("{}__{}", to.data_source, to.base_table)
             };
-            out.push_str(&format!("    {} {{\n        string {}\n    }}\n", id, mermaid_id(&table)));
+            out.push_str(&format!(
+                "    {} {{\n        string {}\n    }}\n",
+                id,
+                mermaid_id(&table)
+            ));
         }
     }
     out
@@ -1633,7 +1648,13 @@ fn build_mermaid_diagram(rels: &[Relationship], tos: &[TableOccurrence]) -> Stri
 
 fn mermaid_id(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -1827,7 +1848,8 @@ fn transform_step_tags(xml: &str) -> String {
             let name = extract_xml_attr(tag, "name").unwrap_or("");
             out.push_str(&format!(
                 "<Script id=\"{}\" name=\"{}\"/>",
-                id, xml_escape_attr(name)
+                id,
+                xml_escape_attr(name)
             ));
             i = tag_end;
             continue;
@@ -1839,7 +1861,8 @@ fn transform_step_tags(xml: &str) -> String {
             let name = extract_xml_attr(tag, "name").unwrap_or("");
             out.push_str(&format!(
                 "<Layout id=\"{}\" name=\"{}\"/>",
-                id, xml_escape_attr(name)
+                id,
+                xml_escape_attr(name)
             ));
             i = tag_end;
             continue;
@@ -1927,8 +1950,7 @@ fn normalize_calculations(xml: &str) -> String {
                             i = k_end;
                             break;
                         }
-                    } else if inner_tag.starts_with("<Calculation")
-                        && !inner_tag.starts_with("</")
+                    } else if inner_tag.starts_with("<Calculation") && !inner_tag.starts_with("</")
                     {
                         depth += 1;
                     }
@@ -2022,7 +2044,12 @@ mod tests {
         assert_eq!(stats.tables, 1);
         assert_eq!(stats.fields, 2);
         assert!(out_dir.join("manifest.json").exists());
-        assert!(out_dir.join("scripts").join("0010_DoThing.fmscript").exists());
+        assert!(
+            out_dir
+                .join("scripts")
+                .join("0010_DoThing.fmscript")
+                .exists()
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

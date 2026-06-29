@@ -1855,8 +1855,62 @@ fn extract_xml_attr<'a>(tag: &'a str, attr_name: &str) -> Option<&'a str> {
 /// Safe to run on a Script ObjectList: ScriptReference/LayoutReference inside there
 /// can only be step targets (the catalog-level <Script>/<Layout> references live outside).
 fn fmsavexml_to_xmss(xml: &str) -> String {
-    let step1 = normalize_calculations(xml);
+    let step0 = collapse_field_target_params(xml);
+    let step1 = normalize_calculations(&step0);
     transform_step_tags(&step1)
+}
+
+/// Read an attribute from the first occurrence of `tag_open` in `hay`.
+fn first_tag_attr<'a>(hay: &'a str, tag_open: &str, attr: &str) -> Option<&'a str> {
+    let p = hay.find(tag_open)?;
+    let end = hay[p..].find('>')? + p + 1;
+    extract_xml_attr(&hay[p..end], attr)
+}
+
+/// Collapse the FMSaveAsXML target-field parameter of Set Field / Replace Field
+/// Contents / Insert … steps into the clipboard form `<Field table="TO" name="f"/>`.
+///
+/// The source shape is:
+/// `<Parameter type="FieldReference"><FieldReference name="f"><repetition>
+///  <Calculation>…rep…</Calculation></repetition>
+///  <TableOccurrenceReference name="TO"/></FieldReference></Parameter>`
+///
+/// Without this, the `<FieldReference>` is left raw (the xmss parser only knows
+/// `<Field>`, so the target is lost) and the inner `<repetition>` calculation is
+/// mistaken for the step's value calc. Collapsing fixes the target AND drops the
+/// repetition calc in one move.
+fn collapse_field_target_params(xml: &str) -> String {
+    const OPEN: &str = "<Parameter type=\"FieldReference\">";
+    const CLOSE: &str = "</Parameter>";
+    let mut out = String::with_capacity(xml.len());
+    let mut i = 0;
+    while let Some(rel) = xml[i..].find(OPEN) {
+        let start = i + rel;
+        out.push_str(&xml[i..start]);
+        let after_open = start + OPEN.len();
+        let Some(crel) = xml[after_open..].find(CLOSE) else {
+            // Unbalanced — emit the rest verbatim and stop.
+            out.push_str(&xml[start..]);
+            return out;
+        };
+        let inner = &xml[after_open..after_open + crel];
+        let field = first_tag_attr(inner, "<FieldReference", "name").unwrap_or("");
+        let to = first_tag_attr(inner, "<TableOccurrenceReference", "name").unwrap_or("");
+        if !field.is_empty() {
+            if to.is_empty() {
+                out.push_str(&format!("<Field name=\"{}\"/>", xml_escape_attr(field)));
+            } else {
+                out.push_str(&format!(
+                    "<Field table=\"{}\" name=\"{}\"/>",
+                    xml_escape_attr(to),
+                    xml_escape_attr(field)
+                ));
+            }
+        }
+        i = after_open + crel + CLOSE.len();
+    }
+    out.push_str(&xml[i..]);
+    out
 }
 
 fn transform_step_tags(xml: &str) -> String {
@@ -2235,6 +2289,25 @@ mod tests {
         let text = crate::text_format::format_script(&script);
         assert!(
             text.contains(r#"#56 from "By_99_Import_MTs""#),
+            "rendered: {}",
+            text
+        );
+    }
+
+    /// Set Field / Replace in the legacy `<ParameterValues>` form keep BOTH the
+    /// real target (FieldReference) and the value calc — and the inner repetition
+    /// calc ("1") must NOT be mistaken for the value.
+    #[test]
+    fn parametervalues_set_field_keeps_target_and_calc() {
+        let raw = r#"<fmxmlsnippet type="FMObjectList"><Step enable="True" id="1" name="Set Field"><ParameterValues membercount="2"><Parameter type="FieldReference"><FieldReference id="58" name="ProIte_Num" UUID=""><repetition><Calculation datatype="1" position="10"><Calculation><Text><![CDATA[1]]></Text></Calculation></Calculation></repetition><TableOccurrenceReference id="9" name="Ta_i_ProductosItems" UUID="Z"></TableOccurrenceReference></FieldReference></Parameter><Parameter type="Calculation"><Calculation datatype="1" position="0"><Calculation><Text><![CDATA[Ta_i_ProductosItems::cant]]></Text></Calculation></Calculation></Parameter></ParameterValues></Step></fmxmlsnippet>"#;
+
+        let xmss = fmsavexml_to_xmss(raw);
+        let script = crate::xmss::parse_fmxml_snippet(&xmss).unwrap();
+        let text = crate::text_format::format_script(&script);
+
+        // Real target (ProIte_Num), value formula (cant), and NOT the rep "1".
+        assert!(
+            text.contains("Set Field [Ta_i_ProductosItems::ProIte_Num; Ta_i_ProductosItems::cant]"),
             "rendered: {}",
             text
         );

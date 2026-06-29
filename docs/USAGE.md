@@ -179,6 +179,59 @@ la futura extensión de VSCode. Formato:
 **sin tocar el clipboard** — es lo que usa la extensión de VSCode para subrayar
 errores mientras editás. `write` valida igual pero además escribe al clipboard.
 
+### `fm-bridge inspect <archivo.xml> [output-dir]`
+
+Analiza un `FMSaveAsXML` (export completo de la base hecho con *File → Save a
+Copy As → XML*) y genera una carpeta navegable con todo el contexto del
+proyecto. Para archivos grandes (100MB+) trabaja en streaming.
+
+```bash
+fm-bridge inspect "By_00_Desk.xml" output/
+```
+
+**Salida (`output/`):**
+
+```
+output/
+  manifest.json             ← índice global con contadores
+  scripts/<id>_<name>.fmscript   ← scripts en formato editable (mismo formato que `read`)
+  layouts/<id>_<name>.json       ← cada layout: TO base, objetos recursivos
+                                   (fields, buttons → script, portales con su
+                                   contenido anidado), tooltips, ScriptTriggers
+                                   de objetos (OnObjectExit…) y de layout
+                                   (OnLayoutEnter, OnRecordCommit…)
+  layouts.json              ← índice de layouts
+  tables/<Tabla>.json       ← campos por tabla base (solo tablas locales del archivo)
+  table_occurrences.json    ← TOs resueltas a (archivo externo, tabla)
+  relationships.json        ← relaciones con joins completos
+  external_sources.json     ← archivos externos referenciados (`By_xx.fmp12`)
+  custom_functions/<id>_<name>.fmcalc   ← cuerpo de cada custom function
+  custom_functions.json     ← índice
+  analysis/analysis.json    ← grafo de llamadas, scripts no usados,
+                              triggers de botones, dependencias por archivo externo
+  relationships.mmd         ← diagrama ER en formato Mermaid
+```
+
+Si no pasás `output-dir`, usa `fm-inspect-output/`. Sirve para versionar la base
+(cada export → diff en git), buscar campos o scripts huérfanos, y como fuente
+para `fm-bridge slice`.
+
+### `fm-bridge slice <output-dir> <slice-dir> <layout-name> [layout-name...]`
+
+A partir de un `inspect` ya hecho, arma una **carpeta enfocada** con sólo lo que
+toca a los layouts pedidos. Pensado para darle a una IA el contexto justo (~30
+archivos, ~500 KB) en vez del export entero (~150 MB).
+
+```bash
+fm-bridge slice output/ slice_sto/ Sto_Dat_Gen Sto_Dat_Lis
+```
+
+Resuelve el cierre transitivo: scripts disparados por los botones de esos
+layouts → scripts que esos scripts llaman → TOs referenciadas en los layouts y
+en los cuerpos de los scripts → relaciones que tocan esas TOs → custom functions
+efectivamente usadas → archivos externos involucrados. La salida espeja la de
+`inspect` pero recortada (`slice_summary.md` agrega el contexto en prosa para la IA).
+
 ---
 
 ## 4. Workflow real
@@ -303,7 +356,9 @@ fm-bridge/
     ├── clipboard.rs        ← I/O al clipboard del SO (Win32 + macOS)
     ├── xmss.rs             ← codec del formato XML de FM
     ├── text_format.rs      ← codec del formato .fmscript de texto
-    └── steps.rs            ← carga steps.toml, helpers de búsqueda
+    ├── steps.rs            ← carga steps.toml, helpers de búsqueda
+    ├── fmsavexml.rs        ← parser del export FMSaveAsXML (comando `inspect`)
+    └── slice.rs            ← arma slices enfocados (comando `slice`)
 ```
 
 ---

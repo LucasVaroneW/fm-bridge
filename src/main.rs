@@ -3,9 +3,11 @@
 // No UI, no HTTP, no async. Procedural and minimal.
 
 mod clipboard;
+mod fmsavexml;
 mod normalization;
 #[cfg(windows)]
 mod ole_clipboard;
+mod slice;
 mod steps;
 mod text_format;
 mod xmss;
@@ -169,8 +171,64 @@ fn run_cli_mode() -> Result<(), String> {
             }
             Ok(())
         }
-        _ => Err(format!("Unknown command: {}. Use: read, write, json, steps, debug, test, passthrough, dump-ids", args[0]))
+        "inspect" => run_inspect_cli(&args[1..]),
+        "slice" => run_slice_cli(&args[1..]),
+        _ => Err(format!("Unknown command: {}. Use: read, write, json, steps, debug, test, passthrough, dump-ids, inspect, slice", args[0]))
     }
+}
+
+/// Parse an `FMSaveAsXML` database export and write a navigable inspection
+/// directory (scripts, layouts, tables, TOs, relationships, custom functions,
+/// cross-reference analysis). Streaming, handles 100MB+ UTF-16 exports.
+fn run_inspect_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("Usage: fm-bridge inspect <FMSaveAsXML.xml> [output-dir]".to_string());
+    }
+    let xml_path = &args[0];
+    let output_dir = args.get(1).map(|s| s.as_str()).unwrap_or("fm-inspect-output");
+
+    println!("Parsing {}...", xml_path);
+    let db = fmsavexml::parse(xml_path)?;
+
+    println!(
+        "  Scripts: {}  |  Layouts: {}  |  Tables: {}",
+        db.scripts.iter().filter(|s| !s.is_folder && !s.is_separator).count(),
+        db.layouts.len(),
+        db.tables.len(),
+    );
+
+    println!("Writing to {}...", output_dir);
+    let stats = fmsavexml::write_inspection(&db, output_dir)?;
+
+    println!(
+        "Done.\n  Scripts exported       : {}\n  Layouts indexed        : {}\n  Tables (base) indexed  : {}\n  Fields (base) indexed  : {}\n  Table occurrences      : {}\n  Relationships          : {}\n  External data sources  : {}\n  Custom functions       : {}\n  Unreferenced scripts   : {}",
+        stats.scripts_written,
+        stats.layouts,
+        stats.tables,
+        stats.fields,
+        stats.table_occurrences,
+        stats.relationships,
+        stats.external_sources,
+        stats.custom_functions,
+        stats.unreferenced_scripts,
+    );
+    Ok(())
+}
+
+/// From an existing `inspect` output, build a focused slice around one or more
+/// layouts: transitive closure of triggered scripts, referenced TOs, relations,
+/// and custom functions. Pares a 150MB export down to ~30 files for an AI.
+fn run_slice_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 3 {
+        return Err(
+            "Usage: fm-bridge slice <output-dir> <slice-dir> <layout-name> [layout-name…]"
+                .to_string(),
+        );
+    }
+    let output_dir = &args[0];
+    let slice_dir = &args[1];
+    let layouts: Vec<String> = args[2..].to_vec();
+    slice::run_slice(output_dir, slice_dir, &layouts)
 }
 
 /// Read a text file with encoding detection.

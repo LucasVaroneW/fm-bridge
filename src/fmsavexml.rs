@@ -107,6 +107,26 @@ pub struct FieldInfo {
     pub field_type: String,
     pub data_type: String,
     pub comment: String,
+    /// Calculation expression for `Calculated` fields (the field's own
+    /// `<Calculation>`, not its auto-enter calc). `None` for plain fields.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calculation: Option<String>,
+    /// Index level from `<Storage index=...>`: "All" | "Minimal" | "None".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<String>,
+    /// Whether the field has any index (index != "None"). Convenience flag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indexed: Option<bool>,
+    /// Global storage (`<Storage global="True">`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub global: Option<bool>,
+    /// For calc fields: whether the result is stored (`storeCalculationResults`).
+    /// `Some(false)` means an unstored calc (not indexable, evaluated on read).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stored: Option<bool>,
+    /// Repetition count (`<Storage maxRepetitions>`), when > 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_repetitions: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -353,6 +373,10 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
     let mut cur_field_table_id: Option<u32> = None;
     let mut cur_field_table_name = String::new();
     let mut cur_field: Option<FieldInfo> = None;
+    // A Field's <Calculation> capture: skip the one nested inside <AutoEnter>,
+    // capture only the field's own calc (Calculated fields). Expression is CDATA.
+    let mut in_field_autoenter = false;
+    let mut reading_field_calc = false;
 
     // ExternalDataSource state
     let mut cur_eds: Option<ExternalDataSource> = None;
@@ -702,7 +726,48 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 field_type,
                                 data_type,
                                 comment,
+                                calculation: None,
+                                index: None,
+                                indexed: None,
+                                global: None,
+                                stored: None,
+                                max_repetitions: None,
                             });
+                            in_field_autoenter = false;
+                            reading_field_calc = false;
+                        } else if local == b"Storage" {
+                            if let Some(f) = cur_field.as_mut() {
+                                for attr in e.attributes().flatten() {
+                                    match attr.key.as_ref() {
+                                        b"index" => {
+                                            let v =
+                                                String::from_utf8_lossy(&attr.value).to_string();
+                                            f.indexed = Some(v != "None");
+                                            f.index = Some(v);
+                                        }
+                                        b"global" => f.global = Some(&attr.value[..] == b"True"),
+                                        b"storeCalculationResults" => {
+                                            f.stored = Some(&attr.value[..] == b"True")
+                                        }
+                                        b"maxRepetitions" => {
+                                            let n: u32 = String::from_utf8_lossy(&attr.value)
+                                                .parse()
+                                                .unwrap_or(1);
+                                            if n > 1 {
+                                                f.max_repetitions = Some(n);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        } else if local == b"AutoEnter" && cur_field.is_some() {
+                            in_field_autoenter = true;
+                        } else if local == b"Calculation"
+                            && cur_field.is_some()
+                            && !in_field_autoenter
+                        {
+                            reading_field_calc = true;
                         }
                     }
 
@@ -1082,6 +1147,12 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                     }
                                 }
                             }
+                            in_field_autoenter = false;
+                            reading_field_calc = false;
+                        } else if local == b"AutoEnter" {
+                            in_field_autoenter = false;
+                        } else if local == b"Calculation" {
+                            reading_field_calc = false;
                         }
                         if depth == sec_depth {
                             section = Section::Root;
@@ -1203,6 +1274,20 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                     if let Some(cf) = cur_cf.as_mut() {
                         let text = e.unescape().unwrap_or_default().to_string();
                         cf.display.push_str(text.trim());
+                    }
+                }
+            }
+
+            // Field calculation bodies live in CDATA: <Calculation>…<Text>
+            // <![CDATA[ expr ]]></Text></Calculation>. Capture only while inside
+            // a field's own <Calculation> (not its auto-enter calc).
+            Ok(Event::CData(ref e)) => {
+                if reading_field_calc {
+                    if let Some(f) = cur_field.as_mut() {
+                        let text = String::from_utf8_lossy(e.as_ref()).to_string();
+                        f.calculation
+                            .get_or_insert_with(String::new)
+                            .push_str(&text);
                     }
                 }
             }
@@ -2050,6 +2135,65 @@ mod tests {
                 .join("0010_DoThing.fmscript")
                 .exists()
         );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Fields carry their calculation body + storage (index / global / stored),
+    /// and the auto-enter calc must NOT be mistaken for the field's own calc.
+    const FIELD_FIXTURE: &str = r#"<FMSaveAsXML File="T.fmp12">
+  <BaseTableCatalog><BaseTable id="1" name="Ofertas"/></BaseTableCatalog>
+  <FieldsForTables>
+    <BaseTableReference id="1" name="Ofertas"/>
+    <Field id="4" name="Ofe_PK" fieldtype="Normal" datatype="Text">
+      <Storage index="All" global="False" maxRepetitions="1"/>
+    </Field>
+    <Field id="3" name="g_sep" fieldtype="Normal" datatype="Number">
+      <Storage index="None" global="True" maxRepetitions="1"/>
+    </Field>
+    <Field id="69" name="Ofe_cBool" fieldtype="Calculated" datatype="Number">
+      <AutoEnter alwaysEvaluate="True">
+        <Calculation><Text><![CDATA[NOT THE FIELD CALC]]></Text></Calculation>
+      </AutoEnter>
+      <Storage storeCalculationResults="True" index="All" global="False" maxRepetitions="1"/>
+      <Calculation>
+        <TableOccurrenceReference id="1" name="Ta_d_Ofertas"/>
+        <Text><![CDATA[If ( IsEmpty ( Ofe_RK ); 0 ; 1)]]></Text>
+      </Calculation>
+    </Field>
+  </FieldsForTables>
+</FMSaveAsXML>"#;
+
+    #[test]
+    fn fields_capture_calculation_and_storage() {
+        let dir = temp_dir("fields");
+        let xml_path = dir.join("export.xml");
+        std::fs::write(&xml_path, FIELD_FIXTURE).unwrap();
+
+        let db = parse(xml_path.to_str().unwrap()).unwrap();
+        let fields = &db.tables[0].fields;
+        let by = |n: &str| fields.iter().find(|f| f.name == n).unwrap();
+
+        // Plain indexed text field.
+        let pk = by("Ofe_PK");
+        assert_eq!(pk.index.as_deref(), Some("All"));
+        assert_eq!(pk.indexed, Some(true));
+        assert_eq!(pk.global, Some(false));
+        assert!(pk.calculation.is_none());
+
+        // Global field: not indexed.
+        let g = by("g_sep");
+        assert_eq!(g.global, Some(true));
+        assert_eq!(g.indexed, Some(false));
+
+        // Calculated field: captures its OWN calc, not the auto-enter one.
+        let c = by("Ofe_cBool");
+        assert_eq!(
+            c.calculation.as_deref(),
+            Some("If ( IsEmpty ( Ofe_RK ); 0 ; 1)")
+        );
+        assert_eq!(c.stored, Some(true));
+        assert_eq!(c.indexed, Some(true));
 
         std::fs::remove_dir_all(&dir).ok();
     }

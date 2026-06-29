@@ -24,6 +24,10 @@ pub struct ScriptInfo {
     pub is_separator: bool,
     pub run_with_full_access: bool,
     pub step_count: usize,
+    /// Containing script-folder name (best-effort: FMSaveAsXML lists scripts
+    /// flat, so we assign each to the most recent `isFolder` marker). Empty =
+    /// top level. Used to mirror the folder tree into subdirectories.
+    pub folder: String,
 }
 
 #[derive(Debug, Serialize, Clone, Default)]
@@ -335,6 +339,9 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
 
     // ScriptCatalog state
     let mut cur_script: Option<ScriptInfo> = None;
+    // Most recent `isFolder` marker — scripts after it belong to that folder
+    // (FMSaveAsXML lists the catalog flat, so this is the only signal we have).
+    let mut current_folder = String::new();
     let mut reading_script_uuid = false;
     let mut reading_script_options = false;
 
@@ -452,6 +459,12 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                         let sec_depth = *sec_depth;
                         if local == b"Script" {
                             let (id, name, is_folder, is_sep) = parse_script_attrs(e);
+                            // A folder marker opens a new group; the folder item
+                            // itself lives at the parent level (folder = current).
+                            let folder = current_folder.clone();
+                            if is_folder {
+                                current_folder = name.clone();
+                            }
                             cur_script = Some(ScriptInfo {
                                 id,
                                 name,
@@ -461,6 +474,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 is_separator: is_sep,
                                 run_with_full_access: false,
                                 step_count: 0,
+                                folder,
                             });
                             reading_script_uuid = false;
                             reading_script_options = false;
@@ -1373,11 +1387,24 @@ pub fn write_inspection(db: &ParsedDatabase, output_dir: &str) -> Result<Inspect
                 let text = format_script(&fmscript);
                 let safe_name = sanitize_filename(&script.name);
                 let filename = format!("{:04}_{}.fmscript", script.id, safe_name);
-                let path = scripts_dir.join(&filename);
+                // Mirror the script folder into a subdirectory. `rel` is the
+                // forward-slash path stored in the manifest (portable).
+                let (dir, rel) = if script.folder.is_empty() {
+                    (scripts_dir.clone(), filename.clone())
+                } else {
+                    let safe_folder = sanitize_filename(&script.folder);
+                    std::fs::create_dir_all(scripts_dir.join(&safe_folder))
+                        .map_err(|e| format!("mkdir scripts/{}: {}", safe_folder, e))?;
+                    (
+                        scripts_dir.join(&safe_folder),
+                        format!("{}/{}", safe_folder, filename),
+                    )
+                };
+                let path = dir.join(&filename);
                 std::fs::write(&path, &text)
                     .map_err(|e| format!("write {}: {}", path.display(), e))?;
                 scripts_written += 1;
-                Some(filename)
+                Some(rel)
             } else {
                 None
             }
@@ -2269,6 +2296,43 @@ mod tests {
         assert_eq!(c.stored, Some(true));
         assert_eq!(c.indexed, Some(true));
 
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Scripts are assigned to the most recent `isFolder` marker and written
+    /// into a matching subdirectory (FMSaveAsXML lists the catalog flat).
+    #[test]
+    fn scripts_grouped_into_folders() {
+        let fixture = r#"<FMSaveAsXML File="T.fmp12">
+  <ScriptCatalog>
+    <Script id="5" name="TopLevel"></Script>
+    <Script id="9" name="MyFolder" isFolder="True"></Script>
+    <Script id="10" name="Inside"></Script>
+  </ScriptCatalog>
+  <StepsForScripts>
+    <StepsForScript><ScriptReference id="5" name="TopLevel"/><ObjectList><Step enable="True" id="1" name="Comment"><Text>a</Text></Step></ObjectList></StepsForScript>
+    <StepsForScript><ScriptReference id="10" name="Inside"/><ObjectList><Step enable="True" id="1" name="Comment"><Text>b</Text></Step></ObjectList></StepsForScript>
+  </StepsForScripts>
+</FMSaveAsXML>"#;
+        let dir = temp_dir("folders");
+        let xml = dir.join("export.xml");
+        std::fs::write(&xml, fixture).unwrap();
+        let db = parse(xml.to_str().unwrap()).unwrap();
+
+        let top = db.scripts.iter().find(|s| s.name == "TopLevel").unwrap();
+        let inside = db.scripts.iter().find(|s| s.name == "Inside").unwrap();
+        assert_eq!(top.folder, "");
+        assert_eq!(inside.folder, "MyFolder");
+
+        let out = dir.join("out");
+        write_inspection(&db, out.to_str().unwrap()).unwrap();
+        assert!(out.join("scripts").join("0005_TopLevel.fmscript").exists());
+        assert!(
+            out.join("scripts")
+                .join("MyFolder")
+                .join("0010_Inside.fmscript")
+                .exists()
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

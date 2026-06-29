@@ -251,6 +251,11 @@ pub fn run_slice(
                 let src = scripts_dir.join(file);
                 let dst = slice_scripts_dir.join(file);
                 if let Ok(content) = fs::read_to_string(&src) {
+                    // `file` may include a script-folder subdir; mirror it.
+                    if let Some(parent) = dst.parent() {
+                        fs::create_dir_all(parent)
+                            .map_err(|e| format!("mkdir {}: {}", parent.display(), e))?;
+                    }
                     fs::write(&dst, &content)
                         .map_err(|e| format!("write {}: {}", dst.display(), e))?;
                     all_script_text.push_str(&content);

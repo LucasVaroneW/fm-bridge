@@ -298,6 +298,30 @@ Imprime un resumen por tipo y la lista de issues. También por JSON
 a propósito los Perform Script **cross-file** y los targets dinámicos (calc/
 `$variable`) para no tirar falsos positivos.
 
+### `fm-bridge who-calls <FMSaveAsXML.xml> <script|#id>`
+
+Lista **todo lo que dispara** un script — antes de tocarlo, para saber el radio
+de impacto: otros scripts (Perform Script), triggers de layout y de objeto, y
+botones.
+
+```bash
+fm-bridge who-calls By_00_Desk.xml "Imp_Inicial"
+fm-bridge who-calls By_00_Desk.xml "#56"
+```
+
+### `fm-bridge who-uses-field <FMSaveAsXML.xml> <Field|TO::Field>`
+
+Encuentra **dónde se usa un campo**: ubicaciones en layouts, claves de relación,
+pasos Set Field, y menciones en cálculos (scripts, calcs de campo, custom
+functions). Acepta `TableOccurrence::Campo` o el nombre suelto.
+
+```bash
+fm-bridge who-uses-field By_00_Desk.xml "Ofe_Estado"
+fm-bridge who-uses-field By_00_Desk.xml "Ta_d_Ofertas::Ofe_Estado"
+```
+
+Ambos también por JSON (`who_calls` / `who_uses_field`) y como tools MCP.
+
 ---
 
 ## 4. Workflow real

@@ -37,8 +37,13 @@ interchangeable.
   behind diagnostics).
 - `src/steps.rs` + `steps.toml` — the step catalog (single source for names,
   shapes, block behavior). `steps.toml` is the data; add steps there.
+- `src/fmsavexml.rs` + `src/slice.rs` — schema parser (`inspect`/`slice`, #6):
+  FMSaveAsXML → navigable dirs of tables/fields/layouts/TOs/relations/scripts.
+- `src/mcp.rs` — the **AI front door**: `fm-bridge mcp` serves MCP (JSON-RPC over
+  stdio), exposing engine commands as tools. Forwards to `handle_command`.
 - `editors/vscode/` — the VS Code extension (TypeScript).
-- `docs/USAGE.md` — user guide (ES). `docs/IA-PROMPT.md` — `.fmscript` syntax for AI.
+- `docs/VISION.md` — north star. `docs/MCP.md` — MCP setup + tools.
+  `docs/USAGE.md` — user guide (ES). `docs/IA-PROMPT.md` — `.fmscript` syntax for AI.
 
 ## Build & test
 

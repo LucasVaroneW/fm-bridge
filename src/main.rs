@@ -5,6 +5,7 @@
 mod clipboard;
 mod fmsavexml;
 mod import_records;
+mod mcp;
 mod normalization;
 #[cfg(windows)]
 mod ole_clipboard;
@@ -156,6 +157,22 @@ fn handle_command(cmd: &Command) -> Response {
                 Response::ok()
             } else {
                 Response::errors(errors)
+            }
+        }
+        // Parse `.fmscript` text into the structured step tree as JSON (#3), for
+        // AI/tooling that wants to reason over fields, not just the flat text.
+        // Side-effect free, like `parse`. On a format error, returns the
+        // positioned error(s) instead of a tree.
+        "to_json" => {
+            let script_text = match &cmd.script_text {
+                Some(t) => t,
+                None => return Response::error("No script_text provided".to_string()),
+            };
+            match text_format::parse_text_to_script(script_text) {
+                Ok(script) => {
+                    Response::ok_data(serde_json::to_value(&script).unwrap_or(serde_json::Value::Null))
+                }
+                Err(pe) => Response::errors(vec![pe]),
             }
         }
         "write" => {
@@ -311,8 +328,9 @@ fn run_cli_mode() -> Result<(), String> {
         }
         "inspect" => run_inspect_cli(&args[1..]),
         "slice" => run_slice_cli(&args[1..]),
+        "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, steps, debug, test, passthrough, dump-ids, inspect, slice",
+            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice",
             args[0]
         )),
     }

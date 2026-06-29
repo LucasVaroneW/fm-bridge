@@ -60,6 +60,11 @@ pub struct ScriptStep {
     // For Perform Script (PerformScript shape): target script + parent mode.
     pub script_target_name: Option<String>,
     pub script_target_id: Option<String>,
+    /// External file the target script lives in, for cross-file Perform Script
+    /// (`<DataSourceReference>` in FMSaveAsXML). `None` = same file. Decode-only
+    /// (inspect): never set on the clipboard read/write path.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub script_target_file: Option<String>,
     pub current_script_mode: Option<String>,
     // For Go to Record/Request/Page (GoToRecord shape).
     pub goto_location: Option<String>,
@@ -460,6 +465,17 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             }
                         }
                     }
+                    // External file of a cross-file Perform Script target. Emitted by
+                    // the FMSaveAsXML→XMSS transform from <DataSourceReference>; never
+                    // present in clipboard XMSS, so it's inert on the read/write path.
+                    b"DataSource" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"name" {
+                                parser.script_target_file =
+                                    String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
                     b"CurrentScript" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"value" {
@@ -742,6 +758,7 @@ struct StepParser {
     field_numeric_id: String,
     script_target_name: String,
     script_target_id: String,
+    script_target_file: String,
     current_script_mode: String,
     goto_location: String,
     goto_exit_after_last: String,
@@ -893,6 +910,11 @@ impl StepParser {
                 None
             } else {
                 Some(self.script_target_id.clone())
+            },
+            script_target_file: if self.script_target_file.is_empty() {
+                None
+            } else {
+                Some(self.script_target_file.clone())
             },
             current_script_mode: if self.current_script_mode.is_empty() {
                 None

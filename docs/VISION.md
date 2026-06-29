@@ -43,39 +43,54 @@ combinadas y son intercambiables.
 motor (decode + lint + inspect), y encuentra bugs rápido — cruzando scripts con
 el esquema (ej.: un `Set Field` que apunta a un campo inexistente).
 
-## Estado actual (2026-06-28)
+## Estado actual (2026-06-29)
 
 - ✅ **Vía humana (MVP):** extensión VS Code — highlighting, snippets, read/write
   clipboard, diagnostics (multi-error + estructura de bloques + Quick Fix),
-  autocomplete desde el catálogo del binario. (#17)
+  autocomplete desde el catálogo del binario, comandos `inspect`/`slice`. (#17)
 - ✅ **Cero instalación:** binario empaquetado en el `.vsix` + CI multiplataforma.
 - ✅ **Motor de scripts:** codec XML↔texto, linter, comando `parse`/`lint`,
   catálogo `steps`, `decode-xml`/`encode-text`.
 - ✅ **Opaco por defecto:** steps no reconocidos round-trippean byte-a-byte. (#2)
-- ❌ **Vía IA:** todavía no hay MCP server ni salida JSON estructurada del script.
-- ❌ **Esquema:** el motor solo entiende scripts (`<Step>`), no tablas/campos/DDR.
+  Import/Export Records ahora se ven como **DSL indentado y editable** con
+  round-trip byte-a-byte. (#5)
+- ✅ **Esquema (#6) — el salto grande, hecho:** `inspect` parsea el export
+  `FMSaveAsXML` y genera carpeta navegable con **tablas + campos calculados +
+  indexación** (index/indexed/global/stored), layouts (objetos recursivos,
+  portales, triggers, tooltips), TOs resueltas a archivo externo, relaciones con
+  joins, custom functions, y **scripts fieles al `read` byte-a-byte** (incluido
+  cross-file Perform Script, Set Field/Replace, comentarios, nombres de variable)
+  organizados en **carpetas** como en FM. `slice` arma el subconjunto enfocado
+  por cierre transitivo. Todo expuesto también por `--json` para una IA headless.
+- 🟡 **Vía IA:** la IA ya puede manejar el motor **headless por CLI-JSON**
+  (`fm-bridge json` con `read`/`write`/`parse`/`version`/`inspect`/`slice`).
+  Falta: **#3** (árbol del script como JSON, no solo texto) y el **MCP server**
+  que envuelva todo eso como la puerta IA pulida.
 
 ## Roadmap por fases
 
-### Fase 1 — Desbloquear la IA (fácil, alta palanca)
+### Fase 1 — Desbloquear la IA (lo que queda de la puerta IA)
+- 🟡 Base hecha: protocolo CLI-JSON con `read`/`parse`/`version`/`inspect`/`slice`.
 - **#3 — JSON estructurado del script.** `FmScript`/`ScriptStep` ya son
   `Serialize`; falta un comando que emita el árbol en JSON (no solo texto).
-- **MCP server mínimo** envolviendo lo que ya existe: `read`, `parse/lint`,
-  `steps`, `decode-xml`. Con esto una IA ya analiza scripts en lote.
+- **MCP server** envolviendo lo que ya existe (`read`, `parse/lint`, `steps`,
+  `decode-xml`, `inspect`, `slice`). Con esto la puerta IA queda formal.
 
-### Fase 2 — El salto grande: esquema (#6 inspect/slice)
-- Segunda familia de parsers: definiciones de tabla/campo, layouts, DDR.
-- Empezar con un **spike**: copiar una tabla en FM (o exportar DDR), `fm-bridge
-  debug`, y mapear el formato XML.
-- Exponer por `--json` y como tool del MCP.
+### Fase 2 — El salto grande: esquema (#6 inspect/slice) — ✅ hecho
+- ✅ Segunda familia de parsers (`fmsavexml.rs`): tablas/campos (con cálculo e
+  indexación), layouts, TOs, relaciones, custom functions, scripts en carpetas.
+- ✅ Expuesto por `--json` (`inspect`/`slice`) y por la extensión de VS Code.
+- Pendiente menor: campos de tablas **externas** viven en el `inspect` de su
+  propio archivo, no dentro del slice (hay que cruzar dos exports).
 
 ### Fase 3 — El oro: bugs con contexto
 - Tools que **cruzan** script + esquema (referencias rotas, campos inexistentes,
-  scripts huérfanos, etc.). Acá "encontrar bugs solo con extraer XMLs" se vuelve
-  real.
+  scripts huérfanos, `who-calls`/`who-uses-field`, etc.). Hoy se hace **a mano**
+  con inspect/slice (ej.: el diagnóstico del bug de las SX); falta automatizarlo.
 
 ### Fidelidad del core (en paralelo, cuando convenga)
-- #4 Show Custom Dialog (input fields), #5 Import/Export con DSL legible.
+- #4 Show Custom Dialog (input fields). #5 Import/Export con DSL legible ✅.
+- Pendiente conocido: indentación de cálculos multilínea en el round-trip.
 
 ## Issues relacionados
 

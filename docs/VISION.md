@@ -62,19 +62,18 @@ el esquema (ej.: un `Set Field` que apunta a un campo inexistente).
   cross-file Perform Script, Set Field/Replace, comentarios, nombres de variable)
   organizados en **carpetas** como en FM. `slice` arma el subconjunto enfocado
   por cierre transitivo. Todo expuesto también por `--json` para una IA headless.
-- 🟡 **Vía IA:** la IA ya puede manejar el motor **headless por CLI-JSON**
-  (`fm-bridge json` con `read`/`write`/`parse`/`version`/`inspect`/`slice`).
-  Falta: **#3** (árbol del script como JSON, no solo texto) y el **MCP server**
-  que envuelva todo eso como la puerta IA pulida.
+- ✅ **Vía IA — hecha:** **#3** (árbol del script en JSON via `to_json`) + un
+  **MCP server** (`fm-bridge mcp`, JSON-RPC por stdio, sin async ni deps nuevas)
+  que expone `read`/`validate`/`script_to_json`/`inspect`/`slice`/`steps` como
+  tools. Cualquier cliente MCP (Claude Desktop, Cursor, Antigravity) maneja el
+  mismo motor que el humano. Ver [MCP.md](MCP.md).
 
 ## Roadmap por fases
 
-### Fase 1 — Desbloquear la IA (lo que queda de la puerta IA)
-- 🟡 Base hecha: protocolo CLI-JSON con `read`/`parse`/`version`/`inspect`/`slice`.
-- **#3 — JSON estructurado del script.** `FmScript`/`ScriptStep` ya son
-  `Serialize`; falta un comando que emita el árbol en JSON (no solo texto).
-- **MCP server** envolviendo lo que ya existe (`read`, `parse/lint`, `steps`,
-  `decode-xml`, `inspect`, `slice`). Con esto la puerta IA queda formal.
+### Fase 1 — Desbloquear la IA — ✅ hecho
+- ✅ **#3 — JSON estructurado del script** (`to_json`: texto → árbol de steps).
+- ✅ **MCP server** (`fm-bridge mcp`) envolviendo `read`/`validate`/
+  `script_to_json`/`inspect`/`slice`/`steps`. Puerta IA formal. Ver [MCP.md](MCP.md).
 
 ### Fase 2 — El salto grande: esquema (#6 inspect/slice) — ✅ hecho
 - ✅ Segunda familia de parsers (`fmsavexml.rs`): tablas/campos (con cálculo e

@@ -168,6 +168,7 @@ la futura extensión de VSCode. Formato:
 {"command": "read"}
 {"command": "write", "script_text": "Set Variable [$x = 1]"}
 {"command": "parse", "script_text": "Set Variable [$x = 1]"}
+{"command": "to_json", "script_text": "Set Variable [$x = 1]"}
 {"command": "version"}
 
 // stdout
@@ -178,6 +179,8 @@ la futura extensión de VSCode. Formato:
 `parse` valida el texto y devuelve el error con su línea (`error_line`, 1-based)
 **sin tocar el clipboard** — es lo que usa la extensión de VSCode para subrayar
 errores mientras editás. `write` valida igual pero además escribe al clipboard.
+`to_json` parsea el `.fmscript` y devuelve el **árbol estructurado** del script
+(steps con sus campos) en `data`, para que una IA razone sobre la estructura.
 
 El modo `json` también expone `inspect` y `slice`, pensados para que una **IA o
 agente los ejecute headless** (stdout queda siempre como un único JSON limpio —
@@ -209,6 +212,18 @@ los mensajes de progreso solo salen por la vía CLI, no acá):
 `xml_path` es obligatorio para `inspect` (si falta, `output_dir` por defecto es
 `fm-inspect-output/`). Para `slice` son obligatorios `output_dir`, `slice_dir` y
 un `layouts` no vacío. Cualquier fallo vuelve como `{"status":"error","error":"…"}`.
+
+### `fm-bridge mcp`
+
+Levanta un servidor **MCP (Model Context Protocol)** por stdio: la **puerta IA**.
+Cualquier cliente MCP (Claude Desktop, Cursor, Antigravity) maneja el mismo motor
+que el humano. Cada tool reenvía a un comando del binario, así que no se duplica
+nada. Configuración (Claude Desktop, etc.), lista de tools y ejemplos en
+[`MCP.md`](MCP.md).
+
+```bash
+fm-bridge mcp    # habla JSON-RPC por stdin/stdout; lo lanza el cliente MCP
+```
 
 ### `fm-bridge inspect <archivo.xml> [output-dir]`
 

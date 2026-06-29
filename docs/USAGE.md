@@ -278,6 +278,26 @@ en los cuerpos de los scripts → relaciones que tocan esas TOs → custom funct
 efectivamente usadas → archivos externos involucrados. La salida espeja la de
 `inspect` pero recortada (`slice_summary.md` agrega el contexto en prosa para la IA).
 
+### `fm-bridge audit <FMSaveAsXML.xml>`
+
+Cruza scripts × esquema y reporta **referencias rotas** — los bugs que un humano
+buscaría a mano:
+
+- Perform Script que apunta a un script inexistente (en este archivo).
+- Go to Layout / New Window a un layout inexistente.
+- Relaciones cuyas table occurrences no existen.
+- Table occurrences internas cuya tabla base fue borrada.
+- Layouts (y campos/portales dentro) que muestran una TO inexistente.
+
+```bash
+fm-bridge audit By_00_Desk.xml
+```
+
+Imprime un resumen por tipo y la lista de issues. También por JSON
+(`{"command":"audit","xml_path":"…"}`) y como tool MCP `audit_database`. Ignora
+a propósito los Perform Script **cross-file** y los targets dinámicos (calc/
+`$variable`) para no tirar falsos positivos.
+
 ---
 
 ## 4. Workflow real

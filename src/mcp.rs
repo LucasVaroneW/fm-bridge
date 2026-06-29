@@ -108,6 +108,11 @@ fn tools_list_result() -> Value {
             "inputSchema": { "type": "object", "properties": { "output_dir": { "type": "string", "description": "An existing inspect output directory." }, "slice_dir": { "type": "string", "description": "Where to write the slice." }, "layouts": { "type": "array", "items": { "type": "string" }, "description": "Layout name(s) to anchor the slice on." } }, "required": ["output_dir", "slice_dir", "layouts"] }
         },
         {
+            "name": "audit_database",
+            "description": "Scan a FileMaker FMSaveAsXML export for broken references (dangling Perform Script / Go to Layout targets, relationships and layouts pointing at deleted table occurrences, table occurrences whose base table is gone, ghost fields on layouts). Returns a structured issue list — the fast way to find bugs.",
+            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." } }, "required": ["xml_path"] }
+        },
+        {
             "name": "list_steps",
             "description": "Return the catalog of supported FileMaker script step types (English/Spanish name, shape, block behavior).",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
@@ -151,6 +156,10 @@ fn tools_call(params: Option<&Value>) -> Result<Value, RpcError> {
                 .get("output_dir")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+        }
+        "audit_database" => {
+            cmd.command = "audit".to_string();
+            cmd.xml_path = Some(arg_str(&args, "xml_path")?);
         }
         "slice_inspect" => {
             cmd.command = "slice".to_string();
@@ -221,6 +230,7 @@ mod tests {
             "script_to_json",
             "inspect_database",
             "slice_inspect",
+            "audit_database",
             "list_steps",
         ] {
             assert!(names.contains(&expected), "missing tool {}", expected);

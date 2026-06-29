@@ -179,6 +179,37 @@ la futura extensión de VSCode. Formato:
 **sin tocar el clipboard** — es lo que usa la extensión de VSCode para subrayar
 errores mientras editás. `write` valida igual pero además escribe al clipboard.
 
+El modo `json` también expone `inspect` y `slice`, pensados para que una **IA o
+agente los ejecute headless** (stdout queda siempre como un único JSON limpio —
+los mensajes de progreso solo salen por la vía CLI, no acá):
+
+```json
+// stdin
+{"command": "inspect", "xml_path": "By_00_Desk.xml", "output_dir": "out"}
+{"command": "slice", "output_dir": "out", "slice_dir": "slice_sto",
+ "layouts": ["Sto_Dat_Gen", "Sto_Dat_Lis"]}
+
+// stdout (inspect) — counts + rutas de salida en `data`
+{"status": "ok", "data": {
+  "output_dir": "out", "manifest": "out/manifest.json", "file_name": "By_00_Desk.fmp12",
+  "scripts": 296, "layouts": 451, "tables": 40, "fields": 1200,
+  "table_occurrences": 833, "relationships": 675, "custom_functions": 16,
+  "external_sources": 8, "unreferenced_scripts": 34
+}}
+
+// stdout (slice) — counts del cierre + ruta del resumen para leer después
+{"status": "ok", "data": {
+  "slice_dir": "slice_sto", "summary": "slice_sto/slice_summary.md",
+  "layouts": 2, "scripts_seed": 8, "scripts_closure": 41,
+  "table_occurrences": 53, "relationships": 47, "custom_functions": 6,
+  "external_sources": 3
+}}
+```
+
+`xml_path` es obligatorio para `inspect` (si falta, `output_dir` por defecto es
+`fm-inspect-output/`). Para `slice` son obligatorios `output_dir`, `slice_dir` y
+un `layouts` no vacío. Cualquier fallo vuelve como `{"status":"error","error":"…"}`.
+
 ### `fm-bridge inspect <archivo.xml> [output-dir]`
 
 Analiza un `FMSaveAsXML` (export completo de la base hecho con *File → Save a

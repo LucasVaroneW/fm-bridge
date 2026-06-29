@@ -2008,6 +2008,41 @@ fn transform_step_tags(xml: &str) -> String {
             // Unknown shape — fall through and emit raw.
         }
 
+        // ── Comment text: <Comment value="X"> → <Text>X</Text> ───────────
+        // FMSaveAsXML puts comment text in a `value` attribute; the clipboard
+        // form (which xmss reads into `step.text`) uses element text. Without
+        // this every comment decodes empty.
+        if tag.starts_with("<Comment value=") || tag == "<Comment>" {
+            let v = extract_xml_attr(tag, "value").unwrap_or("");
+            if tag.ends_with("/>") {
+                out.push_str(&format!("<Text>{}</Text>", v));
+            } else {
+                // The trailing </Comment> is rewritten to </Text> below.
+                out.push_str(&format!("<Text>{}", v));
+            }
+            i = tag_end;
+            continue;
+        }
+        if tag == "</Comment>" {
+            out.push_str("</Text>");
+            i = tag_end;
+            continue;
+        }
+
+        // ── Set Variable name: <Name value="$v"> → <Name>$v</Name> ───────
+        // Same attribute-vs-text mismatch; without this the `$var =` part of
+        // every Set Variable is lost.
+        if tag.starts_with("<Name value=") {
+            let v = extract_xml_attr(tag, "value").unwrap_or("");
+            if tag.ends_with("/>") {
+                out.push_str(&format!("<Name>{}</Name>", v));
+            } else {
+                out.push_str(&format!("<Name>{}", v)); // existing </Name> closes it
+            }
+            i = tag_end;
+            continue;
+        }
+
         // ── DataSourceReference → DataSource (cross-file Perform Script) ──
         // In `<List name="From list"><DataSourceReference/><ScriptReference/></List>`
         // the DataSourceReference names the external file the target script lives
@@ -2354,6 +2389,35 @@ mod tests {
         assert!(
             text.contains(r#"#56 from "By_99_Import_MTs""#),
             "rendered: {}",
+            text
+        );
+    }
+
+    /// Comment text (`<Comment value>`) and Set Variable name (`<Name value>`)
+    /// survive the FMSaveAsXML→XMSS transform (both use a `value` attribute where
+    /// the clipboard form uses element text — without conversion they decode empty).
+    #[test]
+    fn comment_text_and_setvariable_name_survive() {
+        let raw = concat!(
+            "<fmxmlsnippet type=\"FMObjectList\">",
+            "<Step enable=\"True\" id=\"89\" name=\"# (comment)\"><ParameterValues membercount=\"1\">",
+            "<Parameter type=\"Comment\"><Comment value=\"hola mundo\"></Comment></Parameter>",
+            "</ParameterValues></Step>",
+            "<Step enable=\"True\" id=\"141\" name=\"Set Variable\"><ParameterValues membercount=\"1\">",
+            "<Parameter type=\"Variable\">",
+            "<value><Calculation datatype=\"1\" position=\"1\"><Calculation><Text><![CDATA[Get(ScriptParameter)]]></Text></Calculation></Calculation></value>",
+            "<Name value=\"$PG\"></Name>",
+            "<repetition><Calculation datatype=\"1\" position=\"2\"><Calculation><Text><![CDATA[1]]></Text></Calculation></Calculation></repetition>",
+            "</Parameter></ParameterValues></Step>",
+            "</fmxmlsnippet>",
+        );
+        let xmss = fmsavexml_to_xmss(raw);
+        let script = crate::xmss::parse_fmxml_snippet(&xmss).unwrap();
+        let text = crate::text_format::format_script(&script);
+        assert!(text.contains("# hola mundo"), "comment text lost: {}", text);
+        assert!(
+            text.contains("Set Variable [$PG = Get(ScriptParameter)]"),
+            "var name lost: {}",
             text
         );
     }

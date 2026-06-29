@@ -24,6 +24,15 @@ struct Command {
     command: String,
     #[serde(default)]
     script_text: Option<String>,
+    // ── inspect / slice params (file-based commands, for AI/tooling) ──
+    #[serde(default)]
+    xml_path: Option<String>,
+    #[serde(default)]
+    output_dir: Option<String>,
+    #[serde(default)]
+    slice_dir: Option<String>,
+    #[serde(default)]
+    layouts: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -43,20 +52,27 @@ struct Response {
     /// mirror the first entry for older single-error consumers.
     #[serde(skip_serializing_if = "Option::is_none")]
     errors: Option<Vec<text_format::ParseError>>,
+    /// Structured result payload for commands that produce more than text
+    /// (e.g. `inspect`/`slice` return counts + output paths for an AI/tooling).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<serde_json::Value>,
 }
 
 impl Response {
     fn ok() -> Self {
-        Response { status: "ok".to_string(), script_text: None, error: None, version: None, error_line: None, errors: None }
+        Response { status: "ok".to_string(), script_text: None, error: None, version: None, error_line: None, errors: None, data: None }
     }
     fn ok_text(text: String) -> Self {
-        Response { status: "ok".to_string(), script_text: Some(text), error: None, version: None, error_line: None, errors: None }
+        Response { status: "ok".to_string(), script_text: Some(text), error: None, version: None, error_line: None, errors: None, data: None }
+    }
+    fn ok_data(data: serde_json::Value) -> Self {
+        Response { status: "ok".to_string(), script_text: None, error: None, version: None, error_line: None, errors: None, data: Some(data) }
     }
     fn version(v: String) -> Self {
-        Response { status: "ok".to_string(), script_text: None, error: None, version: Some(v), error_line: None, errors: None }
+        Response { status: "ok".to_string(), script_text: None, error: None, version: Some(v), error_line: None, errors: None, data: None }
     }
     fn error(message: String) -> Self {
-        Response { status: "error".to_string(), script_text: None, error: Some(message), version: None, error_line: None, errors: None }
+        Response { status: "error".to_string(), script_text: None, error: Some(message), version: None, error_line: None, errors: None, data: None }
     }
     /// Build an error response from a full list of validation errors. The first
     /// error is also mirrored into `error`/`error_line` for single-error clients.
@@ -64,7 +80,7 @@ impl Response {
         let first = errors.first();
         let error = first.map(|e| e.to_string());
         let error_line = first.map(|e| e.line);
-        Response { status: "error".to_string(), script_text: None, error, version: None, error_line, errors: Some(errors) }
+        Response { status: "error".to_string(), script_text: None, error, version: None, error_line, errors: Some(errors), data: None }
     }
 }
 
@@ -109,6 +125,76 @@ fn handle_command(cmd: &Command) -> Response {
                     Ok(()) => Response::ok(),
                     Err(e) => Response::error(e),
                 },
+                Err(e) => Response::error(e),
+            }
+        }
+        // Parse a FMSaveAsXML export into a navigable inspection directory and
+        // return the counts + output paths so an AI/agent can drive it headless.
+        // Streaming and silent: the human-progress prints live in the CLI path,
+        // not here, so stdout stays a single clean JSON object.
+        "inspect" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            let output_dir = cmd.output_dir.as_deref().unwrap_or("fm-inspect-output");
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => match fmsavexml::write_inspection(&db, output_dir) {
+                    Ok(stats) => {
+                        let real_scripts = db
+                            .scripts
+                            .iter()
+                            .filter(|s| !s.is_folder && !s.is_separator)
+                            .count();
+                        Response::ok_data(serde_json::json!({
+                            "output_dir": output_dir,
+                            "manifest": format!("{}/manifest.json", output_dir),
+                            "file_name": db.file_name,
+                            "scripts": real_scripts,
+                            "scripts_written": stats.scripts_written,
+                            "layouts": stats.layouts,
+                            "tables": stats.tables,
+                            "fields": stats.fields,
+                            "table_occurrences": stats.table_occurrences,
+                            "relationships": stats.relationships,
+                            "external_sources": stats.external_sources,
+                            "custom_functions": stats.custom_functions,
+                            "unreferenced_scripts": stats.unreferenced_scripts,
+                        }))
+                    }
+                    Err(e) => Response::error(e),
+                },
+                Err(e) => Response::error(e),
+            }
+        }
+        // Build a focused slice from an existing inspect output. Returns the
+        // closure counts + the slice_summary.md path for the AI to read next.
+        "slice" => {
+            let output_dir = match &cmd.output_dir {
+                Some(p) => p,
+                None => return Response::error("No output_dir provided".to_string()),
+            };
+            let slice_dir = match &cmd.slice_dir {
+                Some(p) => p,
+                None => return Response::error("No slice_dir provided".to_string()),
+            };
+            let layouts = match &cmd.layouts {
+                Some(l) if !l.is_empty() => l,
+                _ => return Response::error("No layouts provided".to_string()),
+            };
+            match slice::run_slice(output_dir, slice_dir, layouts) {
+                Ok(stats) => {
+                    let mut data = serde_json::to_value(&stats)
+                        .unwrap_or(serde_json::Value::Null);
+                    if let serde_json::Value::Object(ref mut m) = data {
+                        m.insert("slice_dir".to_string(), slice_dir.clone().into());
+                        m.insert(
+                            "summary".to_string(),
+                            format!("{}/slice_summary.md", slice_dir).into(),
+                        );
+                    }
+                    Response::ok_data(data)
+                }
                 Err(e) => Response::error(e),
             }
         }
@@ -228,7 +314,20 @@ fn run_slice_cli(args: &[String]) -> Result<(), String> {
     let output_dir = &args[0];
     let slice_dir = &args[1];
     let layouts: Vec<String> = args[2..].to_vec();
-    slice::run_slice(output_dir, slice_dir, &layouts)
+    println!("Slicing {} layout(s)...", layouts.len());
+    let stats = slice::run_slice(output_dir, slice_dir, &layouts)?;
+    println!(
+        "Slice written to {}\n  Layouts                : {}\n  Scripts (seed)         : {}\n  Scripts (closure)      : {}\n  Table occurrences      : {}\n  Relationships          : {}\n  Custom functions       : {}\n  External data sources  : {}",
+        slice_dir,
+        stats.layouts,
+        stats.scripts_seed,
+        stats.scripts_closure,
+        stats.table_occurrences,
+        stats.relationships,
+        stats.custom_functions,
+        stats.external_sources,
+    );
+    Ok(())
 }
 
 /// Read a text file with encoding detection.
@@ -448,5 +547,72 @@ fn main() {
     if let Err(e) = result {
         eprintln!("Error: {}", e);
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FIXTURE: &str = r#"<FMSaveAsXML File="Test.fmp12">
+  <BaseTableCatalog><BaseTable id="1" name="Contacts"/></BaseTableCatalog>
+  <FieldsForTables>
+    <BaseTableReference id="1" name="Contacts"/>
+    <Field id="1" name="Name" fieldtype="Normal" datatype="Text"/>
+  </FieldsForTables>
+  <ScriptCatalog><Script id="10" name="DoThing"/></ScriptCatalog>
+  <StepsForScripts><StepsForScript>
+    <ScriptReference id="10" name="DoThing"/>
+    <ObjectList><Step enable="True" id="1" name="Comment"><Text>hi</Text></Step></ObjectList>
+  </StepsForScript></StepsForScripts>
+</FMSaveAsXML>"#;
+
+    fn cmd(command: &str) -> Command {
+        Command {
+            command: command.to_string(),
+            script_text: None,
+            xml_path: None,
+            output_dir: None,
+            slice_dir: None,
+            layouts: None,
+        }
+    }
+
+    /// The JSON `inspect` command returns a clean ok+data payload with counts
+    /// (and never prints progress to stdout — that's the CLI path's job).
+    #[test]
+    fn json_inspect_returns_structured_data() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("fmbridge-json-{}", nanos));
+        std::fs::create_dir_all(&dir).unwrap();
+        let xml = dir.join("export.xml");
+        std::fs::write(&xml, FIXTURE).unwrap();
+        let out = dir.join("out");
+
+        let resp = handle_command(&Command {
+            xml_path: Some(xml.to_string_lossy().into_owned()),
+            output_dir: Some(out.to_string_lossy().into_owned()),
+            ..cmd("inspect")
+        });
+
+        assert_eq!(resp.status, "ok");
+        let data = resp.data.expect("inspect should return data");
+        assert_eq!(data["file_name"], "Test.fmp12");
+        assert_eq!(data["tables"], 1);
+        assert_eq!(data["fields"], 1);
+        assert_eq!(data["scripts"], 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Missing required params surface as structured errors, not panics.
+    #[test]
+    fn json_inspect_without_path_errors() {
+        let resp = handle_command(&cmd("inspect"));
+        assert_eq!(resp.status, "error");
+        assert!(resp.error.unwrap().contains("xml_path"));
     }
 }

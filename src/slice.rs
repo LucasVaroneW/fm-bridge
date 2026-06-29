@@ -9,7 +9,21 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+/// Counts describing what a slice ended up containing. Returned by `run_slice`
+/// so callers (CLI text output, JSON mode) decide how to present it instead of
+/// the function printing to stdout itself.
+#[derive(Debug, Clone, Serialize)]
+pub struct SliceStats {
+    pub layouts: usize,
+    pub scripts_seed: usize,
+    pub scripts_closure: usize,
+    pub table_occurrences: usize,
+    pub relationships: usize,
+    pub custom_functions: usize,
+    pub external_sources: usize,
+}
 
 // ─── Minimal deserialization types ────────────────────────────────────────────
 // We re-declare only the fields we read, so slice doesn't have to import the
@@ -125,7 +139,11 @@ struct CallGraphEntry {
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
-pub fn run_slice(output_dir: &str, slice_dir: &str, layout_names: &[String]) -> Result<(), String> {
+pub fn run_slice(
+    output_dir: &str,
+    slice_dir: &str,
+    layout_names: &[String],
+) -> Result<SliceStats, String> {
     let out = Path::new(output_dir);
     let slice = Path::new(slice_dir);
 
@@ -165,8 +183,6 @@ pub fn run_slice(output_dir: &str, slice_dir: &str, layout_names: &[String]) -> 
     if wanted_layouts.is_empty() {
         return Err("No layouts specified".to_string());
     }
-
-    println!("Slicing {} layout(s)...", wanted_layouts.len());
 
     // ── Load layout JSONs (the full LayoutFull for each requested) ──────────
     let layouts_dir = out.join("layouts");
@@ -365,19 +381,15 @@ pub fn run_slice(output_dir: &str, slice_dir: &str, layout_names: &[String]) -> 
     fs::write(slice.join("slice_summary.md"), &summary)
         .map_err(|e| format!("write slice_summary.md: {}", e))?;
 
-    println!(
-        "Slice written to {}\n  Layouts                : {}\n  Scripts (seed)         : {}\n  Scripts (closure)      : {}\n  Table occurrences      : {}\n  Relationships          : {}\n  Custom functions       : {}\n  External data sources  : {}",
-        slice_dir,
-        wanted_layouts.len(),
-        seed_count,
-        copied_scripts.len(),
-        wanted_tos.len(),
-        wanted_rels.len(),
-        wanted_cfs.len(),
-        wanted_eds.len(),
-    );
-
-    Ok(())
+    Ok(SliceStats {
+        layouts: wanted_layouts.len(),
+        scripts_seed: seed_count,
+        scripts_closure: copied_scripts.len(),
+        table_occurrences: wanted_tos.len(),
+        relationships: wanted_rels.len(),
+        custom_functions: wanted_cfs.len(),
+        external_sources: wanted_eds.len(),
+    })
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

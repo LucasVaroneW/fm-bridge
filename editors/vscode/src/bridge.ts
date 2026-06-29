@@ -230,3 +230,52 @@ export async function steps(): Promise<StepInfo[]> {
     throw new Error(`Unexpected step catalog from fm-bridge: ${out.slice(0, 200)}`);
   }
 }
+
+/**
+ * Run a subcommand whose exit code is authoritative (unlike JSON mode, which
+ * always exits 0). `inspect`/`slice` print human progress to stdout and signal
+ * failure with a non-zero exit + message on stderr, so we reject on `err`
+ * regardless of whatever partial progress made it to stdout.
+ */
+function spawnSubcommand(args: string[]): Promise<string> {
+  const bin = resolveBinaryPath();
+  if (!bin) {
+    return Promise.reject(new BinaryNotFoundError());
+  }
+  return new Promise((resolve, reject) => {
+    cp.execFile(
+      bin,
+      args,
+      { maxBuffer: 64 * 1024 * 1024, windowsHide: true },
+      (err, stdout, stderr) => {
+        if (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code === "ENOENT") {
+            reject(new BinaryNotFoundError());
+            return;
+          }
+          reject(new Error(stderr?.trim() || err.message));
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+  });
+}
+
+/** Parse an FMSaveAsXML export into a navigable inspection directory. */
+export async function runInspect(
+  xmlPath: string,
+  outputDir: string,
+): Promise<string> {
+  return spawnSubcommand(["inspect", xmlPath, outputDir]);
+}
+
+/** Build a focused slice (around one or more layouts) from an inspect output. */
+export async function runSlice(
+  outputDir: string,
+  sliceDir: string,
+  layouts: string[],
+): Promise<string> {
+  return spawnSubcommand(["slice", outputDir, sliceDir, ...layouts]);
+}

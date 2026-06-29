@@ -390,14 +390,17 @@ fn preprocess_block_comments(text: &str) -> String {
                 // ever generates, see `format_step` above) always has the step name
                 // right after `/* `, e.g. `/* Perform Script [...] */`. A calculation
                 // can also contain a *literal*, hand-authored FileMaker in-formula
-                // comment nested inside an already-open, still-active step (e.g. to
+                // comment nested inside an already-open, still-active step — e.g. to
                 // comment out a couple of JSONSetElement rows while keeping the call
-                // itself live) — that shape starts with `[` right after `/* `, with no
-                // step name. Treat that case as plain text: leave it untouched so the
+                // itself live (that shape starts with `[` right after `/* `, no step
+                // name), or a free-form prose note like `/*\nSome explanation\n*/`
+                // (that shape has nothing at all after `/* ` — the text starts on the
+                // next line). Treat both as plain text: leave them untouched so the
                 // enclosing step's own bracket-matching finds its real closing `]`,
-                // instead of misreading it as a step-disable marker and swallowing
+                // instead of misreading them as a step-disable marker and swallowing
                 // whatever follows the closing `*/` on its last line.
-                if after_open.trim_start().starts_with('[') {
+                let rest = after_open.trim_start();
+                if rest.is_empty() || rest.starts_with('[') {
                     out.push(raw.to_string());
                     continue;
                 }
@@ -1971,6 +1974,21 @@ mod tests {
         let calc = script.steps[0].calculation.as_deref().unwrap();
         assert!(calc.contains("JSONSetElement ( $$BF_Model ; [\"a\" ; 1 ; 2] )"));
         assert!(calc.contains("/* [\"conf_mail\""));
+        assert!(calc.ends_with("*/"));
+    }
+
+    #[test]
+    fn nested_freeform_block_comment_inside_open_step_does_not_eat_closing_bracket() {
+        // Same idea as the test above, but for the other nested-comment shape: `/*`
+        // alone on its own line (nothing after it — the prose starts on the next
+        // line), e.g. a developer leaving a sample/preview of a computed message
+        // inside an still-open Set Variable. There's no step name and no `[` right
+        // after `/* ` either, so this must also be left untouched.
+        let text = "Set Variable [$Text = Let ( [\n\t_x = 1\n] ;\n\t_x\n)\n\n/*\nSample preview text, see above\n*/]";
+        let script = super::parse_text_to_script(text).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        let calc = script.steps[0].calculation.as_deref().unwrap();
+        assert!(calc.contains("Sample preview text"));
         assert!(calc.ends_with("*/"));
     }
 }

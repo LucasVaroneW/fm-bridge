@@ -113,6 +113,16 @@ fn tools_list_result() -> Value {
             "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." } }, "required": ["xml_path"] }
         },
         {
+            "name": "who_calls",
+            "description": "List everything that fires a given script: other scripts (Perform Script), layout triggers, buttons and object triggers. Use before changing a script to know its blast radius.",
+            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string" }, "script": { "type": "string", "description": "Script name or #id." } }, "required": ["xml_path", "script"] }
+        },
+        {
+            "name": "who_uses_field",
+            "description": "Find where a field is referenced: layout placements, relationship join keys, Set Field steps, and calculation mentions (scripts, field calcs, custom functions). Accepts 'TableOccurrence::Field' or a bare 'Field'.",
+            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string" }, "field": { "type": "string", "description": "Field name, optionally 'TableOccurrence::Field'." } }, "required": ["xml_path", "field"] }
+        },
+        {
             "name": "list_steps",
             "description": "Return the catalog of supported FileMaker script step types (English/Spanish name, shape, block behavior).",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
@@ -161,6 +171,16 @@ fn tools_call(params: Option<&Value>) -> Result<Value, RpcError> {
             cmd.command = "audit".to_string();
             cmd.xml_path = Some(arg_str(&args, "xml_path")?);
         }
+        "who_calls" => {
+            cmd.command = "who_calls".to_string();
+            cmd.xml_path = Some(arg_str(&args, "xml_path")?);
+            cmd.script = Some(arg_str(&args, "script")?);
+        }
+        "who_uses_field" => {
+            cmd.command = "who_uses_field".to_string();
+            cmd.xml_path = Some(arg_str(&args, "xml_path")?);
+            cmd.field = Some(arg_str(&args, "field")?);
+        }
         "slice_inspect" => {
             cmd.command = "slice".to_string();
             cmd.output_dir = Some(arg_str(&args, "output_dir")?);
@@ -184,6 +204,8 @@ fn base_command() -> Command {
         output_dir: None,
         slice_dir: None,
         layouts: None,
+        script: None,
+        field: None,
     }
 }
 
@@ -231,6 +253,8 @@ mod tests {
             "inspect_database",
             "slice_inspect",
             "audit_database",
+            "who_calls",
+            "who_uses_field",
             "list_steps",
         ] {
             assert!(names.contains(&expected), "missing tool {}", expected);

@@ -14,6 +14,7 @@ mod slice;
 mod steps;
 mod text_format;
 mod xmss;
+mod xref;
 
 use serde::{Deserialize, Serialize};
 use std::io::Read;
@@ -36,6 +37,11 @@ struct Command {
     slice_dir: Option<String>,
     #[serde(default)]
     layouts: Option<Vec<String>>,
+    // ── xref params (who_calls / who_uses_field) ──
+    #[serde(default)]
+    script: Option<String>,
+    #[serde(default)]
+    field: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -249,6 +255,44 @@ fn handle_command(cmd: &Command) -> Response {
                 Err(e) => Response::error(e),
             }
         }
+        // Cross-reference queries (Phase 3 bug-hunting): who calls a script, and
+        // where a field is used. Both parse the export, then answer structurally.
+        "who_calls" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            let script = match &cmd.script {
+                Some(s) => s,
+                None => return Response::error("No script provided".to_string()),
+            };
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => match xref::who_calls(&db, script) {
+                    Ok(report) => Response::ok_data(
+                        serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+                    ),
+                    Err(e) => Response::error(e),
+                },
+                Err(e) => Response::error(e),
+            }
+        }
+        "who_uses_field" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            let field = match &cmd.field {
+                Some(f) => f,
+                None => return Response::error("No field provided".to_string()),
+            };
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => Response::ok_data(
+                    serde_json::to_value(xref::who_uses_field(&db, field))
+                        .unwrap_or(serde_json::Value::Null),
+                ),
+                Err(e) => Response::error(e),
+            }
+        }
         // Build a focused slice from an existing inspect output. Returns the
         // closure counts + the slice_summary.md path for the AI to read next.
         "slice" => {
@@ -345,9 +389,11 @@ fn run_cli_mode() -> Result<(), String> {
         "inspect" => run_inspect_cli(&args[1..]),
         "slice" => run_slice_cli(&args[1..]),
         "audit" => run_audit_cli(&args[1..]),
+        "who-calls" => run_who_calls_cli(&args[1..]),
+        "who-uses-field" => run_who_uses_field_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit",
+            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, who-calls, who-uses-field",
             args[0]
         )),
     }
@@ -453,6 +499,50 @@ fn run_audit_cli(args: &[String]) -> Result<(), String> {
     println!();
     for issue in &report.issues {
         println!("  [{}] {} — {}", issue.kind, issue.location, issue.detail);
+    }
+    Ok(())
+}
+
+/// `who-calls`: list everything that fires a given script (Perform Script,
+/// layout triggers, buttons, object triggers).
+fn run_who_calls_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err("Usage: fm-bridge who-calls <FMSaveAsXML.xml> <script-name|#id>".to_string());
+    }
+    let db = fmsavexml::parse(&args[0])?;
+    let report = xref::who_calls(&db, &args[1])?;
+    if report.caller_count == 0 {
+        println!("Nothing calls '{}' (#{}).", report.target_name, report.target_id);
+        return Ok(());
+    }
+    println!(
+        "{} caller(s) of '{}' (#{}):",
+        report.caller_count, report.target_name, report.target_id
+    );
+    for c in &report.callers {
+        println!("  {:24}  {}", c.via, c.location);
+    }
+    Ok(())
+}
+
+/// `who-uses-field`: where a field is referenced — layouts, relationship keys,
+/// Set Field steps, and calculation mentions.
+fn run_who_uses_field_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err(
+            "Usage: fm-bridge who-uses-field <FMSaveAsXML.xml> <Field|TableOccurrence::Field>"
+                .to_string(),
+        );
+    }
+    let db = fmsavexml::parse(&args[0])?;
+    let report = xref::who_uses_field(&db, &args[1]);
+    if report.use_count == 0 {
+        println!("No uses found for '{}'.", report.field);
+        return Ok(());
+    }
+    println!("{} use(s) of '{}':", report.use_count, report.field);
+    for u in &report.uses {
+        println!("  [{}] {} — {}", u.kind, u.location, u.detail);
     }
     Ok(())
 }
@@ -711,6 +801,8 @@ mod tests {
             output_dir: None,
             slice_dir: None,
             layouts: None,
+            script: None,
+            field: None,
         }
     }
 

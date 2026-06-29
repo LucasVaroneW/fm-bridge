@@ -87,8 +87,11 @@ el esquema (ej.: un `Set Field` que apunta a un campo inexistente).
   × esquema: Perform Script / Go to Layout colgados, relaciones y layouts que
   apuntan a table occurrences borradas, TOs sin tabla base, campos fantasma en
   layouts. CLI (`fm-bridge audit <export.xml>`) + JSON + tool MCP `audit_database`.
-- Falta: `who-calls` / `who-uses-field` como tools, y referencias **dentro de
-  cálculos** (requiere parsear el lenguaje de cálculo de FM).
+- ✅ **`who-calls` / `who-uses-field`** — qué dispara un script (Perform Script,
+  triggers de layout/objeto, botones) y dónde se usa un campo (layouts, claves de
+  relación, Set Field, menciones en cálculos). CLI + JSON + tools MCP.
+- Falta: referencias **dentro de cálculos** con parseo real del lenguaje de FM
+  (hoy `who-uses-field` las cubre con búsqueda por token, suficiente pero fuzzy).
 - 🔭 **OData** (futuro): una tool MCP que consulte datos reales de la base y los
   cruce con el esquema del export para entender errores con datos en vivo.
 

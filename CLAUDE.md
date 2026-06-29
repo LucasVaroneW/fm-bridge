@@ -42,6 +42,8 @@ interchangeable.
 - `src/audit.rs` — referential-integrity audit (`audit`, Phase 3): crosses
   scripts × schema to flag broken references (dangling Perform Script / Go to
   Layout, relationships/layouts to missing TOs, ghost fields).
+- `src/xref.rs` — cross-reference queries (`who-calls` / `who-uses-field`):
+  reverse call graph + field-usage search over the parsed database.
 - `src/mcp.rs` — the **AI front door**: `fm-bridge mcp` serves MCP (JSON-RPC over
   stdio), exposing engine commands as tools. Forwards to `handle_command`.
 - `editors/vscode/` — the VS Code extension (TypeScript).

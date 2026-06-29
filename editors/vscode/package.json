@@ -65,6 +65,16 @@
         "category": "fm-bridge"
       },
       {
+        "command": "fm-bridge.inspectXml",
+        "title": "fm-bridge: Inspect FMSaveAsXML export",
+        "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.slice",
+        "title": "fm-bridge: Slice inspect output around layouts",
+        "category": "fm-bridge"
+      },
+      {
         "command": "fm-bridge.showLog",
         "title": "fm-bridge: Show log",
         "category": "fm-bridge"

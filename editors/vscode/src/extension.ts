@@ -18,6 +18,7 @@ import {
   writeClipboard,
 } from "./bridge";
 import { StepCompletionProvider, resetCatalogCache } from "./completion";
+import { inspectXmlCommand, sliceCommand } from "./inspect";
 import { StepFixProvider } from "./quickfix";
 
 const LANGUAGE = "fmscript";
@@ -45,6 +46,8 @@ export function activate(context: vscode.ExtensionContext): void {
       "fm-bridge.writeToClipboard",
       writeToClipboard,
     ),
+    vscode.commands.registerCommand("fm-bridge.inspectXml", inspectXmlCommand),
+    vscode.commands.registerCommand("fm-bridge.slice", sliceCommand),
     vscode.commands.registerCommand("fm-bridge.showLog", () => output?.show()),
     vscode.languages.registerCompletionItemProvider(
       LANGUAGE,

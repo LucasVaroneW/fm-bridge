@@ -2,8 +2,8 @@
 // Uses StepShape from steps.rs to drive serialization per step type.
 // All calculations are treated as opaque CDATA — never escaped or modified.
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
@@ -35,7 +35,7 @@ pub struct FindRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScriptStep {
-    pub name: String,       // Always English canonical name
+    pub name: String, // Always English canonical name
     pub enable: bool,
     pub id: u32,
     // Fields populated based on StepShape:
@@ -66,9 +66,9 @@ pub struct ScriptStep {
     pub goto_exit_after_last: Option<String>,
     pub goto_no_interact: Option<String>,
     // For Select Window and Adjust Window.
-    pub window_mode: Option<String>,       // SelectWindow: ByName/Current/First/Last/Next/Previous
-    pub window_limit_current_file: Option<String>,  // SelectWindow: True/False
-    pub window_state: Option<String>,      // AdjustWindow: ResizeToFit/Maximize/...
+    pub window_mode: Option<String>, // SelectWindow: ByName/Current/First/Last/Next/Previous
+    pub window_limit_current_file: Option<String>, // SelectWindow: True/False
+    pub window_state: Option<String>, // AdjustWindow: ResizeToFit/Maximize/...
     // For Go to Layout (GoToLayoutNamed shape) and New Window (NewWindow shape).
     pub layout_name: Option<String>,
     pub layout_id: Option<String>, // optional numeric FM Layout id; preserves round-trip
@@ -79,7 +79,7 @@ pub struct ScriptStep {
     pub window_width: Option<String>,
     pub window_top: Option<String>,
     pub window_left: Option<String>,
-    pub window_style_name: Option<String>,  // Document | Floating | Dialog | Card
+    pub window_style_name: Option<String>, // Document | Floating | Dialog | Card
     // For Perform Find (PerformFind shape).
     pub find_requests: Vec<FindRequest>,
     // For Insert from URL (InsertFromUrl shape). Boolean flags stored as "True"/"False"
@@ -145,42 +145,44 @@ fn decode_xml_bytes(xml_bytes: &[u8]) -> String {
 /// Bytes 0x80-0x9F → Windows-1252 specific characters
 /// Bytes 0xA0-0xFF → Latin-1 direct Unicode mapping
 pub fn decode_windows1252(data: &[u8]) -> String {
-    data.iter().map(|&b| {
-        if b < 0x80 {
-            b as char
-        } else {
-            match b {
-                0x80 => '\u{20AC}', // €
-                0x82 => '\u{201A}', // ‚
-                0x83 => '\u{0192}', // ƒ
-                0x84 => '\u{201E}', // „
-                0x85 => '\u{2026}', // …
-                0x86 => '\u{2020}', // †
-                0x87 => '\u{2021}', // ‡
-                0x88 => '\u{02C6}', // ˆ
-                0x89 => '\u{2030}', // ‰
-                0x8A => '\u{0160}', // Š
-                0x8B => '\u{2039}', // ‹
-                0x8C => '\u{0152}', // Œ
-                0x8E => '\u{017D}', // Ž
-                0x91 => '\u{2018}', // '
-                0x92 => '\u{2019}', // '
-                0x93 => '\u{201C}', // "
-                0x94 => '\u{201D}', // "
-                0x95 => '\u{2022}', // •
-                0x96 => '\u{2013}', // –
-                0x97 => '\u{2014}', // —
-                0x98 => '\u{02DC}', // ˜
-                0x99 => '\u{2122}', // ™
-                0x9A => '\u{0161}', // š
-                0x9B => '\u{203A}', // ›
-                0x9C => '\u{0153}', // œ
-                0x9E => '\u{017E}', // ž
-                0x9F => '\u{0178}', // Ÿ
-                _ => b as char, // 0xA0-0xFF: Latin-1 direct mapping
+    data.iter()
+        .map(|&b| {
+            if b < 0x80 {
+                b as char
+            } else {
+                match b {
+                    0x80 => '\u{20AC}', // €
+                    0x82 => '\u{201A}', // ‚
+                    0x83 => '\u{0192}', // ƒ
+                    0x84 => '\u{201E}', // „
+                    0x85 => '\u{2026}', // …
+                    0x86 => '\u{2020}', // †
+                    0x87 => '\u{2021}', // ‡
+                    0x88 => '\u{02C6}', // ˆ
+                    0x89 => '\u{2030}', // ‰
+                    0x8A => '\u{0160}', // Š
+                    0x8B => '\u{2039}', // ‹
+                    0x8C => '\u{0152}', // Œ
+                    0x8E => '\u{017D}', // Ž
+                    0x91 => '\u{2018}', // '
+                    0x92 => '\u{2019}', // '
+                    0x93 => '\u{201C}', // "
+                    0x94 => '\u{201D}', // "
+                    0x95 => '\u{2022}', // •
+                    0x96 => '\u{2013}', // –
+                    0x97 => '\u{2014}', // —
+                    0x98 => '\u{02DC}', // ˜
+                    0x99 => '\u{2122}', // ™
+                    0x9A => '\u{0161}', // š
+                    0x9B => '\u{203A}', // ›
+                    0x9C => '\u{0153}', // œ
+                    0x9E => '\u{017E}', // ž
+                    0x9F => '\u{0178}', // Ÿ
+                    _ => b as char,     // 0xA0-0xFF: Latin-1 direct mapping
+                }
             }
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 /// Strip BOM (U+FEFF) from a string, commonly found in FM clipboard data.
@@ -241,7 +243,9 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                                     parser.name = strip_bom(&name).to_string();
                                 }
                                 b"enable" => parser.enable = attr.value.as_ref() == b"True",
-                                b"id" => parser.id = String::from_utf8_lossy(&attr.value).to_string(),
+                                b"id" => {
+                                    parser.id = String::from_utf8_lossy(&attr.value).to_string()
+                                }
                                 _ => {}
                             }
                         }
@@ -251,10 +255,8 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                         // anything we don't model structurally is preserved as-is
                         // rather than silently dropped.
                         let en = steps::translate_to_en(&parser.name);
-                        let capture_verbatim = matches!(
-                            steps::shape_for_en(&en),
-                            Some(&StepShape::Opaque) | None
-                        );
+                        let capture_verbatim =
+                            matches!(steps::shape_for_en(&en), Some(&StepShape::Opaque) | None);
                         opaque_inner_start = if capture_verbatim {
                             Some(reader.buffer_position() as usize)
                         } else {
@@ -297,7 +299,8 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"LayoutDestination" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"value" {
-                                parser.layout_destination = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.layout_destination =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
@@ -311,14 +314,23 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             }
                         }
                     }
-                    b"Height" => { parser.push_target(TextTarget::WinHeight); }
-                    b"Width" => { parser.push_target(TextTarget::WinWidth); }
-                    b"DistanceFromTop" => { parser.push_target(TextTarget::WinTop); }
-                    b"DistanceFromLeft" => { parser.push_target(TextTarget::WinLeft); }
+                    b"Height" => {
+                        parser.push_target(TextTarget::WinHeight);
+                    }
+                    b"Width" => {
+                        parser.push_target(TextTarget::WinWidth);
+                    }
+                    b"DistanceFromTop" => {
+                        parser.push_target(TextTarget::WinTop);
+                    }
+                    b"DistanceFromLeft" => {
+                        parser.push_target(TextTarget::WinLeft);
+                    }
                     b"NewWndStyles" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"Style" {
-                                parser.window_style_name = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.window_style_name =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
@@ -332,15 +344,24 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                                 op = String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
-                        parser.current_find_request = Some(FindRequest { operation: op, criteria: Vec::new() });
+                        parser.current_find_request = Some(FindRequest {
+                            operation: op,
+                            criteria: Vec::new(),
+                        });
                     }
                     b"Criteria" => {
                         parser.in_find_criteria = true;
                         parser.current_find_criterion = Some(FindCriterion::default());
                     }
-                    b"Name" => { parser.push_target(TextTarget::VarName); }
-                    b"ObjectName" => { parser.push_target(TextTarget::ObjectName); }
-                    b"FunctionName" => { parser.push_target(TextTarget::FunctionName); }
+                    b"Name" => {
+                        parser.push_target(TextTarget::VarName);
+                    }
+                    b"ObjectName" => {
+                        parser.push_target(TextTarget::ObjectName);
+                    }
+                    b"FunctionName" => {
+                        parser.push_target(TextTarget::FunctionName);
+                    }
                     b"P" => {
                         parser.current_param.clear();
                         parser.push_target(TextTarget::Param);
@@ -354,7 +375,8 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"Restore" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
-                                parser.restore_state = Some(String::from_utf8_lossy(&attr.value).to_string());
+                                parser.restore_state =
+                                    Some(String::from_utf8_lossy(&attr.value).to_string());
                             }
                         }
                     }
@@ -368,7 +390,10 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             match attr.key.as_ref() {
                                 b"table" => tbl = val,
                                 b"id" => numeric_id = val,
-                                b"name" => { nm = val; has_name_attr = true; }
+                                b"name" => {
+                                    nm = val;
+                                    has_name_attr = true;
+                                }
                                 _ => {}
                             }
                         }
@@ -392,29 +417,35 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"SelectAll" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
-                                parser.select_all_state = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.select_all_state =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
                     b"DontEncodeURL" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
-                                parser.dont_encode_url = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.dont_encode_url =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
                     b"VerifySSLCertificates" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
-                                parser.verify_ssl = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.verify_ssl =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
-                    b"CURLOptions" => { parser.push_target(TextTarget::CurlOptions); }
+                    b"CURLOptions" => {
+                        parser.push_target(TextTarget::CurlOptions);
+                    }
                     b"Set" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
-                                parser.set_state = Some(String::from_utf8_lossy(&attr.value).to_string());
+                                parser.set_state =
+                                    Some(String::from_utf8_lossy(&attr.value).to_string());
                             }
                         }
                         parser.push_target(TextTarget::SetState);
@@ -432,60 +463,75 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"CurrentScript" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"value" {
-                                parser.current_script_mode = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.current_script_mode =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
                     b"RowPageLocation" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"value" {
-                                parser.goto_location = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.goto_location =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
                     b"Exit" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
-                                parser.goto_exit_after_last = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.goto_exit_after_last =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
                     b"Window" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"value" {
-                                parser.window_mode = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.window_mode =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
                     b"LimitToWindowsOfCurrentFile" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
-                                parser.window_limit_current_file = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.window_limit_current_file =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
                     b"WindowState" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"value" {
-                                parser.window_state = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.window_state =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
                     b"NoInteract" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
-                                parser.goto_no_interact = String::from_utf8_lossy(&attr.value).to_string();
+                                parser.goto_no_interact =
+                                    String::from_utf8_lossy(&attr.value).to_string();
                             }
                         }
                     }
-                    b"Title" => { parser.push_target(TextTarget::DialogTitle); }
-                    b"Message" => { parser.push_target(TextTarget::DialogMessage); }
+                    b"Title" => {
+                        parser.push_target(TextTarget::DialogTitle);
+                    }
+                    b"Message" => {
+                        parser.push_target(TextTarget::DialogMessage);
+                    }
                     b"Button" => {
                         parser.current_button.clear();
                         parser.push_target(TextTarget::DialogButton);
                     }
-                    b"Result" => { parser.push_target(TextTarget::FieldResult); }
-                    b"TargetName" => { parser.push_target(TextTarget::FieldTarget); }
+                    b"Result" => {
+                        parser.push_target(TextTarget::FieldResult);
+                    }
+                    b"TargetName" => {
+                        parser.push_target(TextTarget::FieldTarget);
+                    }
                     _ => {}
                 }
             }
@@ -493,7 +539,9 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                 // `unescape()` resolves `&#13;`, `&amp;`, `&gt;` etc. to their literal
                 // characters so the round-trip xml_escape on the encode side doesn't
                 // double-escape them. CDATA is exempt — it's already literal.
-                let raw = e.unescape().map(|c| c.into_owned())
+                let raw = e
+                    .unescape()
+                    .map(|c| c.into_owned())
                     .unwrap_or_else(|_| String::from_utf8_lossy(e.as_ref()).to_string());
                 let text = normalize_eol(strip_bom(&raw));
                 parser.capture(&text);
@@ -534,20 +582,38 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             indent_level += 1;
                         }
                     }
-                    b"Calculation" => { parser.pop_target(TextTarget::Calculation); }
-                    b"Name" => { parser.pop_target(TextTarget::VarName); }
-                    b"ObjectName" => { parser.pop_target(TextTarget::ObjectName); }
-                    b"FunctionName" => { parser.pop_target(TextTarget::FunctionName); }
+                    b"Calculation" => {
+                        parser.pop_target(TextTarget::Calculation);
+                    }
+                    b"Name" => {
+                        parser.pop_target(TextTarget::VarName);
+                    }
+                    b"ObjectName" => {
+                        parser.pop_target(TextTarget::ObjectName);
+                    }
+                    b"FunctionName" => {
+                        parser.pop_target(TextTarget::FunctionName);
+                    }
                     b"P" => {
                         parser.pop_target(TextTarget::Param);
                         parser.param_values.push(parser.current_param.clone());
                     }
-                    b"Repetition" => { parser.pop_target(TextTarget::RepetitionCalc); }
-                    b"Value" => { parser.pop_target(TextTarget::ValueCalc); }
+                    b"Repetition" => {
+                        parser.pop_target(TextTarget::RepetitionCalc);
+                    }
+                    b"Value" => {
+                        parser.pop_target(TextTarget::ValueCalc);
+                    }
                     b"Restore" => {}
-                    b"Set" => { parser.pop_target(TextTarget::SetState); }
-                    b"Title" => { parser.pop_target(TextTarget::DialogTitle); }
-                    b"Message" => { parser.pop_target(TextTarget::DialogMessage); }
+                    b"Set" => {
+                        parser.pop_target(TextTarget::SetState);
+                    }
+                    b"Title" => {
+                        parser.pop_target(TextTarget::DialogTitle);
+                    }
+                    b"Message" => {
+                        parser.pop_target(TextTarget::DialogMessage);
+                    }
                     b"Button" => {
                         parser.pop_target(TextTarget::DialogButton);
                         if !parser.current_button.is_empty() {
@@ -555,9 +621,15 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             parser.current_button.clear();
                         }
                     }
-                    b"Result" => { parser.pop_target(TextTarget::FieldResult); }
-                    b"TargetName" => { parser.pop_target(TextTarget::FieldTarget); }
-                    b"Field" => { parser.pop_target(TextTarget::FieldTextContent); }
+                    b"Result" => {
+                        parser.pop_target(TextTarget::FieldResult);
+                    }
+                    b"TargetName" => {
+                        parser.pop_target(TextTarget::FieldTarget);
+                    }
+                    b"Field" => {
+                        parser.pop_target(TextTarget::FieldTextContent);
+                    }
                     b"Text" => {
                         if parser.in_find_criteria {
                             parser.pop_target(TextTarget::FindCriterionText);
@@ -565,13 +637,26 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             parser.pop_target(TextTarget::Text);
                         }
                     }
-                    b"CURLOptions" => { parser.pop_target(TextTarget::CurlOptions); }
-                    b"Height" => { parser.pop_target(TextTarget::WinHeight); }
-                    b"Width" => { parser.pop_target(TextTarget::WinWidth); }
-                    b"DistanceFromTop" => { parser.pop_target(TextTarget::WinTop); }
-                    b"DistanceFromLeft" => { parser.pop_target(TextTarget::WinLeft); }
+                    b"CURLOptions" => {
+                        parser.pop_target(TextTarget::CurlOptions);
+                    }
+                    b"Height" => {
+                        parser.pop_target(TextTarget::WinHeight);
+                    }
+                    b"Width" => {
+                        parser.pop_target(TextTarget::WinWidth);
+                    }
+                    b"DistanceFromTop" => {
+                        parser.pop_target(TextTarget::WinTop);
+                    }
+                    b"DistanceFromLeft" => {
+                        parser.pop_target(TextTarget::WinLeft);
+                    }
                     b"Criteria" => {
-                        if let (Some(req), Some(c)) = (parser.current_find_request.as_mut(), parser.current_find_criterion.take()) {
+                        if let (Some(req), Some(c)) = (
+                            parser.current_find_request.as_mut(),
+                            parser.current_find_criterion.take(),
+                        ) {
                             req.criteria.push(c);
                         }
                         parser.in_find_criteria = false;
@@ -607,9 +692,9 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
 enum TextTarget {
     None,
     Text,
-    Calculation,       // top-level calc (direct child of Step, If, etc)
-    ValueCalc,         // calc inside <Value> (Set Variable)
-    RepetitionCalc,    // calc inside <Repetition>
+    Calculation,    // top-level calc (direct child of Step, If, etc)
+    ValueCalc,      // calc inside <Value> (Set Variable)
+    RepetitionCalc, // calc inside <Repetition>
     VarName,
     ObjectName,
     FunctionName,
@@ -619,7 +704,7 @@ enum TextTarget {
     DialogButton,
     FieldResult,
     FieldTarget,
-    FieldTextContent,  // <Field>$var</Field> form used by Execute FileMaker Data API
+    FieldTextContent, // <Field>$var</Field> form used by Execute FileMaker Data API
     SetState,
     // New Window geometry calcs
     WinHeight,
@@ -735,44 +820,176 @@ impl StepParser {
             name,
             enable: self.enable,
             id: self.id.parse().unwrap_or(0),
-            text: if self.text.is_empty() { None } else { Some(self.text.clone()) },
-            calculation: if self.calculation.is_empty() { None } else { Some(self.calculation.clone()) },
-            var_name: if self.var_name.is_empty() { None } else { Some(self.var_name.clone()) },
-            repetition: if self.repetition.is_empty() { None } else { Some(self.repetition.clone()) },
-            object_name: if self.object_name.is_empty() { None } else { Some(self.object_name.clone()) },
-            function_name: if self.function_name.is_empty() { None } else { Some(self.function_name.clone()) },
+            text: if self.text.is_empty() {
+                None
+            } else {
+                Some(self.text.clone())
+            },
+            calculation: if self.calculation.is_empty() {
+                None
+            } else {
+                Some(self.calculation.clone())
+            },
+            var_name: if self.var_name.is_empty() {
+                None
+            } else {
+                Some(self.var_name.clone())
+            },
+            repetition: if self.repetition.is_empty() {
+                None
+            } else {
+                Some(self.repetition.clone())
+            },
+            object_name: if self.object_name.is_empty() {
+                None
+            } else {
+                Some(self.object_name.clone())
+            },
+            function_name: if self.function_name.is_empty() {
+                None
+            } else {
+                Some(self.function_name.clone())
+            },
             parameters: self.param_values.clone(),
             restore_state: self.restore_state.clone(),
             set_state: self.set_state.clone(),
-            dialog_title: if self.dialog_title.is_empty() { None } else { Some(self.dialog_title.clone()) },
-            dialog_message: if self.dialog_message.is_empty() { None } else { Some(self.dialog_message.clone()) },
+            dialog_title: if self.dialog_title.is_empty() {
+                None
+            } else {
+                Some(self.dialog_title.clone())
+            },
+            dialog_message: if self.dialog_message.is_empty() {
+                None
+            } else {
+                Some(self.dialog_message.clone())
+            },
             dialog_buttons: self.dialog_buttons.clone(),
-            field_result: if self.field_result.is_empty() { None } else { Some(self.field_result.clone()) },
-            field_target: if self.field_target.is_empty() { None } else { Some(self.field_target.clone()) },
-            field_table: if self.field_table.is_empty() { None } else { Some(self.field_table.clone()) },
-            field_numeric_id: if self.field_numeric_id.is_empty() { None } else { Some(self.field_numeric_id.clone()) },
-            script_target_name: if self.script_target_name.is_empty() { None } else { Some(self.script_target_name.clone()) },
-            script_target_id: if self.script_target_id.is_empty() { None } else { Some(self.script_target_id.clone()) },
-            current_script_mode: if self.current_script_mode.is_empty() { None } else { Some(self.current_script_mode.clone()) },
-            goto_location: if self.goto_location.is_empty() { None } else { Some(self.goto_location.clone()) },
-            goto_exit_after_last: if self.goto_exit_after_last.is_empty() { None } else { Some(self.goto_exit_after_last.clone()) },
-            goto_no_interact: if self.goto_no_interact.is_empty() { None } else { Some(self.goto_no_interact.clone()) },
-            window_mode: if self.window_mode.is_empty() { None } else { Some(self.window_mode.clone()) },
-            window_limit_current_file: if self.window_limit_current_file.is_empty() { None } else { Some(self.window_limit_current_file.clone()) },
-            window_state: if self.window_state.is_empty() { None } else { Some(self.window_state.clone()) },
-            layout_name: if self.layout_name.is_empty() { None } else { Some(self.layout_name.clone()) },
-            layout_id: if self.layout_id.is_empty() { None } else { Some(self.layout_id.clone()) },
-            layout_destination: if self.layout_destination.is_empty() { None } else { Some(self.layout_destination.clone()) },
-            window_height: if self.window_height.is_empty() { None } else { Some(self.window_height.clone()) },
-            window_width: if self.window_width.is_empty() { None } else { Some(self.window_width.clone()) },
-            window_top: if self.window_top.is_empty() { None } else { Some(self.window_top.clone()) },
-            window_left: if self.window_left.is_empty() { None } else { Some(self.window_left.clone()) },
-            window_style_name: if self.window_style_name.is_empty() { None } else { Some(self.window_style_name.clone()) },
+            field_result: if self.field_result.is_empty() {
+                None
+            } else {
+                Some(self.field_result.clone())
+            },
+            field_target: if self.field_target.is_empty() {
+                None
+            } else {
+                Some(self.field_target.clone())
+            },
+            field_table: if self.field_table.is_empty() {
+                None
+            } else {
+                Some(self.field_table.clone())
+            },
+            field_numeric_id: if self.field_numeric_id.is_empty() {
+                None
+            } else {
+                Some(self.field_numeric_id.clone())
+            },
+            script_target_name: if self.script_target_name.is_empty() {
+                None
+            } else {
+                Some(self.script_target_name.clone())
+            },
+            script_target_id: if self.script_target_id.is_empty() {
+                None
+            } else {
+                Some(self.script_target_id.clone())
+            },
+            current_script_mode: if self.current_script_mode.is_empty() {
+                None
+            } else {
+                Some(self.current_script_mode.clone())
+            },
+            goto_location: if self.goto_location.is_empty() {
+                None
+            } else {
+                Some(self.goto_location.clone())
+            },
+            goto_exit_after_last: if self.goto_exit_after_last.is_empty() {
+                None
+            } else {
+                Some(self.goto_exit_after_last.clone())
+            },
+            goto_no_interact: if self.goto_no_interact.is_empty() {
+                None
+            } else {
+                Some(self.goto_no_interact.clone())
+            },
+            window_mode: if self.window_mode.is_empty() {
+                None
+            } else {
+                Some(self.window_mode.clone())
+            },
+            window_limit_current_file: if self.window_limit_current_file.is_empty() {
+                None
+            } else {
+                Some(self.window_limit_current_file.clone())
+            },
+            window_state: if self.window_state.is_empty() {
+                None
+            } else {
+                Some(self.window_state.clone())
+            },
+            layout_name: if self.layout_name.is_empty() {
+                None
+            } else {
+                Some(self.layout_name.clone())
+            },
+            layout_id: if self.layout_id.is_empty() {
+                None
+            } else {
+                Some(self.layout_id.clone())
+            },
+            layout_destination: if self.layout_destination.is_empty() {
+                None
+            } else {
+                Some(self.layout_destination.clone())
+            },
+            window_height: if self.window_height.is_empty() {
+                None
+            } else {
+                Some(self.window_height.clone())
+            },
+            window_width: if self.window_width.is_empty() {
+                None
+            } else {
+                Some(self.window_width.clone())
+            },
+            window_top: if self.window_top.is_empty() {
+                None
+            } else {
+                Some(self.window_top.clone())
+            },
+            window_left: if self.window_left.is_empty() {
+                None
+            } else {
+                Some(self.window_left.clone())
+            },
+            window_style_name: if self.window_style_name.is_empty() {
+                None
+            } else {
+                Some(self.window_style_name.clone())
+            },
             find_requests: self.find_requests.clone(),
-            curl_options: if self.curl_options.is_empty() { None } else { Some(self.curl_options.clone()) },
-            dont_encode_url: if self.dont_encode_url.is_empty() { None } else { Some(self.dont_encode_url.clone()) },
-            verify_ssl: if self.verify_ssl.is_empty() { None } else { Some(self.verify_ssl.clone()) },
-            select_all_state: if self.select_all_state.is_empty() { None } else { Some(self.select_all_state.clone()) },
+            curl_options: if self.curl_options.is_empty() {
+                None
+            } else {
+                Some(self.curl_options.clone())
+            },
+            dont_encode_url: if self.dont_encode_url.is_empty() {
+                None
+            } else {
+                Some(self.dont_encode_url.clone())
+            },
+            verify_ssl: if self.verify_ssl.is_empty() {
+                None
+            } else {
+                Some(self.verify_ssl.clone())
+            },
+            select_all_state: if self.select_all_state.is_empty() {
+                None
+            } else {
+                Some(self.select_all_state.clone())
+            },
             indent_level,
         }
     }
@@ -805,7 +1022,12 @@ pub fn build_xml_from_script(script: &FmScript) -> Result<String, String> {
 /// Generates compact XML without extra whitespace (matching FM's format).
 fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
     let enabled = if step.enable { "True" } else { "False" };
-    let mut xml = format!("<Step enable=\"{}\" id=\"{}\" name=\"{}\">", enabled, step.id, xml_escape(&step.name));
+    let mut xml = format!(
+        "<Step enable=\"{}\" id=\"{}\" name=\"{}\">",
+        enabled,
+        step.id,
+        xml_escape(&step.name)
+    );
 
     // Helper: wrap a calc body in CDATA, converting `\n` back to `\r` (FM's native EOL
     // inside calculations). Opaque shape bypasses this — its body is already raw XML.
@@ -822,7 +1044,10 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             xml.push_str(&format!("<Text>{}</Text>", escaped));
         }
         Some(StepShape::ValueCalcName) => {
-            xml.push_str(&format!("<Value><Calculation>{}</Calculation></Value>", cdata(step.calculation.as_deref().unwrap_or(""))));
+            xml.push_str(&format!(
+                "<Value><Calculation>{}</Calculation></Value>",
+                cdata(step.calculation.as_deref().unwrap_or(""))
+            ));
             xml.push_str("<Repetition><Calculation><![CDATA[1]]></Calculation></Repetition>");
             if let Some(var_name) = &step.var_name {
                 xml.push_str(&format!("<Name>{}</Name>", xml_escape(var_name)));
@@ -848,10 +1073,16 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             // The bracket content the user typed is the literal calc expression
             // (so "prueba" with quotes is a string literal in FM-calc terms).
             if let Some(title) = &step.dialog_title {
-                xml.push_str(&format!("<Title><Calculation>{}</Calculation></Title>", cdata(title)));
+                xml.push_str(&format!(
+                    "<Title><Calculation>{}</Calculation></Title>",
+                    cdata(title)
+                ));
             }
             if let Some(msg) = &step.dialog_message {
-                xml.push_str(&format!("<Message><Calculation>{}</Calculation></Message>", cdata(msg)));
+                xml.push_str(&format!(
+                    "<Message><Calculation>{}</Calculation></Message>",
+                    cdata(msg)
+                ));
             }
             if !step.dialog_buttons.is_empty() {
                 xml.push_str("<Buttons>");
@@ -860,7 +1091,8 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                     let commit = if i == 0 { "True" } else { "False" };
                     xml.push_str(&format!(
                         "<Button CommitState=\"{}\"><Calculation>{}</Calculation></Button>",
-                        commit, cdata(btn)
+                        commit,
+                        cdata(btn)
                     ));
                 }
                 xml.push_str("</Buttons>");
@@ -889,12 +1121,18 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         Some(StepShape::GoToRecord) => {
             // FM emits the elements in this order; preserve it.
             let no_interact = step.goto_no_interact.as_deref().unwrap_or("False");
-            xml.push_str(&format!("<NoInteract state=\"{}\"></NoInteract>", xml_escape(no_interact)));
+            xml.push_str(&format!(
+                "<NoInteract state=\"{}\"></NoInteract>",
+                xml_escape(no_interact)
+            ));
             if let Some(exit) = &step.goto_exit_after_last {
                 xml.push_str(&format!("<Exit state=\"{}\"></Exit>", xml_escape(exit)));
             }
             if let Some(loc) = &step.goto_location {
-                xml.push_str(&format!("<RowPageLocation value=\"{}\"></RowPageLocation>", xml_escape(loc)));
+                xml.push_str(&format!(
+                    "<RowPageLocation value=\"{}\"></RowPageLocation>",
+                    xml_escape(loc)
+                ));
                 if loc == "byCalculation" {
                     if let Some(calc) = &step.calculation {
                         xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
@@ -904,7 +1142,10 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         }
         Some(StepShape::PerformScript) => {
             if let Some(mode) = &step.current_script_mode {
-                xml.push_str(&format!("<CurrentScript value=\"{}\"></CurrentScript>", xml_escape(mode)));
+                xml.push_str(&format!(
+                    "<CurrentScript value=\"{}\"></CurrentScript>",
+                    xml_escape(mode)
+                ));
             }
             if let Some(calc) = &step.calculation {
                 xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
@@ -940,7 +1181,10 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         Some(StepShape::ReplaceFieldContents) => {
             // Fixed element order matching FM's output for the calculated-result mode.
             let no_int = step.goto_no_interact.as_deref().unwrap_or("False");
-            xml.push_str(&format!("<NoInteract state=\"{}\"></NoInteract>", xml_escape(no_int)));
+            xml.push_str(&format!(
+                "<NoInteract state=\"{}\"></NoInteract>",
+                xml_escape(no_int)
+            ));
             xml.push_str("<Restore state=\"True\"></Restore>");
             xml.push_str("<With value=\"Calculation\"></With>");
             if let Some(calc) = &step.calculation {
@@ -963,10 +1207,16 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         Some(StepShape::WebViewerJs) => {
             // FM nests text inside <Calculation><![CDATA[...]]></Calculation>
             if let Some(obj) = &step.object_name {
-                xml.push_str(&format!("<ObjectName><Calculation>{}</Calculation></ObjectName>", cdata(obj)));
+                xml.push_str(&format!(
+                    "<ObjectName><Calculation>{}</Calculation></ObjectName>",
+                    cdata(obj)
+                ));
             }
             if let Some(func) = &step.function_name {
-                xml.push_str(&format!("<FunctionName><Calculation>{}</Calculation></FunctionName>", cdata(func)));
+                xml.push_str(&format!(
+                    "<FunctionName><Calculation>{}</Calculation></FunctionName>",
+                    cdata(func)
+                ));
             }
             if !step.parameters.is_empty() {
                 xml.push_str(&format!("<Parameters Count=\"{}\">", step.parameters.len()));
@@ -979,31 +1229,56 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
         Some(StepShape::SelectWindow) => {
             // <LimitToWindowsOfCurrentFile/> + <Window value/> + <Name><Calculation>name</Calculation></Name>
             let limit = step.window_limit_current_file.as_deref().unwrap_or("False");
-            xml.push_str(&format!("<LimitToWindowsOfCurrentFile state=\"{}\"></LimitToWindowsOfCurrentFile>", xml_escape(limit)));
+            xml.push_str(&format!(
+                "<LimitToWindowsOfCurrentFile state=\"{}\"></LimitToWindowsOfCurrentFile>",
+                xml_escape(limit)
+            ));
             // Mode default: ByName if a name is present, Current otherwise.
-            let default_mode = if step.var_name.is_some() { "ByName" } else { "Current" };
+            let default_mode = if step.var_name.is_some() {
+                "ByName"
+            } else {
+                "Current"
+            };
             let mode = step.window_mode.as_deref().unwrap_or(default_mode);
             xml.push_str(&format!("<Window value=\"{}\"></Window>", xml_escape(mode)));
             if let Some(name) = &step.var_name {
-                xml.push_str(&format!("<Name><Calculation>{}</Calculation></Name>", cdata(name)));
+                xml.push_str(&format!(
+                    "<Name><Calculation>{}</Calculation></Name>",
+                    cdata(name)
+                ));
             }
         }
         Some(StepShape::AdjustWindow) => {
             if let Some(state) = &step.window_state {
-                xml.push_str(&format!("<WindowState value=\"{}\"></WindowState>", xml_escape(state)));
+                xml.push_str(&format!(
+                    "<WindowState value=\"{}\"></WindowState>",
+                    xml_escape(state)
+                ));
             }
         }
         Some(StepShape::GoToObject) => {
             if let Some(obj) = &step.object_name {
-                xml.push_str(&format!("<ObjectName><Calculation>{}</Calculation></ObjectName>", cdata(obj)));
+                xml.push_str(&format!(
+                    "<ObjectName><Calculation>{}</Calculation></ObjectName>",
+                    cdata(obj)
+                ));
             }
             // Repetition defaults to "1" — FM emits it even when implicit.
             let rep = step.repetition.as_deref().unwrap_or("1");
-            xml.push_str(&format!("<Repetition><Calculation>{}</Calculation></Repetition>", cdata(rep)));
+            xml.push_str(&format!(
+                "<Repetition><Calculation>{}</Calculation></Repetition>",
+                cdata(rep)
+            ));
         }
         Some(StepShape::GoToLayoutNamed) => {
-            let dest = step.layout_destination.as_deref().unwrap_or("SelectedLayout");
-            xml.push_str(&format!("<LayoutDestination value=\"{}\"></LayoutDestination>", xml_escape(dest)));
+            let dest = step
+                .layout_destination
+                .as_deref()
+                .unwrap_or("SelectedLayout");
+            xml.push_str(&format!(
+                "<LayoutDestination value=\"{}\"></LayoutDestination>",
+                xml_escape(dest)
+            ));
             if dest == "SelectedLayout" {
                 if let Some(name) = &step.layout_name {
                     xml.push_str("<Layout");
@@ -1021,10 +1296,22 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             let w = step.window_width.as_deref().unwrap_or("");
             let top = step.window_top.as_deref().unwrap_or("");
             let left = step.window_left.as_deref().unwrap_or("");
-            xml.push_str(&format!("<Height><Calculation>{}</Calculation></Height>", cdata(h)));
-            xml.push_str(&format!("<Width><Calculation>{}</Calculation></Width>", cdata(w)));
-            xml.push_str(&format!("<DistanceFromTop><Calculation>{}</Calculation></DistanceFromTop>", cdata(top)));
-            xml.push_str(&format!("<DistanceFromLeft><Calculation>{}</Calculation></DistanceFromLeft>", cdata(left)));
+            xml.push_str(&format!(
+                "<Height><Calculation>{}</Calculation></Height>",
+                cdata(h)
+            ));
+            xml.push_str(&format!(
+                "<Width><Calculation>{}</Calculation></Width>",
+                cdata(w)
+            ));
+            xml.push_str(&format!(
+                "<DistanceFromTop><Calculation>{}</Calculation></DistanceFromTop>",
+                cdata(top)
+            ));
+            xml.push_str(&format!(
+                "<DistanceFromLeft><Calculation>{}</Calculation></DistanceFromLeft>",
+                cdata(left)
+            ));
             // Style bitfield + named-style attribute. We emit the standard "Document" flag set
             // unless overridden. The `Styles` integer is FM's internal representation; the
             // value 1076299266 matches a Document window with all chrome enabled.
@@ -1044,12 +1331,27 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             let dont_enc = step.dont_encode_url.as_deref().unwrap_or("False");
             let sel_all = step.select_all_state.as_deref().unwrap_or("False");
             let verify = step.verify_ssl.as_deref().unwrap_or("False");
-            xml.push_str(&format!("<NoInteract state=\"{}\"></NoInteract>", xml_escape(no_int)));
-            xml.push_str(&format!("<DontEncodeURL state=\"{}\"></DontEncodeURL>", xml_escape(dont_enc)));
-            xml.push_str(&format!("<SelectAll state=\"{}\"></SelectAll>", xml_escape(sel_all)));
-            xml.push_str(&format!("<VerifySSLCertificates state=\"{}\"></VerifySSLCertificates>", xml_escape(verify)));
+            xml.push_str(&format!(
+                "<NoInteract state=\"{}\"></NoInteract>",
+                xml_escape(no_int)
+            ));
+            xml.push_str(&format!(
+                "<DontEncodeURL state=\"{}\"></DontEncodeURL>",
+                xml_escape(dont_enc)
+            ));
+            xml.push_str(&format!(
+                "<SelectAll state=\"{}\"></SelectAll>",
+                xml_escape(sel_all)
+            ));
+            xml.push_str(&format!(
+                "<VerifySSLCertificates state=\"{}\"></VerifySSLCertificates>",
+                xml_escape(verify)
+            ));
             if let Some(curl) = &step.curl_options {
-                xml.push_str(&format!("<CURLOptions><Calculation>{}</Calculation></CURLOptions>", cdata(curl)));
+                xml.push_str(&format!(
+                    "<CURLOptions><Calculation>{}</Calculation></CURLOptions>",
+                    cdata(curl)
+                ));
             }
             // URL calc (the "Specify URL" calc in FM's dialog).
             if let Some(url) = &step.calculation {
@@ -1074,7 +1376,10 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             if !step.find_requests.is_empty() {
                 xml.push_str("<Query>");
                 for req in &step.find_requests {
-                    xml.push_str(&format!("<RequestRow operation=\"{}\">", xml_escape(&req.operation)));
+                    xml.push_str(&format!(
+                        "<RequestRow operation=\"{}\">",
+                        xml_escape(&req.operation)
+                    ));
                     for c in &req.criteria {
                         xml.push_str("<Criteria><Field");
                         if !c.table.is_empty() {
@@ -1083,7 +1388,10 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                         if !c.field.is_empty() {
                             xml.push_str(&format!(" name=\"{}\"", xml_escape(&c.field)));
                         }
-                        xml.push_str(&format!("></Field><Text>{}</Text></Criteria>", xml_escape(&c.text)));
+                        xml.push_str(&format!(
+                            "></Field><Text>{}</Text></Criteria>",
+                            xml_escape(&c.text)
+                        ));
                     }
                     xml.push_str("</RequestRow>");
                 }
@@ -1118,8 +1426,7 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
 /// Returns raw XML bytes (no framing). The clipboard layer adds platform-specific
 /// framing: Windows prepends a 4-byte LE length; macOS NSPasteboard takes raw XML.
 pub fn encode_xmss(text: &str) -> Result<Vec<u8>, String> {
-    let script = crate::text_format::parse_text_to_script(text)
-        .map_err(|e| e.to_string())?;
+    let script = crate::text_format::parse_text_to_script(text).map_err(|e| e.to_string())?;
     let xml = build_xml_from_script(&script)?;
     Ok(xml.into_bytes())
 }
@@ -1134,8 +1441,7 @@ pub fn decode_xmss(data: &[u8]) -> Result<FmScript, String> {
 mod tests {
     use super::*;
 
-    const SNIPPET: &str =
-        "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"1\" name=\"Comment\"><Text>hi</Text></Step></fmxmlsnippet>";
+    const SNIPPET: &str = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"1\" name=\"Comment\"><Text>hi</Text></Step></fmxmlsnippet>";
 
     /// Frame XML as Windows clipboard data: 4-byte LE length prefix + bytes.
     fn windows_frame(xml: &str) -> Vec<u8> {

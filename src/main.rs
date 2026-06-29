@@ -60,19 +60,59 @@ struct Response {
 
 impl Response {
     fn ok() -> Self {
-        Response { status: "ok".to_string(), script_text: None, error: None, version: None, error_line: None, errors: None, data: None }
+        Response {
+            status: "ok".to_string(),
+            script_text: None,
+            error: None,
+            version: None,
+            error_line: None,
+            errors: None,
+            data: None,
+        }
     }
     fn ok_text(text: String) -> Self {
-        Response { status: "ok".to_string(), script_text: Some(text), error: None, version: None, error_line: None, errors: None, data: None }
+        Response {
+            status: "ok".to_string(),
+            script_text: Some(text),
+            error: None,
+            version: None,
+            error_line: None,
+            errors: None,
+            data: None,
+        }
     }
     fn ok_data(data: serde_json::Value) -> Self {
-        Response { status: "ok".to_string(), script_text: None, error: None, version: None, error_line: None, errors: None, data: Some(data) }
+        Response {
+            status: "ok".to_string(),
+            script_text: None,
+            error: None,
+            version: None,
+            error_line: None,
+            errors: None,
+            data: Some(data),
+        }
     }
     fn version(v: String) -> Self {
-        Response { status: "ok".to_string(), script_text: None, error: None, version: Some(v), error_line: None, errors: None, data: None }
+        Response {
+            status: "ok".to_string(),
+            script_text: None,
+            error: None,
+            version: Some(v),
+            error_line: None,
+            errors: None,
+            data: None,
+        }
     }
     fn error(message: String) -> Self {
-        Response { status: "error".to_string(), script_text: None, error: Some(message), version: None, error_line: None, errors: None, data: None }
+        Response {
+            status: "error".to_string(),
+            script_text: None,
+            error: Some(message),
+            version: None,
+            error_line: None,
+            errors: None,
+            data: None,
+        }
     }
     /// Build an error response from a full list of validation errors. The first
     /// error is also mirrored into `error`/`error_line` for single-error clients.
@@ -80,7 +120,15 @@ impl Response {
         let first = errors.first();
         let error = first.map(|e| e.to_string());
         let error_line = first.map(|e| e.line);
-        Response { status: "error".to_string(), script_text: None, error, version: None, error_line, errors: Some(errors), data: None }
+        Response {
+            status: "error".to_string(),
+            script_text: None,
+            error,
+            version: None,
+            error_line,
+            errors: Some(errors),
+            data: None,
+        }
     }
 }
 
@@ -184,8 +232,7 @@ fn handle_command(cmd: &Command) -> Response {
             };
             match slice::run_slice(output_dir, slice_dir, layouts) {
                 Ok(stats) => {
-                    let mut data = serde_json::to_value(&stats)
-                        .unwrap_or(serde_json::Value::Null);
+                    let mut data = serde_json::to_value(&stats).unwrap_or(serde_json::Value::Null);
                     if let serde_json::Value::Object(ref mut m) = data {
                         m.insert("slice_dir".to_string(), slice_dir.clone().into());
                         m.insert(
@@ -204,10 +251,10 @@ fn handle_command(cmd: &Command) -> Response {
 
 fn run_json_mode() -> Result<(), String> {
     let mut input = String::new();
-    std::io::stdin().read_to_string(&mut input)
+    std::io::stdin()
+        .read_to_string(&mut input)
         .map_err(|e| format!("Cannot read stdin: {}", e))?;
-    let cmd: Command = serde_json::from_str(&input)
-        .map_err(|e| format!("Invalid JSON: {}", e))?;
+    let cmd: Command = serde_json::from_str(&input).map_err(|e| format!("Invalid JSON: {}", e))?;
     let response = handle_command(&cmd);
     let output = serde_json::to_string(&response)
         .map_err(|e| format!("Cannot serialize response: {}", e))?;
@@ -237,7 +284,9 @@ fn run_cli_mode() -> Result<(), String> {
         "dump-ids" => run_dump_ids_cli(),
         "steps" => run_steps_cli(),
         "encode-text" => {
-            if args.len() < 3 { return Err("Usage: fm-bridge encode-text <in.fmscript> <out.xml>".to_string()); }
+            if args.len() < 3 {
+                return Err("Usage: fm-bridge encode-text <in.fmscript> <out.xml>".to_string());
+            }
             let text = read_file_to_string(&args[1])?;
             let xml_bytes = xmss::encode_xmss(&text)?;
             std::fs::write(&args[2], &xml_bytes).map_err(|e| e.to_string())?;
@@ -245,7 +294,9 @@ fn run_cli_mode() -> Result<(), String> {
             Ok(())
         }
         "decode-xml" => {
-            if args.len() < 2 { return Err("Usage: fm-bridge decode-xml <file.xml>".to_string()); }
+            if args.len() < 2 {
+                return Err("Usage: fm-bridge decode-xml <file.xml>".to_string());
+            }
             let xml = std::fs::read_to_string(&args[1]).map_err(|e| e.to_string())?;
             let script = xmss::parse_fmxml_snippet(&xml)?;
             let text = text_format::format_script(&script);
@@ -259,7 +310,10 @@ fn run_cli_mode() -> Result<(), String> {
         }
         "inspect" => run_inspect_cli(&args[1..]),
         "slice" => run_slice_cli(&args[1..]),
-        _ => Err(format!("Unknown command: {}. Use: read, write, json, steps, debug, test, passthrough, dump-ids, inspect, slice", args[0]))
+        _ => Err(format!(
+            "Unknown command: {}. Use: read, write, json, steps, debug, test, passthrough, dump-ids, inspect, slice",
+            args[0]
+        )),
     }
 }
 
@@ -271,14 +325,20 @@ fn run_inspect_cli(args: &[String]) -> Result<(), String> {
         return Err("Usage: fm-bridge inspect <FMSaveAsXML.xml> [output-dir]".to_string());
     }
     let xml_path = &args[0];
-    let output_dir = args.get(1).map(|s| s.as_str()).unwrap_or("fm-inspect-output");
+    let output_dir = args
+        .get(1)
+        .map(|s| s.as_str())
+        .unwrap_or("fm-inspect-output");
 
     println!("Parsing {}...", xml_path);
     let db = fmsavexml::parse(xml_path)?;
 
     println!(
         "  Scripts: {}  |  Layouts: {}  |  Tables: {}",
-        db.scripts.iter().filter(|s| !s.is_folder && !s.is_separator).count(),
+        db.scripts
+            .iter()
+            .filter(|s| !s.is_folder && !s.is_separator)
+            .count(),
         db.layouts.len(),
         db.tables.len(),
     );
@@ -333,8 +393,7 @@ fn run_slice_cli(args: &[String]) -> Result<(), String> {
 /// Read a text file with encoding detection.
 /// Tries: UTF-8 (with/without BOM), UTF-16 LE (PowerShell >), UTF-16 BE, then Windows-1252.
 fn read_file_to_string(path: &str) -> Result<String, String> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| format!("Cannot read file {}: {}", path, e))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("Cannot read file {}: {}", path, e))?;
 
     if bytes.is_empty() {
         return Ok(String::new());
@@ -374,8 +433,7 @@ fn run_read_cli(output_path: Option<&str>) -> Result<(), String> {
     let script = xmss::decode_xmss(&data)?;
     let text = text_format::format_script(&script);
     if let Some(path) = output_path {
-        std::fs::write(path, &text)
-            .map_err(|e| format!("Cannot write file {}: {}", path, e))?;
+        std::fs::write(path, &text).map_err(|e| format!("Cannot write file {}: {}", path, e))?;
         println!("Script written to {}", path);
     } else {
         println!("{}", text);
@@ -395,12 +453,18 @@ fn run_debug_cli() -> Result<(), String> {
     let formats = clipboard::list_clipboard_formats();
     println!("=== Clipboard formats ({} total) ===", formats.len());
     for (fmt, name, fmt_size) in &formats {
-        println!("  ID: {:5}  Name: {:30}  Size: {} bytes", fmt, name, fmt_size);
+        println!(
+            "  ID: {:5}  Name: {:30}  Size: {} bytes",
+            fmt, name, fmt_size
+        );
     }
 
     let data = clipboard::read_fm_clipboard()?;
     println!("\n=== FM data ({} bytes) ===", data.len());
-    println!("Header: {:02x} {:02x} {:02x} {:02x}", data[0], data[1], data[2], data[3]);
+    println!(
+        "Header: {:02x} {:02x} {:02x} {:02x}",
+        data[0], data[1], data[2], data[3]
+    );
 
     let xml_str = xmss::strip_header(&data)?;
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -445,13 +509,15 @@ fn run_steps_cli() -> Result<(), String> {
 fn run_passthrough_cli() -> Result<(), String> {
     let data = clipboard::read_fm_clipboard()?;
     println!("Read {} bytes from clipboard", data.len());
-    println!("Header: {:02X} {:02X} {:02X} {:02X}", data[0], data[1], data[2], data[3]);
+    println!(
+        "Header: {:02X} {:02X} {:02X} {:02X}",
+        data[0], data[1], data[2], data[3]
+    );
 
     // Also save raw bytes for comparison
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let raw_path = manifest_dir.join("clipboard_raw.bin");
-    std::fs::write(&raw_path, &data)
-        .map_err(|e| format!("Cannot save raw data: {}", e))?;
+    std::fs::write(&raw_path, &data).map_err(|e| format!("Cannot save raw data: {}", e))?;
     println!("Raw bytes saved to: {}", raw_path.display());
 
     // On Windows, read_fm_clipboard returns bytes WITH the 4-byte LE length header
@@ -466,7 +532,10 @@ fn run_passthrough_cli() -> Result<(), String> {
         &data[..]
     };
     clipboard::write_fm_clipboard(xml_bytes)?;
-    println!("Wrote {} bytes of XML back to clipboard (header re-added by write).", xml_bytes.len());
+    println!(
+        "Wrote {} bytes of XML back to clipboard (header re-added by write).",
+        xml_bytes.len()
+    );
     println!("Now try pasting in FileMaker.");
     Ok(())
 }

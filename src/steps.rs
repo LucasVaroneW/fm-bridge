@@ -117,8 +117,8 @@ struct StepsFile {
 static STEPS_JSON: &str = include_str!("../steps.toml");
 
 fn parse_steps() -> Vec<StepDef> {
-    let file: StepsFile = toml::from_str(STEPS_JSON)
-        .expect("Failed to parse steps.toml at compile time");
+    let file: StepsFile =
+        toml::from_str(STEPS_JSON).expect("Failed to parse steps.toml at compile time");
     file.steps
 }
 
@@ -170,7 +170,9 @@ pub fn lookup_by_en(name: &str) -> Option<&'static StepDef> {
 /// Used during decode to translate FM Spanish names to English.
 /// Returns None if no Spanish mapping exists.
 pub fn lookup_by_es(name: &str) -> Option<&'static StepDef> {
-    all_steps().iter().find(|s| !s.es.is_empty() && s.es == name)
+    all_steps()
+        .iter()
+        .find(|s| !s.es.is_empty() && s.es == name)
 }
 
 /// Find the canonical English step name closest to `name` for a "did you mean"
@@ -246,7 +248,10 @@ mod tests {
         assert_eq!(translate_to_en("Establecer variable"), "Set Variable");
         assert_eq!(translate_to_en("Si"), "If");
         assert_eq!(translate_to_en("Fin Si"), "End If");
-        assert_eq!(translate_to_en("Mostrar cuadro de diálogo personalizado"), "Show Custom Dialog");
+        assert_eq!(
+            translate_to_en("Mostrar cuadro de diálogo personalizado"),
+            "Show Custom Dialog"
+        );
     }
 
     #[test]
@@ -274,7 +279,10 @@ mod tests {
 
     #[test]
     fn test_shapes() {
-        assert_eq!(shape_for_en("Set Variable"), Some(&StepShape::ValueCalcName));
+        assert_eq!(
+            shape_for_en("Set Variable"),
+            Some(&StepShape::ValueCalcName)
+        );
         assert_eq!(shape_for_en("If"), Some(&StepShape::CalculationWithRestore));
         assert_eq!(shape_for_en("Halt Script"), Some(&StepShape::Plain));
         assert_eq!(shape_for_en("Show Custom Dialog"), Some(&StepShape::Dialog));

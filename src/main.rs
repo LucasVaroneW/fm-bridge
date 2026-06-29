@@ -4,6 +4,7 @@
 
 mod clipboard;
 mod fmsavexml;
+mod import_records;
 mod normalization;
 #[cfg(windows)]
 mod ole_clipboard;

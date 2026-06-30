@@ -19,6 +19,7 @@ import {
 } from "./bridge";
 import { StepCompletionProvider, resetCatalogCache } from "./completion";
 import { inspectXmlCommand, sliceCommand } from "./inspect";
+import { copyMcpConfigCommand } from "./mcpConfig";
 import { StepFixProvider } from "./quickfix";
 
 const LANGUAGE = "fmscript";
@@ -48,6 +49,10 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand("fm-bridge.inspectXml", inspectXmlCommand),
     vscode.commands.registerCommand("fm-bridge.slice", sliceCommand),
+    vscode.commands.registerCommand(
+      "fm-bridge.copyMcpConfig",
+      copyMcpConfigCommand,
+    ),
     vscode.commands.registerCommand("fm-bridge.showLog", () => output?.show()),
     vscode.languages.registerCompletionItemProvider(
       LANGUAGE,

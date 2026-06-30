@@ -8,6 +8,38 @@ comando del binario — no se duplica lógica.
 No necesitás Node ni nada extra: es un subcomando del mismo binario que ya viene
 empaquetado en el `.vsix` (o instalado en `~/.cargo/bin`).
 
+## ¿El plugin de VS Code ya activa el MCP? No — pero te deja a un paso
+
+Conviene tenerlo claro porque confunde a todo el mundo:
+
+- Instalar el **`.vsix`** te da la **puerta humana** (editar `.fmscript` en VS
+  Code) **y el binario en disco** — sin Rust, sin nada extra.
+- Pero el **`.vsix` NO configura el MCP** en tu cliente de IA. Ese cliente
+  (OpenCode, Claude Desktop, Cursor…) es **otra app, con su propio archivo de
+  config en otra carpeta**; la extensión no puede tocarlo. Hay que apuntarlo al
+  binario **una vez**.
+
+Las dos puertas son el **mismo motor**, activadas por separado:
+
+```
+                 ┌─ .vsix en VS Code ──────────▶ fm-bridge json   (puerta HUMANA)
+ fm-bridge.exe ──┤
+   (un motor)    └─ config MCP en el cliente IA ▶ fm-bridge mcp    (puerta IA)
+```
+
+### La forma fácil (recomendada): desde la extensión
+
+Si tenés la extensión instalada, no escribas rutas a mano:
+
+1. Command Palette → **fm-bridge: Copy MCP config for an AI agent**.
+2. Elegí tu cliente (OpenCode / Claude Desktop / Cursor).
+3. Te copia al portapapeles el bloque JSON correcto **con la ruta real del
+   binario empaquetado ya rellenada**. Pegalo en el archivo de config del cliente
+   (el mensaje te dice cuál), mergeando si la clave ya existe.
+4. Reiniciá el cliente. Listo.
+
+### A mano (lo mismo, si no usás la extensión)
+
 ## Cómo se configura
 
 El cliente lanza `fm-bridge mcp` y habla JSON-RPC por stdin/stdout. Apuntá al
@@ -36,10 +68,32 @@ En Windows, `command` apunta al `.exe`, p. ej.
 > `~/.vscode/extensions/lucasvarone.fm-bridge-*/bin/<plataforma>/fm-bridge`.
 > Podés apuntar ahí, o instalarlo con `cargo install --path .`.
 
+### OpenCode
+
+Otro formato: clave `mcp`, `type: "local"` y el comando como **array**.
+En `~/.config/opencode/opencode.jsonc` (global) o un `opencode.json` en la raíz
+del proyecto:
+
+```jsonc
+{
+  "mcp": {
+    "fm-bridge": {
+      "type": "local",
+      "command": ["C:\\Users\\TU_USUARIO\\.cargo\\bin\\fm-bridge.exe", "mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+OpenCode ya es un agente con acceso a archivos, así que ahí también te sirven
+`inspect_database` / `slice_inspect` (puede leer las carpetas que generan), no
+solo las tools inline.
+
 ### Cursor / Antigravity / otros
 
-Mismo patrón: en su archivo de MCP servers, comando = ruta al binario,
-args = `["mcp"]`.
+Mismo patrón que Claude Desktop: en su archivo de MCP servers, comando = ruta al
+binario, args = `["mcp"]`.
 
 ## Tools que expone
 

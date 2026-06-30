@@ -45,6 +45,10 @@ How it finds the binary, in order:
 |---|---|
 | `fm-bridge.readFromClipboard` | fm-bridge: Read script from clipboard |
 | `fm-bridge.writeToClipboard` | fm-bridge: Write script to clipboard |
+| `fm-bridge.inspectXml` | fm-bridge: Inspect FMSaveAsXML export |
+| `fm-bridge.slice` | fm-bridge: Slice inspect output around layouts |
+| `fm-bridge.copyMcpConfig` | fm-bridge: Copy MCP config for an AI agent |
+| `fm-bridge.showLog` | fm-bridge: Show log |
 
 `Write` is also available as a button in the editor title bar for `.fmscript`
 files.
@@ -62,6 +66,29 @@ files.
 2. **fm-bridge: Read script from clipboard** → edit the `.fmscript` in VS Code.
 3. **fm-bridge: Write script to clipboard**.
 4. In FileMaker: `Cmd/Ctrl+V` into the Script Workspace.
+
+## Use it from an AI agent (MCP)
+
+The same binary that powers this extension is also an **MCP server** — the door
+an AI agent (OpenCode, Claude Desktop, Cursor, the VS Code agent…) uses to drive
+the engine: inspect a database, audit broken references, pull one table or one
+script, etc. See [docs/MCP.md](../../docs/MCP.md) for the full tool list.
+
+**Important:** installing the `.vsix` gives you the human editor **and the
+binary on disk**, but it does **not** auto-configure the MCP in your AI client —
+that client is a separate app with its own config file. You just have to point it
+at the binary once. The extension makes that one step painless:
+
+1. Run **fm-bridge: Copy MCP config for an AI agent** from the Command Palette.
+2. Pick your client (OpenCode / Claude Desktop / Cursor).
+3. The correct JSON block — **with the real path to the bundled binary already
+   filled in** — is copied to your clipboard. Paste it into that client's config
+   file (the message tells you which one), merging if the key already exists.
+4. Restart the AI client. Done — no Rust, no hand-typed paths.
+
+After that, in a fresh chat you don't mention "MCP" at all: just give the agent a
+path and a task (e.g. *"inspect `C:\exports\ventas.xml` and tell me if any Set
+Field points at a missing field"*) and it picks the right tool on its own.
 
 ## Build from source
 

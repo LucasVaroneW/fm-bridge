@@ -75,6 +75,11 @@
         "category": "fm-bridge"
       },
       {
+        "command": "fm-bridge.copyMcpConfig",
+        "title": "fm-bridge: Copy MCP config for an AI agent",
+        "category": "fm-bridge"
+      },
+      {
         "command": "fm-bridge.showLog",
         "title": "fm-bridge: Show log",
         "category": "fm-bridge"

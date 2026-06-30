@@ -357,6 +357,46 @@ fm-bridge get-script By_12_Productos.xml "#1149"
 Las tres también por JSON (`describe` / `get_table` / `get_script`) y como tools
 MCP (`describe_database` / `get_table` / `get_script`).
 
+### Recetas de depuración (humano o IA, mismos comandos)
+
+Todos estos comandos los corrés **vos** en la terminal igual que los usa una IA
+por MCP — no son "solo para la IA". El flujo arranca siempre con un `inspect` (o
+directo sobre el `.xml` para `audit`/`who-*`).
+
+**Rastrear un campo calculado** (ver su fórmula y dónde impacta antes de tocarlo):
+
+```bash
+# 1) La fórmula del campo (buscá su "calculation" en la salida):
+fm-bridge get-table By_12_Productos.xml Productos     # → campo Pro_cCoste, su calc, si es stored/indexed
+
+# 2) Dónde se usa (el radio de impacto):
+fm-bridge who-uses-field By_12_Productos.xml Pro_cCoste
+#   → menciones en cálculos de OTROS campos, claves de relación,
+#     pasos Set Field, y ubicaciones en layouts
+```
+
+**Antes de cambiar un script** (qué lo dispara):
+
+```bash
+fm-bridge who-calls By_00_Desk.xml "Imp_2_Pro"
+#   → otros scripts (Perform Script), triggers de layout/objeto, botones
+```
+
+**Buscar bugs en frío** (referencias rotas en toda la base):
+
+```bash
+fm-bridge audit By_00_Desk.xml
+#   → Perform Script / Go to Layout colgados, relaciones a TOs borradas,
+#     campos fantasma en layouts
+```
+
+**Entender una tabla y sus relaciones**: `inspect` y mirá `tables/<Tabla>.json`
+(campos + cálculos + indexación) y `relationships.json` (joins). Para un diagrama
+ER legible usá el `.mmd` del **`slice`** (recortado), no el de la base entera.
+
+La IA hace exactamente esto mismo con las tools MCP `get_table` / `who_uses_field`
+/ `who_calls` / `audit` — el motor es el mismo, cambia solo la puerta.
+
 ---
 
 ## 4. Workflow real

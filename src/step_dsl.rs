@@ -15,7 +15,17 @@ use crate::import_records::{element_attr, element_attrs};
 /// Render an opaque step's inner XML as a readable DSL, or `None` to keep raw.
 pub fn to_dsl(step_name: &str, xml: &str) -> Option<String> {
     let dsl = match step_name {
-        "Import Records" | "Export Records" => return crate::import_records::xml_to_dsl(xml),
+        "Import Records" | "Export Records" => {
+            // Clipboard form: gated, fully round-trips (the read/write path).
+            if let Some(d) = crate::import_records::xml_to_dsl(xml) {
+                return Some(d);
+            }
+            // FMSaveAsXML form (an `inspect` of a whole-DB export): a readable,
+            // **read-only** summary instead of the raw XML blob. inspect output is
+            // documentation, not something you paste back, so it isn't gated for
+            // round-trip — see import_fmsavexml_summary.
+            return import_fmsavexml_summary(xml);
+        }
         "Commit Records/Requests" => commit_to_dsl(xml)?,
         "Go to Related Record" => gtrr_to_dsl(xml)?,
         _ => return None,
@@ -40,6 +50,63 @@ pub fn from_dsl(step_name: &str, dsl: &str) -> Option<String> {
         "Go to Related Record" => gtrr_from_dsl(dsl),
         _ => None,
     }
+}
+
+// ─── Import Records (FMSaveAsXML form — inspect only) ──────────────────────────
+// A whole-database export serializes Import Records very differently from the
+// clipboard (`<ImportField>`/`<FilePathList>`/`<Map>`/`<FieldReference>` instead
+// of `<TargetFields>`/`<Field>`), and the export is pretty-printed with tabs, so
+// a byte-exact round-trip isn't practical. inspect output is read-only context,
+// so here we render a readable **summary** (source, target TO, field map) — the
+// thing a human or AI actually needs: which source column maps to which field.
+
+/// Read-only readable summary of an FMSaveAsXML Import Records payload, or `None`
+/// if this isn't that form (so the caller keeps the raw XML).
+fn import_fmsavexml_summary(xml: &str) -> Option<String> {
+    if !xml.contains("<ImportField") && !xml.contains("<FilePathList") {
+        return None;
+    }
+    let mut lines: Vec<String> = Vec::new();
+    lines.push("(inspect view — read-only)".to_string());
+
+    if let Some(path) = crate::import_records::element_inner(xml, "FilePathList") {
+        // FileMaker wraps the path in field-separator chars (decode to `â`); strip
+        // those and surrounding whitespace.
+        let clean = path.trim().trim_matches(|c: char| !c.is_ascii_alphanumeric());
+        if !clean.is_empty() {
+            lines.push(format!("Source: {}", clean));
+        }
+    }
+    if let Some(name) = crate::import_records::element_attr(xml, "TableOccurrenceReference", "name")
+    {
+        let id = crate::import_records::element_attr(xml, "TableOccurrenceReference", "id")
+            .unwrap_or("");
+        lines.push(format!("Target: {} #{}", name, id));
+    }
+
+    // Field map: each `<Map index="N" …><FieldReference name="F" …>`.
+    let mut maps: Vec<String> = Vec::new();
+    for chunk in xml.split("<Map ").skip(1) {
+        let open_tag = format!("<Map {}>", chunk.split('>').next().unwrap_or(""));
+        let index = crate::import_records::tag_attr(&open_tag, "index").unwrap_or("");
+        let field = chunk.find("<FieldReference").and_then(|p| {
+            let rest = &chunk[p..];
+            let end = rest.find('>').map(|e| e + 1).unwrap_or(rest.len());
+            crate::import_records::tag_attr(&rest[..end], "name")
+        });
+        if let Some(f) = field {
+            maps.push(format!("  {} -> {}", index, f));
+        }
+    }
+    if !maps.is_empty() {
+        lines.push("Mapping:".to_string());
+        lines.extend(maps);
+    }
+
+    if lines.len() <= 1 {
+        return None; // nothing useful extracted → keep raw XML
+    }
+    Some(lines.join("\n"))
 }
 
 // ─── Commit Records/Requests ───────────────────────────────────────────────────
@@ -240,6 +307,24 @@ mod tests {
     #[test]
     fn unknown_step_is_none() {
         assert_eq!(to_dsl("Set Field", "<x></x>"), None);
+    }
+
+    #[test]
+    fn import_fmsavexml_form_renders_readable_summary() {
+        // The whole-DB export form (inspect), not the clipboard form.
+        let xml = "<Options>33587232</Options>\
+                   <FilePathList fileType=\"TABS\">âfilemac:/Desktop/SRCâ</FilePathList>\
+                   <ImportField><Target>\
+                   <TableOccurrenceReference id=\"99\" name=\"MT_PROV\"></TableOccurrenceReference>\
+                   </Target><Field membercount=\"2\">\
+                   <Map index=\"1\" id=\"5\"><FieldReference id=\"5\" name=\"idPadre\"></FieldReference></Map>\
+                   <Map index=\"2\" id=\"6\"><FieldReference id=\"6\" name=\"codProv\"></FieldReference></Map>\
+                   </Field></ImportField>";
+        let dsl = to_dsl("Import Records", xml).expect("summary");
+        assert!(dsl.contains("Source: filemac:/Desktop/SRC")); // â delimiters stripped
+        assert!(dsl.contains("Target: MT_PROV #99"));
+        assert!(dsl.contains("1 -> idPadre"));
+        assert!(dsl.contains("2 -> codProv"));
     }
 
     #[test]

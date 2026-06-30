@@ -1932,6 +1932,12 @@ fn build_mermaid_diagram(rels: &[Relationship], tos: &[TableOccurrence]) -> Stri
     let mut used: HashSet<String> = HashSet::new();
 
     for r in rels {
+        // Skip edges with no endpoints — a blank entity name is invalid Mermaid
+        // (the diagram silently fails to render). Shouldn't happen now that TO
+        // names parse, but stay defensive.
+        if r.left_to.is_empty() || r.right_to.is_empty() {
+            continue;
+        }
         used.insert(r.left_to.clone());
         used.insert(r.right_to.clone());
         out.push_str(&format!(

@@ -43,9 +43,11 @@ struct Command {
     script: Option<String>,
     #[serde(default)]
     field: Option<String>,
-    // ── inline-read param (get_table) ──
+    // ── inline-read params (get_table / get_layout) ──
     #[serde(default)]
     table: Option<String>,
+    #[serde(default)]
+    layout: Option<String>,
     // ── format style (reformat): "inline" | "indented" ──
     #[serde(default)]
     style: Option<String>,
@@ -328,6 +330,23 @@ fn handle_command(cmd: &Command) -> Response {
                 Err(e) => Response::error(e),
             }
         }
+        "get_layout" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            let layout = match &cmd.layout {
+                Some(l) => l,
+                None => return Response::error("No layout provided".to_string()),
+            };
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => match fmsavexml::layout_inline(&db, layout) {
+                    Ok(v) => Response::ok_data(v),
+                    Err(e) => Response::error(e),
+                },
+                Err(e) => Response::error(e),
+            }
+        }
         // Cross-reference queries (Phase 3 bug-hunting): who calls a script, and
         // where a field is used. Both parse the export, then answer structurally.
         "who_calls" => {
@@ -468,6 +487,7 @@ fn run_cli_mode() -> Result<(), String> {
         "describe" => run_describe_cli(&args[1..]),
         "get-table" => run_get_table_cli(&args[1..]),
         "get-script" => run_get_script_cli(&args[1..]),
+        "get-layout" => run_get_layout_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
             "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, who-calls, who-uses-field, describe, get-table, get-script",
@@ -672,6 +692,18 @@ fn run_get_table_cli(args: &[String]) -> Result<(), String> {
     let db = fmsavexml::parse(&args[0])?;
     let table = fmsavexml::table_inline(&db, &args[1])?;
     println!("{}", serde_json::to_string_pretty(&table).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
+/// `get-layout`: one layout's full structure (objects, fields, web viewer URLs,
+/// triggers) as pretty JSON, by name or `#id`.
+fn run_get_layout_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err("Usage: fm-bridge get-layout <FMSaveAsXML.xml> <layout-name|#id>".to_string());
+    }
+    let db = fmsavexml::parse(&args[0])?;
+    let data = fmsavexml::layout_inline(&db, &args[1])?;
+    println!("{}", serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?);
     Ok(())
 }
 
@@ -946,6 +978,7 @@ mod tests {
             script: None,
             field: None,
             table: None,
+            layout: None,
             style: None,
         }
     }

@@ -354,8 +354,19 @@ fm-bridge get-script By_12_Productos.xml Gen_Abrir
 fm-bridge get-script By_12_Productos.xml "#1149"
 ```
 
-Las tres también por JSON (`describe` / `get_table` / `get_script`) y como tools
-MCP (`describe_database` / `get_table` / `get_script`).
+### `fm-bridge get-layout <FMSaveAsXML.xml> <nombre|#id>`
+
+Imprime (JSON inline) la estructura de un layout: TO base, objetos recursivos
+(campos, botones→script, portales con su contenido), tooltips, **URL/cálculo de
+los web viewers**, y triggers de objeto y de layout. Inline, sin escribir a disco.
+
+```bash
+fm-bridge get-layout By_00_Desk.xml "Ven_Dat_Cli"
+```
+
+Las cuatro también por JSON (`describe` / `get_table` / `get_script` /
+`get_layout`) y como tools MCP (`describe_database` / `get_table` / `get_script`
+/ `get_layout`).
 
 ### Recetas de depuración (humano o IA, mismos comandos)
 

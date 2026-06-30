@@ -889,6 +889,12 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                         b"cascadeDelete" => {
                                             r.left_cascade_delete = &attr.value[..] == b"True"
                                         }
+                                        // The TO name lives on the element here (some
+                                        // FMSaveAsXML dialects) vs a nested
+                                        // <TableOccurrenceReference> (others, below).
+                                        b"name" if r.left_to.is_empty() => {
+                                            r.left_to = attr_text(&attr)
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -901,6 +907,9 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                         }
                                         b"cascadeDelete" => {
                                             r.right_cascade_delete = &attr.value[..] == b"True"
+                                        }
+                                        b"name" if r.right_to.is_empty() => {
+                                            r.right_to = attr_text(&attr)
                                         }
                                         _ => {}
                                     }
@@ -935,11 +944,31 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 }
                             } else if local == b"FieldReference" {
                                 let (_, name) = parse_id_name_attrs(e);
+                                // Legacy FMSaveAsXML (older FileMaker) carries the TO
+                                // as a `tableOccurrence` attribute on FieldReference
+                                // instead of a nested <TableOccurrenceReference>.
+                                let to_attr = e.attributes().flatten().find_map(|a| {
+                                    if matches!(a.key.as_ref(), b"tableOccurrence" | b"baseTable") {
+                                        Some(attr_text(&a))
+                                    } else {
+                                        None
+                                    }
+                                });
                                 if let Some(p) = cur_predicate.as_mut() {
                                     if in_left_field && p.left_field.is_empty() {
                                         p.left_field = name;
+                                        if p.left_to.is_empty() {
+                                            if let Some(to) = to_attr {
+                                                p.left_to = to;
+                                            }
+                                        }
                                     } else if in_right_field && p.right_field.is_empty() {
                                         p.right_field = name;
+                                        if p.right_to.is_empty() {
+                                            if let Some(to) = to_attr {
+                                                p.right_to = to;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1229,7 +1258,20 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 }
                             }
                         } else if local == b"Relationship" {
-                            if let Some(r) = cur_rel.take() {
+                            if let Some(mut r) = cur_rel.take() {
+                                // Legacy format has no <LeftTable>/<RightTable> TO
+                                // refs; derive the relationship's TOs from the first
+                                // predicate (whose TOs we read off FieldReference).
+                                if r.left_to.is_empty() || r.right_to.is_empty() {
+                                    if let Some(p) = r.predicates.first() {
+                                        if r.left_to.is_empty() {
+                                            r.left_to = p.left_to.clone();
+                                        }
+                                        if r.right_to.is_empty() {
+                                            r.right_to = p.right_to.clone();
+                                        }
+                                    }
+                                }
                                 relationships.push(r);
                             }
                         }

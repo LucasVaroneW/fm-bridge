@@ -98,8 +98,23 @@ fn tools_list_result() -> Value {
             "inputSchema": { "type": "object", "properties": { "script_text": { "type": "string", "description": "The .fmscript source to parse." } }, "required": ["script_text"] }
         },
         {
+            "name": "describe_database",
+            "description": "Inline overview of a database from a single FMSaveAsXML export: counts plus the names of every table, script, layout, custom function and external source. Writes nothing to disk — the right first call to orient yourself before drilling in with get_table / get_script.",
+            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." } }, "required": ["xml_path"] }
+        },
+        {
+            "name": "get_table",
+            "description": "Return one base table's full field definitions inline (type, calculation, indexing, global, stored) from a single FMSaveAsXML export. Writes nothing to disk. Use describe_database first to get table names.",
+            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." }, "table": { "type": "string", "description": "Base table name (case-insensitive)." } }, "required": ["xml_path", "table"] }
+        },
+        {
+            "name": "get_script",
+            "description": "Return a single script's .fmscript text inline, by name (case-insensitive) or '#id', from a single FMSaveAsXML export. Same rendering as inspect, but no files written. Use describe_database first to get script names.",
+            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." }, "script": { "type": "string", "description": "Script name or #id." } }, "required": ["xml_path", "script"] }
+        },
+        {
             "name": "inspect_database",
-            "description": "Parse a FileMaker FMSaveAsXML export into a navigable inspection directory (tables, fields with calc/index, layouts, table occurrences, relationships, custom functions, scripts in folders) and return counts + output paths.",
+            "description": "Parse a FileMaker FMSaveAsXML export into a navigable inspection DIRECTORY ON DISK (tables, fields with calc/index, layouts, table occurrences, relationships, custom functions, scripts in folders) and return counts + output paths. Requires filesystem access to read the result; if you have none, use describe_database / get_table / get_script instead.",
             "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." }, "output_dir": { "type": "string", "description": "Where to write the inspection (default: fm-inspect-output)." } }, "required": ["xml_path"] }
         },
         {
@@ -159,6 +174,20 @@ fn tools_call(params: Option<&Value>) -> Result<Value, RpcError> {
             cmd.command = "to_json".to_string();
             cmd.script_text = Some(arg_str(&args, "script_text")?);
         }
+        "describe_database" => {
+            cmd.command = "describe".to_string();
+            cmd.xml_path = Some(arg_str(&args, "xml_path")?);
+        }
+        "get_table" => {
+            cmd.command = "get_table".to_string();
+            cmd.xml_path = Some(arg_str(&args, "xml_path")?);
+            cmd.table = Some(arg_str(&args, "table")?);
+        }
+        "get_script" => {
+            cmd.command = "get_script".to_string();
+            cmd.xml_path = Some(arg_str(&args, "xml_path")?);
+            cmd.script = Some(arg_str(&args, "script")?);
+        }
         "inspect_database" => {
             cmd.command = "inspect".to_string();
             cmd.xml_path = Some(arg_str(&args, "xml_path")?);
@@ -206,6 +235,7 @@ fn base_command() -> Command {
         layouts: None,
         script: None,
         field: None,
+        table: None,
     }
 }
 
@@ -250,6 +280,9 @@ mod tests {
             "read_clipboard_script",
             "validate_script",
             "script_to_json",
+            "describe_database",
+            "get_table",
+            "get_script",
             "inspect_database",
             "slice_inspect",
             "audit_database",

@@ -322,6 +322,41 @@ fm-bridge who-uses-field By_00_Desk.xml "Ta_d_Ofertas::Ofe_Estado"
 
 Ambos también por JSON (`who_calls` / `who_uses_field`) y como tools MCP.
 
+### `fm-bridge describe <FMSaveAsXML.xml>`
+
+Resumen **inline** (a stdout, sin escribir a disco): conteos globales + los
+nombres de cada tabla, script, layout, custom function y archivo externo. La
+forma rápida de orientarse antes de pedir detalle — y lo que usa una IA **sin
+acceso al sistema de archivos** (donde `inspect` no sirve porque no puede leer la
+carpeta que genera).
+
+```bash
+fm-bridge describe By_12_Productos.xml
+```
+
+### `fm-bridge get-table <FMSaveAsXML.xml> <Tabla>`
+
+Imprime (JSON inline) las definiciones de campo de una tabla base: tipo,
+cálculo, indexación, global, stored. Nombre case-insensitive; si no existe,
+sugiere las coincidencias más cercanas.
+
+```bash
+fm-bridge get-table By_12_Productos.xml Productos
+```
+
+### `fm-bridge get-script <FMSaveAsXML.xml> <nombre|#id>`
+
+Imprime el `.fmscript` de un solo script (mismo formato que `read`/`inspect`),
+por nombre o por `#id`. Inline, sin escribir a disco.
+
+```bash
+fm-bridge get-script By_12_Productos.xml Gen_Abrir
+fm-bridge get-script By_12_Productos.xml "#1149"
+```
+
+Las tres también por JSON (`describe` / `get_table` / `get_script`) y como tools
+MCP (`describe_database` / `get_table` / `get_script`).
+
 ---
 
 ## 4. Workflow real

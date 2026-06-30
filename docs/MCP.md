@@ -48,7 +48,10 @@ args = `["mcp"]`.
 | `read_clipboard_script` | Lee el clipboard de FM → `.fmscript` | — |
 | `validate_script` | Linter: todos los errores de formato/estructura | `script_text` |
 | `script_to_json` | Árbol estructurado del script (steps, calcs, campos) | `script_text` |
-| `inspect_database` | Parsea un export `FMSaveAsXML` → directorio navegable + conteos | `xml_path`, `output_dir?` |
+| `describe_database` | **Inline**: conteos + nombres de tablas/scripts/layouts/CFs/externos. Primera llamada para orientarse. No escribe a disco | `xml_path` |
+| `get_table` | **Inline**: campos de una tabla (tipo, cálculo, indexación, global, stored). No escribe a disco | `xml_path`, `table` |
+| `get_script` | **Inline**: el `.fmscript` de un script por nombre o `#id`. No escribe a disco | `xml_path`, `script` |
+| `inspect_database` | Parsea un export `FMSaveAsXML` → **directorio navegable en disco** + conteos | `xml_path`, `output_dir?` |
 | `slice_inspect` | Subconjunto enfocado por layout (cierre transitivo) | `output_dir`, `slice_dir`, `layouts[]` |
 | `audit_database` | Busca **referencias rotas** (Perform Script / Go to Layout colgados, relaciones/layouts a TOs borradas, campos fantasma) | `xml_path` |
 | `who_calls` | Qué dispara un script (Perform Script, triggers, botones) | `xml_path`, `script` |
@@ -57,6 +60,13 @@ args = `["mcp"]`.
 
 Cada tool devuelve un bloque de texto con el JSON de la respuesta del motor
 (`status`, `data`, `errors`, …) e `isError` cuando el motor reporta error.
+
+> **¿Cliente MCP sin acceso a archivos?** (p. ej. Claude Desktop "pelado", sin un
+> filesystem-MCP). Entonces `inspect_database` / `slice_inspect` escriben a disco
+> pero no podés volver a leer esa carpeta. Usá las tools **inline**
+> (`describe_database` → `get_table` / `get_script`, más `audit_database`,
+> `who_calls`, `who_uses_field`): devuelven todo en la respuesta, sin tocar disco.
+> Con un solo XML eso alcanza para orientarse y razonar.
 
 ## Ejemplo de uso
 

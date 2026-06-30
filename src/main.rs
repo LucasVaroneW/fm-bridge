@@ -42,6 +42,9 @@ struct Command {
     script: Option<String>,
     #[serde(default)]
     field: Option<String>,
+    // ── inline-read param (get_table) ──
+    #[serde(default)]
+    table: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -255,6 +258,53 @@ fn handle_command(cmd: &Command) -> Response {
                 Err(e) => Response::error(e),
             }
         }
+        // Inline read tools (no disk): orient on a single XML and pull one table
+        // or one script's text without writing an inspect directory. The fix for
+        // MCP clients that have no filesystem access to read inspect output.
+        "describe" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => Response::ok_data(fmsavexml::describe(&db)),
+                Err(e) => Response::error(e),
+            }
+        }
+        "get_table" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            let table = match &cmd.table {
+                Some(t) => t,
+                None => return Response::error("No table provided".to_string()),
+            };
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => match fmsavexml::table_inline(&db, table) {
+                    Ok(v) => Response::ok_data(v),
+                    Err(e) => Response::error(e),
+                },
+                Err(e) => Response::error(e),
+            }
+        }
+        "get_script" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            let script = match &cmd.script {
+                Some(s) => s,
+                None => return Response::error("No script provided".to_string()),
+            };
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => match fmsavexml::script_text_inline(&db, script) {
+                    Ok(v) => Response::ok_data(v),
+                    Err(e) => Response::error(e),
+                },
+                Err(e) => Response::error(e),
+            }
+        }
         // Cross-reference queries (Phase 3 bug-hunting): who calls a script, and
         // where a field is used. Both parse the export, then answer structurally.
         "who_calls" => {
@@ -391,9 +441,12 @@ fn run_cli_mode() -> Result<(), String> {
         "audit" => run_audit_cli(&args[1..]),
         "who-calls" => run_who_calls_cli(&args[1..]),
         "who-uses-field" => run_who_uses_field_cli(&args[1..]),
+        "describe" => run_describe_cli(&args[1..]),
+        "get-table" => run_get_table_cli(&args[1..]),
+        "get-script" => run_get_script_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, who-calls, who-uses-field",
+            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, who-calls, who-uses-field, describe, get-table, get-script",
             args[0]
         )),
     }
@@ -543,6 +596,45 @@ fn run_who_uses_field_cli(args: &[String]) -> Result<(), String> {
     println!("{} use(s) of '{}':", report.use_count, report.field);
     for u in &report.uses {
         println!("  [{}] {} — {}", u.kind, u.location, u.detail);
+    }
+    Ok(())
+}
+
+/// `describe`: inline overview of a database (counts + names of tables,
+/// scripts, layouts, custom functions, external sources) as pretty JSON.
+fn run_describe_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("Usage: fm-bridge describe <FMSaveAsXML.xml>".to_string());
+    }
+    let db = fmsavexml::parse(&args[0])?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&fmsavexml::describe(&db)).map_err(|e| e.to_string())?
+    );
+    Ok(())
+}
+
+/// `get-table`: one table's full field definitions as pretty JSON.
+fn run_get_table_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err("Usage: fm-bridge get-table <FMSaveAsXML.xml> <TableName>".to_string());
+    }
+    let db = fmsavexml::parse(&args[0])?;
+    let table = fmsavexml::table_inline(&db, &args[1])?;
+    println!("{}", serde_json::to_string_pretty(&table).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
+/// `get-script`: one script's `.fmscript` text, by name or `#id`.
+fn run_get_script_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err("Usage: fm-bridge get-script <FMSaveAsXML.xml> <script-name|#id>".to_string());
+    }
+    let db = fmsavexml::parse(&args[0])?;
+    let data = fmsavexml::script_text_inline(&db, &args[1])?;
+    // Print just the script text for CLI ergonomics (the JSON is for the protocol).
+    if let Some(text) = data.get("script_text").and_then(|v| v.as_str()) {
+        println!("{}", text);
     }
     Ok(())
 }
@@ -803,6 +895,7 @@ mod tests {
             layouts: None,
             script: None,
             field: None,
+            table: None,
         }
     }
 
@@ -842,5 +935,77 @@ mod tests {
         let resp = handle_command(&cmd("inspect"));
         assert_eq!(resp.status, "error");
         assert!(resp.error.unwrap().contains("xml_path"));
+    }
+
+    /// Write the FIXTURE to a fresh temp file and hand its path to a callback.
+    fn with_fixture<T>(f: impl FnOnce(&str) -> T) -> T {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("fmbridge-inline-{}", nanos));
+        std::fs::create_dir_all(&dir).unwrap();
+        let xml = dir.join("export.xml");
+        std::fs::write(&xml, FIXTURE).unwrap();
+        let out = f(&xml.to_string_lossy());
+        std::fs::remove_dir_all(&dir).ok();
+        out
+    }
+
+    /// `describe` returns inline counts + names with no disk output.
+    #[test]
+    fn describe_returns_inline_overview() {
+        with_fixture(|path| {
+            let resp = handle_command(&Command {
+                xml_path: Some(path.to_string()),
+                ..cmd("describe")
+            });
+            assert_eq!(resp.status, "ok");
+            let data = resp.data.unwrap();
+            assert_eq!(data["file_name"], "Test.fmp12");
+            assert_eq!(data["counts"]["tables"], 1);
+            assert_eq!(data["tables"][0]["name"], "Contacts");
+            assert_eq!(data["scripts"][0]["name"], "DoThing");
+        });
+    }
+
+    /// `get_table` returns one table's fields inline; a miss suggests near matches.
+    #[test]
+    fn get_table_returns_fields_and_suggests_on_miss() {
+        with_fixture(|path| {
+            let ok = handle_command(&Command {
+                xml_path: Some(path.to_string()),
+                table: Some("contacts".to_string()), // case-insensitive
+                ..cmd("get_table")
+            });
+            assert_eq!(ok.status, "ok");
+            assert_eq!(ok.data.unwrap()["fields"][0]["name"], "Name");
+
+            let miss = handle_command(&Command {
+                xml_path: Some(path.to_string()),
+                table: Some("Contact".to_string()),
+                ..cmd("get_table")
+            });
+            assert_eq!(miss.status, "error");
+            assert!(miss.error.unwrap().contains("Contacts"));
+        });
+    }
+
+    /// `get_script` renders one script's .fmscript text inline, by name or #id.
+    #[test]
+    fn get_script_returns_text_by_name_and_id() {
+        with_fixture(|path| {
+            for q in ["DoThing", "#10"] {
+                let resp = handle_command(&Command {
+                    xml_path: Some(path.to_string()),
+                    script: Some(q.to_string()),
+                    ..cmd("get_script")
+                });
+                assert_eq!(resp.status, "ok", "query {}", q);
+                let data = resp.data.unwrap();
+                assert_eq!(data["name"], "DoThing");
+                assert!(data["script_text"].as_str().unwrap().contains("hi"));
+            }
+        });
     }
 }

@@ -2,7 +2,7 @@
   "name": "fm-bridge",
   "displayName": "fm-bridge — FileMaker scripts",
   "description": "Edit FileMaker scripts as plain-text .fmscript files: syntax highlighting, snippets, clipboard read/write, diagnostics and step autocomplete. Backed by the fm-bridge Rust binary.",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "publisher": "lucasvarone",
   "license": "MIT",
   "repository": {
@@ -77,6 +77,16 @@
       {
         "command": "fm-bridge.copyMcpConfig",
         "title": "Set up MCP for an AI agent",
+        "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.formatInline",
+        "title": "Format inline (1 line per step, matches FileMaker)",
+        "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.formatIndented",
+        "title": "Format indented (readable multi-line)",
         "category": "fm-bridge"
       },
       {

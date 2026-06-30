@@ -111,6 +111,7 @@ binario, args = `["mcp"]`.
 | `describe_database` | **Inline**: conteos + nombres de tablas/scripts/layouts/CFs/externos. Primera llamada para orientarse. No escribe a disco | `xml_path` |
 | `get_table` | **Inline**: campos de una tabla (tipo, cálculo, indexación, global, stored). No escribe a disco | `xml_path`, `table` |
 | `get_script` | **Inline**: el `.fmscript` de un script por nombre o `#id`. No escribe a disco | `xml_path`, `script` |
+| `get_layout` | **Inline**: estructura de un layout (objetos, campos, portales, tooltips, **URL de web viewers**, triggers) por nombre o `#id`. No escribe a disco | `xml_path`, `layout` |
 | `inspect_database` | Parsea un export `FMSaveAsXML` → **directorio navegable en disco** + conteos | `xml_path`, `output_dir?` |
 | `slice_inspect` | Subconjunto enfocado por layout (cierre transitivo) | `output_dir`, `slice_dir`, `layouts[]` |
 | `audit_database` | Busca **referencias rotas** (Perform Script / Go to Layout colgados, relaciones/layouts a TOs borradas, campos fantasma) | `xml_path` |

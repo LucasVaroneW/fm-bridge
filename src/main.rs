@@ -11,6 +11,7 @@ mod normalization;
 #[cfg(windows)]
 mod ole_clipboard;
 mod slice;
+mod step_dsl;
 mod steps;
 mod text_format;
 mod xmss;
@@ -42,9 +43,14 @@ struct Command {
     script: Option<String>,
     #[serde(default)]
     field: Option<String>,
-    // ── inline-read param (get_table) ──
+    // ── inline-read params (get_table / get_layout) ──
     #[serde(default)]
     table: Option<String>,
+    #[serde(default)]
+    layout: Option<String>,
+    // ── format style (reformat): "inline" | "indented" ──
+    #[serde(default)]
+    style: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -185,6 +191,25 @@ fn handle_command(cmd: &Command) -> Response {
                 Err(pe) => Response::errors(vec![pe]),
             }
         }
+        // Re-render a script in a different style without touching the clipboard.
+        // `style` = "inline" (one line per step, matches FileMaker line numbers)
+        // or "indented" (readable multi-line DSL, the default). Side-effect free.
+        "reformat" => {
+            let script_text = match &cmd.script_text {
+                Some(t) => t,
+                None => return Response::error("No script_text provided".to_string()),
+            };
+            let style = match cmd.style.as_deref() {
+                Some("inline") => text_format::FormatStyle::Inline,
+                _ => text_format::FormatStyle::Indented,
+            };
+            match text_format::parse_text_to_script(script_text) {
+                Ok(script) => {
+                    Response::ok_text(text_format::format_script_with(&script, style))
+                }
+                Err(pe) => Response::errors(vec![pe]),
+            }
+        }
         "write" => {
             let script_text = match &cmd.script_text {
                 Some(t) => t,
@@ -299,6 +324,23 @@ fn handle_command(cmd: &Command) -> Response {
             };
             match fmsavexml::parse(xml_path) {
                 Ok(db) => match fmsavexml::script_text_inline(&db, script) {
+                    Ok(v) => Response::ok_data(v),
+                    Err(e) => Response::error(e),
+                },
+                Err(e) => Response::error(e),
+            }
+        }
+        "get_layout" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            let layout = match &cmd.layout {
+                Some(l) => l,
+                None => return Response::error("No layout provided".to_string()),
+            };
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => match fmsavexml::layout_inline(&db, layout) {
                     Ok(v) => Response::ok_data(v),
                     Err(e) => Response::error(e),
                 },
@@ -441,9 +483,11 @@ fn run_cli_mode() -> Result<(), String> {
         "audit" => run_audit_cli(&args[1..]),
         "who-calls" => run_who_calls_cli(&args[1..]),
         "who-uses-field" => run_who_uses_field_cli(&args[1..]),
+        "reformat" => run_reformat_cli(&args[1..]),
         "describe" => run_describe_cli(&args[1..]),
         "get-table" => run_get_table_cli(&args[1..]),
         "get-script" => run_get_script_cli(&args[1..]),
+        "get-layout" => run_get_layout_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
             "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, who-calls, who-uses-field, describe, get-table, get-script",
@@ -600,6 +644,32 @@ fn run_who_uses_field_cli(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// `reformat`: re-render a .fmscript in `inline` or `indented` style. Prints to
+/// stdout, or writes to a third-arg file. Round-trips to the same clipboard XML.
+fn run_reformat_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err(
+            "Usage: fm-bridge reformat <file.fmscript> <inline|indented> [out.fmscript]"
+                .to_string(),
+        );
+    }
+    let style = match args[1].as_str() {
+        "inline" => text_format::FormatStyle::Inline,
+        "indented" | "indent" => text_format::FormatStyle::Indented,
+        other => return Err(format!("Unknown style '{}'. Use inline or indented.", other)),
+    };
+    let text = read_file_to_string(&args[0])?;
+    let script = text_format::parse_text_to_script(&text).map_err(|e| e.to_string())?;
+    let out = text_format::format_script_with(&script, style);
+    if let Some(path) = args.get(2) {
+        std::fs::write(path, &out).map_err(|e| e.to_string())?;
+        println!("Wrote {}", path);
+    } else {
+        println!("{}", out);
+    }
+    Ok(())
+}
+
 /// `describe`: inline overview of a database (counts + names of tables,
 /// scripts, layouts, custom functions, external sources) as pretty JSON.
 fn run_describe_cli(args: &[String]) -> Result<(), String> {
@@ -622,6 +692,18 @@ fn run_get_table_cli(args: &[String]) -> Result<(), String> {
     let db = fmsavexml::parse(&args[0])?;
     let table = fmsavexml::table_inline(&db, &args[1])?;
     println!("{}", serde_json::to_string_pretty(&table).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
+/// `get-layout`: one layout's full structure (objects, fields, web viewer URLs,
+/// triggers) as pretty JSON, by name or `#id`.
+fn run_get_layout_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err("Usage: fm-bridge get-layout <FMSaveAsXML.xml> <layout-name|#id>".to_string());
+    }
+    let db = fmsavexml::parse(&args[0])?;
+    let data = fmsavexml::layout_inline(&db, &args[1])?;
+    println!("{}", serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?);
     Ok(())
 }
 
@@ -896,6 +978,8 @@ mod tests {
             script: None,
             field: None,
             table: None,
+            layout: None,
+            style: None,
         }
     }
 

@@ -74,6 +74,11 @@ pub struct LayoutObjectRef {
     /// Tooltip text (calculation expression; usually a literal string).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<String>,
+    /// For Web Viewer objects: the web address / source calculation (Parameter
+    /// id="0"). Often a field reference (the viewer shows that field's HTML) or
+    /// a URL expression. Captured so it isn't lost in the schema view.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_viewer_url: Option<String>,
     /// ScriptTriggers attached to this object — "hidden" functionality that
     /// fires on user interactions with this control.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -385,6 +390,9 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
     let mut in_tooltip: bool = false;
     let mut tooltip_calc_start: Option<usize> = None;
     let mut tooltip_calc_depth: u32 = 0;
+    let mut in_webviewer: bool = false;
+    let mut webviewer_calc_start: Option<usize> = None;
+    let mut webviewer_calc_depth: u32 = 0;
 
     // Tables / Fields state
     let mut cur_table: Option<TableInfo> = None;
@@ -670,6 +678,17 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 } else if in_tooltip && local == b"Calculation" {
                                     tooltip_calc_start = Some(reader.buffer_position() as usize);
                                     tooltip_calc_depth = depth;
+                                } else if local == b"WebViewer" {
+                                    in_webviewer = true;
+                                } else if in_webviewer
+                                    && local == b"Calculation"
+                                    && webviewer_calc_start.is_none()
+                                    && o.web_viewer_url.is_none()
+                                {
+                                    // First Calculation inside <WebViewer> = the web
+                                    // address (Parameter id="0"); ignore later params.
+                                    webviewer_calc_start = Some(reader.buffer_position() as usize);
+                                    webviewer_calc_depth = depth;
                                 }
                             }
                             // Hidden flag from Options on the Layout itself.
@@ -889,6 +908,12 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                         b"cascadeDelete" => {
                                             r.left_cascade_delete = &attr.value[..] == b"True"
                                         }
+                                        // The TO name lives on the element here (some
+                                        // FMSaveAsXML dialects) vs a nested
+                                        // <TableOccurrenceReference> (others, below).
+                                        b"name" if r.left_to.is_empty() => {
+                                            r.left_to = attr_text(&attr)
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -901,6 +926,9 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                         }
                                         b"cascadeDelete" => {
                                             r.right_cascade_delete = &attr.value[..] == b"True"
+                                        }
+                                        b"name" if r.right_to.is_empty() => {
+                                            r.right_to = attr_text(&attr)
                                         }
                                         _ => {}
                                     }
@@ -935,11 +963,31 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 }
                             } else if local == b"FieldReference" {
                                 let (_, name) = parse_id_name_attrs(e);
+                                // Legacy FMSaveAsXML (older FileMaker) carries the TO
+                                // as a `tableOccurrence` attribute on FieldReference
+                                // instead of a nested <TableOccurrenceReference>.
+                                let to_attr = e.attributes().flatten().find_map(|a| {
+                                    if matches!(a.key.as_ref(), b"tableOccurrence" | b"baseTable") {
+                                        Some(attr_text(&a))
+                                    } else {
+                                        None
+                                    }
+                                });
                                 if let Some(p) = cur_predicate.as_mut() {
                                     if in_left_field && p.left_field.is_empty() {
                                         p.left_field = name;
+                                        if p.left_to.is_empty() {
+                                            if let Some(to) = to_attr {
+                                                p.left_to = to;
+                                            }
+                                        }
                                     } else if in_right_field && p.right_field.is_empty() {
                                         p.right_field = name;
+                                        if p.right_to.is_empty() {
+                                            if let Some(to) = to_attr {
+                                                p.right_to = to;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1070,6 +1118,8 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             in_button_action = false;
                         } else if local == b"Tooltip" {
                             in_tooltip = false;
+                        } else if local == b"WebViewer" {
+                            in_webviewer = false;
                         } else if local == b"Calculation"
                             && in_tooltip
                             && depth == tooltip_calc_depth
@@ -1079,6 +1129,20 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             {
                                 let inner = &xml_str[start..pos_before];
                                 o.tooltip = Some(extract_cdata_or_text(inner));
+                            }
+                        } else if local == b"Calculation"
+                            && in_webviewer
+                            && webviewer_calc_start.is_some()
+                            && depth == webviewer_calc_depth
+                        {
+                            if let (Some(start), Some((o, _))) =
+                                (webviewer_calc_start.take(), object_stack.last_mut())
+                            {
+                                let inner = &xml_str[start..pos_before];
+                                let body = extract_cdata_or_text(inner);
+                                if !body.is_empty() {
+                                    o.web_viewer_url = Some(body);
+                                }
                             }
                         } else if local == b"Calculation"
                             && in_trigger_calc
@@ -1229,7 +1293,20 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 }
                             }
                         } else if local == b"Relationship" {
-                            if let Some(r) = cur_rel.take() {
+                            if let Some(mut r) = cur_rel.take() {
+                                // Legacy format has no <LeftTable>/<RightTable> TO
+                                // refs; derive the relationship's TOs from the first
+                                // predicate (whose TOs we read off FieldReference).
+                                if r.left_to.is_empty() || r.right_to.is_empty() {
+                                    if let Some(p) = r.predicates.first() {
+                                        if r.left_to.is_empty() {
+                                            r.left_to = p.left_to.clone();
+                                        }
+                                        if r.right_to.is_empty() {
+                                            r.right_to = p.right_to.clone();
+                                        }
+                                    }
+                                }
                                 relationships.push(r);
                             }
                         }
@@ -1441,6 +1518,27 @@ pub fn table_inline(db: &ParsedDatabase, name: &str) -> Result<serde_json::Value
         return Ok(serde_json::to_value(t).unwrap_or(serde_json::Value::Null));
     }
     Err(not_found("Table", name, db.tables.iter().map(|t| t.name.as_str())))
+}
+
+/// One layout's full structure inline (base TO, recursive objects incl. fields,
+/// buttons→script, portals, tooltips, **web viewer URLs**, triggers), by name
+/// (case-insensitive) or `#id`. The same data inspect writes to
+/// `layouts/<id>_<name>.json`, but without touching disk.
+pub fn layout_inline(db: &ParsedDatabase, query: &str) -> Result<serde_json::Value, String> {
+    let by_id = query.strip_prefix('#').and_then(|n| n.trim().parse::<u32>().ok());
+    let found = db.layouts.iter().find(|l| match by_id {
+        Some(id) => l.id == id,
+        None => l.name.eq_ignore_ascii_case(query),
+    });
+    match found {
+        Some(l) if !l.is_folder => Ok(serde_json::to_value(l).unwrap_or(serde_json::Value::Null)),
+        Some(_) => Err(format!("'{}' is a layout folder, not a layout.", query)),
+        None => Err(not_found(
+            "Layout",
+            query,
+            db.layouts.iter().filter(|l| !l.is_folder).map(|l| l.name.as_str()),
+        )),
+    }
 }
 
 /// A single script's `.fmscript` text — the exact rendering `inspect` writes to
@@ -1890,6 +1988,12 @@ fn build_mermaid_diagram(rels: &[Relationship], tos: &[TableOccurrence]) -> Stri
     let mut used: HashSet<String> = HashSet::new();
 
     for r in rels {
+        // Skip edges with no endpoints — a blank entity name is invalid Mermaid
+        // (the diagram silently fails to render). Shouldn't happen now that TO
+        // names parse, but stay defensive.
+        if r.left_to.is_empty() || r.right_to.is_empty() {
+            continue;
+        }
         used.insert(r.left_to.clone());
         used.insert(r.right_to.clone());
         out.push_str(&format!(
@@ -2532,6 +2636,54 @@ mod tests {
                 .join("0010_Inside.fmscript")
                 .exists()
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A Web Viewer object's address calculation (Parameter id="0") is captured
+    /// and surfaced both in the layout JSON and via `layout_inline`.
+    #[test]
+    fn web_viewer_url_is_captured() {
+        let fixture = r#"<FMSaveAsXML File="T.fmp12">
+  <LayoutCatalog>
+    <Layout id="100" name="Dash" width="800">
+      <PartsList>
+        <Part>
+          <ObjectList>
+            <LayoutObject type="Web Viewer" name="wv">
+              <Bounds top="0" left="0" bottom="100" right="100"></Bounds>
+              <External type="WEBV" name="Web Viewer">
+                <WebViewer>
+                  <ParameterValues membercount="1">
+                    <Parameter id="0">
+                      <Calculation><Text><![CDATA["http://x/" & Tab::Field]]></Text></Calculation>
+                    </Parameter>
+                  </ParameterValues>
+                </WebViewer>
+              </External>
+            </LayoutObject>
+          </ObjectList>
+        </Part>
+      </PartsList>
+    </Layout>
+  </LayoutCatalog>
+</FMSaveAsXML>"#;
+        let dir = temp_dir("webviewer");
+        let xml = dir.join("export.xml");
+        std::fs::write(&xml, fixture).unwrap();
+        let db = parse(xml.to_str().unwrap()).unwrap();
+
+        let layout = db.layouts.iter().find(|l| l.name == "Dash").unwrap();
+        let wv = layout
+            .objects
+            .iter()
+            .find(|o| o.object_type == "Web Viewer")
+            .unwrap();
+        assert_eq!(wv.web_viewer_url.as_deref(), Some("\"http://x/\" & Tab::Field"));
+
+        let j = layout_inline(&db, "dash").unwrap(); // case-insensitive
+        assert!(j.to_string().contains("web_viewer_url"));
+        assert!(layout_inline(&db, "nope").is_err());
+
         std::fs::remove_dir_all(&dir).ok();
     }
 

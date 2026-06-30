@@ -113,6 +113,11 @@ fn tools_list_result() -> Value {
             "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." }, "script": { "type": "string", "description": "Script name or #id." } }, "required": ["xml_path", "script"] }
         },
         {
+            "name": "get_layout",
+            "description": "Return one layout's full structure inline, by name (case-insensitive) or '#id': base table occurrence, recursive objects (fields, buttons→script, portals with their contents), tooltips, web viewer URL/source calculations, and object + layout script triggers. No files written. Use describe_database first to get layout names.",
+            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." }, "layout": { "type": "string", "description": "Layout name or #id." } }, "required": ["xml_path", "layout"] }
+        },
+        {
             "name": "inspect_database",
             "description": "Parse a FileMaker FMSaveAsXML export into a navigable inspection DIRECTORY ON DISK (tables, fields with calc/index, layouts, table occurrences, relationships, custom functions, scripts in folders) and return counts + output paths. Requires filesystem access to read the result; if you have none, use describe_database / get_table / get_script instead.",
             "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." }, "output_dir": { "type": "string", "description": "Where to write the inspection (default: fm-inspect-output)." } }, "required": ["xml_path"] }
@@ -188,6 +193,11 @@ fn tools_call(params: Option<&Value>) -> Result<Value, RpcError> {
             cmd.xml_path = Some(arg_str(&args, "xml_path")?);
             cmd.script = Some(arg_str(&args, "script")?);
         }
+        "get_layout" => {
+            cmd.command = "get_layout".to_string();
+            cmd.xml_path = Some(arg_str(&args, "xml_path")?);
+            cmd.layout = Some(arg_str(&args, "layout")?);
+        }
         "inspect_database" => {
             cmd.command = "inspect".to_string();
             cmd.xml_path = Some(arg_str(&args, "xml_path")?);
@@ -236,6 +246,8 @@ fn base_command() -> Command {
         script: None,
         field: None,
         table: None,
+        layout: None,
+        style: None,
     }
 }
 
@@ -283,6 +295,7 @@ mod tests {
             "describe_database",
             "get_table",
             "get_script",
+            "get_layout",
             "inspect_database",
             "slice_inspect",
             "audit_database",

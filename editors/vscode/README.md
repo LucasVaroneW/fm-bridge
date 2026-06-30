@@ -68,7 +68,24 @@ How it finds the binary, in order:
 | `fm-bridge.inspectXml` | fm-bridge: Inspect FMSaveAsXML export |
 | `fm-bridge.slice` | fm-bridge: Slice inspect output around layouts |
 | `fm-bridge.copyMcpConfig` | fm-bridge: Set up MCP for an AI agent |
+| `fm-bridge.formatInline` | fm-bridge: Format inline (1 line per step, matches FileMaker) |
+| `fm-bridge.formatIndented` | fm-bridge: Format indented (readable multi-line) |
 | `fm-bridge.showLog` | fm-bridge: Show log |
+
+**Inline vs indented:** multi-field steps (Import Records, Commit Records, Go to
+Related Record) render across several lines for readability. That makes a
+`.fmscript` line number drift from FileMaker's, where every step is one line.
+**Format inline** collapses each such step back to a single line so the numbers
+line up 1:1 (handy when chasing "line 1500" across both); **Format indented**
+restores the readable view.
+
+Multi-line **calculations** (a `Set Variable` with a long `Let(…)`, an `If`
+calc, etc.) are also collapsed by **Format inline**. Because a FileMaker `//`
+comment runs to the end of its line, collapsing to one line would make it
+swallow whatever follows — so inline rewrites each `// note` as the equivalent
+`/* note */` block comment. The calculation stays semantically identical and
+still pastes correctly; the one caveat is that this `//`→`/* */` change isn't
+reversed when you go back to indented (the comment stays a block comment).
 
 `Write` is also available as a button in the editor title bar for `.fmscript`
 files.
@@ -151,7 +168,7 @@ that works on macOS arm64/x64, Windows and Linux):
 Install the resulting `.vsix`:
 
 ```bash
-code --install-extension fm-bridge-0.1.1.vsix
+code --install-extension fm-bridge-0.1.3.vsix
 ```
 
 or in VS Code: **Extensions** panel → `…` menu → **Install from VSIX…**
@@ -163,7 +180,7 @@ Antigravity is a VS Code fork, so the same `.vsix` works there too — but its
 
 ```bash
 "/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide" \
-  --install-extension fm-bridge-0.1.1.vsix
+  --install-extension fm-bridge-0.1.3.vsix
 ```
 
 or from the GUI: **Extensions** panel → `…` menu → **Install from VSIX…**.

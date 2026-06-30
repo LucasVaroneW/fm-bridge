@@ -67,6 +67,21 @@ fn build_dsl(xml: &str) -> Option<String> {
         element_inner(xml, "UniversalPathList")?
     ));
     lines.push(format!("Profile: {}", element_attrs(xml, "Profile")?));
+    // A "File" source (importing from another FM file) nests a <List> of source
+    // <InputField> ids inside <Profile>. Capture it compactly so the step still
+    // round-trips; without this the nested List was dropped and the step fell
+    // back to raw XML. If the inner markup isn't exactly that List shape, bail
+    // (return None) so we keep the verbatim XML rather than risk a lossy edit.
+    let profile_inner = element_inner(xml, "Profile")?;
+    if !profile_inner.trim().is_empty() {
+        let list_attrs = element_attrs(profile_inner, "List")?;
+        let list_inner = element_inner(profile_inner, "List")?;
+        let ids: Vec<&str> = iter_tags(list_inner, "InputField")
+            .map(|t| tag_attr(t, "id"))
+            .collect::<Option<Vec<_>>>()?;
+        // Reject if there's markup we didn't account for (gate will also catch it).
+        lines.push(format!("SourceList: {} fields={}", list_attrs, ids.join(",")));
+    }
     lines.push(format!("Options: {}", element_attrs(xml, "ImportOptions")?));
 
     let table_id = element_attr(xml, "Table", "id")?;
@@ -100,6 +115,7 @@ pub fn dsl_to_xml(dsl: &str) -> Option<String> {
     let mut source = None;
     let mut path = None;
     let mut profile = None;
+    let mut source_list = None;
     let mut options = None;
     let mut target_name = None;
     let mut target_id = None;
@@ -135,6 +151,7 @@ pub fn dsl_to_xml(dsl: &str) -> Option<String> {
             "Source" => source = Some(value.to_string()),
             "Path" => path = Some(value.to_string()),
             "Profile" => profile = Some(value.to_string()),
+            "SourceList" => source_list = Some(value.to_string()),
             "Options" => options = Some(value.to_string()),
             "Target" => {
                 let hash = value.rfind(" #")?;
@@ -157,7 +174,22 @@ pub fn dsl_to_xml(dsl: &str) -> Option<String> {
         "<DataSourceType value=\"{}\"></DataSourceType>",
         source?
     ));
-    xml.push_str(&format!("<Profile {}></Profile>", profile?));
+    match &source_list {
+        // `<attrs> fields=1,2,3` → <Profile attrs><List attrs><InputField…/></List></Profile>
+        Some(sl) => {
+            let (list_attrs, fields) = sl.rsplit_once(" fields=")?;
+            let inputs: String = fields
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(|id| format!("<InputField id=\"{}\"></InputField>", id))
+                .collect();
+            xml.push_str(&format!(
+                "<Profile {}><List {}>{}</List></Profile>",
+                profile?, list_attrs, inputs
+            ));
+        }
+        None => xml.push_str(&format!("<Profile {}></Profile>", profile?)),
+    }
     xml.push_str(&format!("<UniversalPathList>{}</UniversalPathList>", path?));
     xml.push_str(&format!("<ImportOptions {}></ImportOptions>", options?));
     xml.push_str(&format!(
@@ -178,7 +210,7 @@ pub fn dsl_to_xml(dsl: &str) -> Option<String> {
 // ─── tiny XML helpers (string-level; the payload is flat and well-formed) ─────
 
 /// Attribute string of the first `<Tag ...>`: everything between `<Tag ` and `>`.
-fn element_attrs<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+pub(crate) fn element_attrs<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
     let open = format!("<{} ", tag);
     let start = xml.find(&open)? + open.len();
     let end = xml[start..].find('>')? + start;
@@ -187,7 +219,7 @@ fn element_attrs<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
 }
 
 /// A single attribute value from the first `<Tag ...>`.
-fn element_attr<'a>(xml: &'a str, tag: &str, attr: &str) -> Option<&'a str> {
+pub(crate) fn element_attr<'a>(xml: &'a str, tag: &str, attr: &str) -> Option<&'a str> {
     let open = format!("<{} ", tag);
     let start = xml.find(&open)?;
     let end = xml[start..].find('>')? + start + 1;
@@ -195,7 +227,7 @@ fn element_attr<'a>(xml: &'a str, tag: &str, attr: &str) -> Option<&'a str> {
 }
 
 /// Inner text/markup between `<Tag>`/`<Tag ...>` and `</Tag>`.
-fn element_inner<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+pub(crate) fn element_inner<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
     let open = format!("<{}", tag);
     let p = xml.find(&open)?;
     let inner_start = xml[p..].find('>')? + p + 1;
@@ -205,7 +237,7 @@ fn element_inner<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
 }
 
 /// Read an attribute value from a single tag like `<Field a="1" b="2">`.
-fn tag_attr<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
+pub(crate) fn tag_attr<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
     let needle = format!(" {}=\"", attr);
     let start = tag.find(&needle)? + needle.len();
     let end = tag[start..].find('"')? + start;

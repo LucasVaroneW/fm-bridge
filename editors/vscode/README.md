@@ -68,7 +68,16 @@ How it finds the binary, in order:
 | `fm-bridge.inspectXml` | fm-bridge: Inspect FMSaveAsXML export |
 | `fm-bridge.slice` | fm-bridge: Slice inspect output around layouts |
 | `fm-bridge.copyMcpConfig` | fm-bridge: Set up MCP for an AI agent |
+| `fm-bridge.formatInline` | fm-bridge: Format inline (1 line per step, matches FileMaker) |
+| `fm-bridge.formatIndented` | fm-bridge: Format indented (readable multi-line) |
 | `fm-bridge.showLog` | fm-bridge: Show log |
+
+**Inline vs indented:** multi-field steps (Import Records, Commit Records, Go to
+Related Record) render across several lines for readability. That makes a
+`.fmscript` line number drift from FileMaker's, where every step is one line.
+**Format inline** collapses each such step back to a single line so the numbers
+line up 1:1 (handy when chasing "line 1500" across both); **Format indented**
+restores the readable view. Both round-trip to the exact same clipboard.
 
 `Write` is also available as a button in the editor title bar for `.fmscript`
 files.

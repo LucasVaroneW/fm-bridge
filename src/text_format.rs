@@ -5,17 +5,37 @@
 use crate::steps::{self, StepShape};
 use crate::xmss::{FmScript, ScriptStep};
 
-/// Format a script as plain text for display/editing.
+/// How to render multi-field opaque steps (Import/Commit/Go to Related Record).
+/// `Indented` spreads the DSL over several lines for readability; `Inline` keeps
+/// the whole step on one line so `.fmscript` line numbers line up 1:1 with
+/// FileMaker's Script Workspace. Both round-trip to the same clipboard.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FormatStyle {
+    Indented,
+    Inline,
+}
+
+/// Format a script as plain text for display/editing (indented DSL).
 pub fn format_script(script: &FmScript) -> String {
+    format_script_with(script, FormatStyle::Indented)
+}
+
+/// Format a script in the requested style.
+pub fn format_script_with(script: &FmScript, style: FormatStyle) -> String {
     let mut lines = Vec::new();
     for step in &script.steps {
-        lines.push(format_step(step));
+        lines.push(format_step_with(step, style));
     }
     lines.join("\n")
 }
 
 /// Format a single step as a text line (possibly multiline for calculations).
 pub fn format_step(step: &ScriptStep) -> String {
+    format_step_with(step, FormatStyle::Indented)
+}
+
+/// Format a single step in the requested style.
+pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
     let indent = "  ".repeat(step.indent_level as usize);
 
     // Comments are special: "# text".
@@ -399,6 +419,17 @@ pub fn format_step(step: &ScriptStep) -> String {
                     // exactly (else keep the verbatim XML so we never lose data).
                     let dsl = crate::step_dsl::to_dsl(&step.name, trimmed);
                     match dsl {
+                        Some(dsl) if style == FormatStyle::Inline => {
+                            // One line: join the DSL fields with " | " so the step
+                            // occupies a single .fmscript line (matches FileMaker's
+                            // line numbering). parse_text splits " | " back out.
+                            let one: String = dsl
+                                .lines()
+                                .map(str::trim)
+                                .collect::<Vec<_>>()
+                                .join(" | ");
+                            line.push_str(&format!(" [{}]", one));
+                        }
                         Some(dsl) => {
                             // Indent the DSL block under the step for readability;
                             // parse_text trims each line, so it's purely cosmetic.

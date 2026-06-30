@@ -216,6 +216,18 @@ export async function parseScript(scriptText: string): Promise<BridgeResponse> {
   return runJson({ command: "parse", script_text: scriptText });
 }
 
+/**
+ * Re-render a .fmscript in a different style without touching the clipboard.
+ * "inline" = one line per step (line numbers match FileMaker); "indented" =
+ * readable multi-line DSL. Both round-trip to the same clipboard XML.
+ */
+export async function reformat(
+  scriptText: string,
+  style: "inline" | "indented",
+): Promise<BridgeResponse> {
+  return runJson({ command: "reformat", script_text: scriptText, style });
+}
+
 /** Fetch the binary's version (also used as a reachability probe). */
 export async function version(): Promise<BridgeResponse> {
   return runJson({ command: "version" });

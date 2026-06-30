@@ -80,6 +80,16 @@
         "category": "fm-bridge"
       },
       {
+        "command": "fm-bridge.formatInline",
+        "title": "Format inline (1 line per step, matches FileMaker)",
+        "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.formatIndented",
+        "title": "Format indented (readable multi-line)",
+        "category": "fm-bridge"
+      },
+      {
         "command": "fm-bridge.showLog",
         "title": "Show log",
         "category": "fm-bridge"

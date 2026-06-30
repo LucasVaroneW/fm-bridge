@@ -236,6 +236,7 @@ fn base_command() -> Command {
         script: None,
         field: None,
         table: None,
+        style: None,
     }
 }
 

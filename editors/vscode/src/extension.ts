@@ -13,6 +13,7 @@ import {
   BinaryNotFoundError,
   parseScript,
   readClipboard,
+  reformat,
   resetBinaryCache,
   resolveBinaryPath,
   writeClipboard,
@@ -52,6 +53,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       "fm-bridge.copyMcpConfig",
       copyMcpConfigCommand,
+    ),
+    vscode.commands.registerCommand("fm-bridge.formatInline", () =>
+      reformatActive("inline"),
+    ),
+    vscode.commands.registerCommand("fm-bridge.formatIndented", () =>
+      reformatActive("indented"),
     ),
     vscode.commands.registerCommand("fm-bridge.showLog", () => output?.show()),
     vscode.languages.registerCompletionItemProvider(
@@ -118,6 +125,33 @@ async function writeToClipboard(): Promise<void> {
       return;
     }
     await showWriteError(editor, resp.error, resp.error_line);
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+/**
+ * Re-render the active .fmscript in the given style (inline = one line per step
+ * so line numbers match FileMaker; indented = readable multi-line) and replace
+ * the document in place. Side-effect free on the clipboard.
+ */
+async function reformatActive(style: "inline" | "indented"): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== LANGUAGE) {
+    void vscode.window.showErrorMessage("fm-bridge: open a .fmscript file first.");
+    return;
+  }
+  try {
+    const resp = await reformat(editor.document.getText(), style);
+    if (resp.status !== "ok" || resp.script_text === undefined) {
+      await showWriteError(editor, resp.error, resp.error_line);
+      return;
+    }
+    const full = new vscode.Range(
+      editor.document.positionAt(0),
+      editor.document.positionAt(editor.document.getText().length),
+    );
+    await editor.edit((e) => e.replace(full, resp.script_text as string));
   } catch (err) {
     reportError(err);
   }

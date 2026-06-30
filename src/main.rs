@@ -46,6 +46,9 @@ struct Command {
     // ── inline-read param (get_table) ──
     #[serde(default)]
     table: Option<String>,
+    // ── format style (reformat): "inline" | "indented" ──
+    #[serde(default)]
+    style: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -182,6 +185,25 @@ fn handle_command(cmd: &Command) -> Response {
             match text_format::parse_text_to_script(script_text) {
                 Ok(script) => {
                     Response::ok_data(serde_json::to_value(&script).unwrap_or(serde_json::Value::Null))
+                }
+                Err(pe) => Response::errors(vec![pe]),
+            }
+        }
+        // Re-render a script in a different style without touching the clipboard.
+        // `style` = "inline" (one line per step, matches FileMaker line numbers)
+        // or "indented" (readable multi-line DSL, the default). Side-effect free.
+        "reformat" => {
+            let script_text = match &cmd.script_text {
+                Some(t) => t,
+                None => return Response::error("No script_text provided".to_string()),
+            };
+            let style = match cmd.style.as_deref() {
+                Some("inline") => text_format::FormatStyle::Inline,
+                _ => text_format::FormatStyle::Indented,
+            };
+            match text_format::parse_text_to_script(script_text) {
+                Ok(script) => {
+                    Response::ok_text(text_format::format_script_with(&script, style))
                 }
                 Err(pe) => Response::errors(vec![pe]),
             }
@@ -442,6 +464,7 @@ fn run_cli_mode() -> Result<(), String> {
         "audit" => run_audit_cli(&args[1..]),
         "who-calls" => run_who_calls_cli(&args[1..]),
         "who-uses-field" => run_who_uses_field_cli(&args[1..]),
+        "reformat" => run_reformat_cli(&args[1..]),
         "describe" => run_describe_cli(&args[1..]),
         "get-table" => run_get_table_cli(&args[1..]),
         "get-script" => run_get_script_cli(&args[1..]),
@@ -597,6 +620,32 @@ fn run_who_uses_field_cli(args: &[String]) -> Result<(), String> {
     println!("{} use(s) of '{}':", report.use_count, report.field);
     for u in &report.uses {
         println!("  [{}] {} — {}", u.kind, u.location, u.detail);
+    }
+    Ok(())
+}
+
+/// `reformat`: re-render a .fmscript in `inline` or `indented` style. Prints to
+/// stdout, or writes to a third-arg file. Round-trips to the same clipboard XML.
+fn run_reformat_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err(
+            "Usage: fm-bridge reformat <file.fmscript> <inline|indented> [out.fmscript]"
+                .to_string(),
+        );
+    }
+    let style = match args[1].as_str() {
+        "inline" => text_format::FormatStyle::Inline,
+        "indented" | "indent" => text_format::FormatStyle::Indented,
+        other => return Err(format!("Unknown style '{}'. Use inline or indented.", other)),
+    };
+    let text = read_file_to_string(&args[0])?;
+    let script = text_format::parse_text_to_script(&text).map_err(|e| e.to_string())?;
+    let out = text_format::format_script_with(&script, style);
+    if let Some(path) = args.get(2) {
+        std::fs::write(path, &out).map_err(|e| e.to_string())?;
+        println!("Wrote {}", path);
+    } else {
+        println!("{}", out);
     }
     Ok(())
 }
@@ -897,6 +946,7 @@ mod tests {
             script: None,
             field: None,
             table: None,
+            style: None,
         }
     }
 

@@ -29,7 +29,11 @@ pub fn to_dsl(step_name: &str, xml: &str) -> Option<String> {
 }
 
 /// Rebuild the inner XML from a step's DSL, or `None` if it isn't ours/malformed.
+/// Accepts both the indented (newline-separated) and inline (" | "-separated)
+/// forms — the inline form is normalized to lines first.
 pub fn from_dsl(step_name: &str, dsl: &str) -> Option<String> {
+    let normalized = dsl.replace(" | ", "\n");
+    let dsl = normalized.as_str();
     match step_name {
         "Import Records" | "Export Records" => crate::import_records::dsl_to_xml(dsl),
         "Commit Records/Requests" => commit_from_dsl(dsl),
@@ -236,5 +240,21 @@ mod tests {
     #[test]
     fn unknown_step_is_none() {
         assert_eq!(to_dsl("Set Field", "<x></x>"), None);
+    }
+
+    #[test]
+    fn inline_form_parses_back() {
+        // The inline writer joins DSL fields with " | "; from_dsl must accept it
+        // and rebuild the exact same XML as the indented (newline) form.
+        let xml = "<NoInteract state=\"False\"></NoInteract><Option state=\"True\"></Option>\
+                   <ESSForceCommit state=\"True\"></ESSForceCommit>";
+        let indented = to_dsl("Commit Records/Requests", xml).unwrap();
+        let inline = indented
+            .lines()
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert!(!inline.contains('\n'));
+        assert_eq!(from_dsl("Commit Records/Requests", &inline).as_deref(), Some(xml));
     }
 }

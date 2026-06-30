@@ -77,7 +77,15 @@ Related Record) render across several lines for readability. That makes a
 `.fmscript` line number drift from FileMaker's, where every step is one line.
 **Format inline** collapses each such step back to a single line so the numbers
 line up 1:1 (handy when chasing "line 1500" across both); **Format indented**
-restores the readable view. Both round-trip to the exact same clipboard.
+restores the readable view.
+
+Multi-line **calculations** (a `Set Variable` with a long `Let(…)`, an `If`
+calc, etc.) are also collapsed by **Format inline**. Because a FileMaker `//`
+comment runs to the end of its line, collapsing to one line would make it
+swallow whatever follows — so inline rewrites each `// note` as the equivalent
+`/* note */` block comment. The calculation stays semantically identical and
+still pastes correctly; the one caveat is that this `//`→`/* */` change isn't
+reversed when you go back to indented (the comment stays a block comment).
 
 `Write` is also available as a button in the editor title bar for `.fmscript`
 files.

@@ -34,6 +34,58 @@ pub fn format_step(step: &ScriptStep) -> String {
     format_step_with(step, FormatStyle::Indented)
 }
 
+/// True if `s` contains a FileMaker `//` line comment — i.e. a `//` that is not
+/// inside a string literal. (FileMaker `//` comments run to the end of the line.)
+fn has_line_comment(s: &str) -> bool {
+    line_comment_pos(s).is_some()
+}
+
+/// Byte offset of the first `//` line comment in `s` that's outside a string
+/// literal, or `None`.
+fn line_comment_pos(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut in_string = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => in_string = !in_string,
+            b'/' if !in_string && i + 1 < bytes.len() && bytes[i + 1] == b'/' => return Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Collapse a (possibly multi-line) calculation to a single line for inline mode.
+/// FileMaker `//` line comments run to end of line, so once the newlines are gone
+/// they'd swallow whatever follows — convert each to an equivalent `/* … */`
+/// block comment first, then join the lines with spaces. The result is
+/// semantically identical for FileMaker (it just can't be reversed back to `//`).
+fn inline_calc(calc: &str) -> String {
+    calc.lines()
+        .map(convert_line_comment)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Rewrite a single line's trailing `// comment` as `/* comment */`. Lines with
+/// no line comment are returned unchanged.
+fn convert_line_comment(line: &str) -> String {
+    match line_comment_pos(line) {
+        None => line.to_string(),
+        Some(pos) => {
+            let before = &line[..pos];
+            let comment = line[pos + 2..].trim();
+            if comment.is_empty() {
+                before.trim_end().to_string()
+            } else {
+                format!("{}/* {} */", before, comment)
+            }
+        }
+    }
+}
+
 /// Format a single step in the requested style.
 pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
     let indent = "  ".repeat(step.indent_level as usize);
@@ -63,10 +115,23 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
                 parts.push(name.clone());
             }
             if let Some(calc) = &step.calculation {
-                parts.push(format!("= {}", calc.trim()));
+                let c = match style {
+                    FormatStyle::Inline => inline_calc(calc.trim()),
+                    FormatStyle::Indented => calc.trim().to_string(),
+                };
+                parts.push(format!("= {}", c));
             }
             if !parts.is_empty() {
-                line.push_str(&format!(" [{}]", parts.join(" ")));
+                let inner = parts.join(" ");
+                // Close on a fresh line when the calc's last line is a `//` comment
+                // (in FileMaker it runs to end of line, so a trailing `]` would be
+                // swallowed). The calc keeps its own embedded indentation verbatim.
+                let last_line = inner.rsplit('\n').next().unwrap_or("");
+                if has_line_comment(last_line) {
+                    line.push_str(&format!(" [{}\n{}]", inner, indent));
+                } else {
+                    line.push_str(&format!(" [{}]", inner));
+                }
             }
         }
         Some(StepShape::SetState) => {
@@ -76,12 +141,19 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
         }
         Some(StepShape::Calculation) | Some(StepShape::CalculationWithRestore) => {
             if let Some(calc) = &step.calculation {
-                let trimmed = calc.trim();
+                let collapsed;
+                let trimmed = match style {
+                    FormatStyle::Inline => {
+                        collapsed = inline_calc(calc.trim());
+                        collapsed.as_str()
+                    }
+                    FormatStyle::Indented => calc.trim(),
+                };
                 if !trimmed.is_empty() {
                     // Check if calculation is multiline
                     if trimmed.contains('\n') {
                         line.push_str(" [");
-                        // For multiline, the closing ] goes on the last line
+                        // For multiline, the closing ] goes on the last line…
                         let calc_lines: Vec<&str> = trimmed.lines().collect();
                         for (i, cl) in calc_lines.iter().enumerate() {
                             if i > 0 {
@@ -90,6 +162,13 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
                                 line.push_str("  ");
                             }
                             line.push_str(cl);
+                        }
+                        // …unless that line ends in a `//` line comment, which in
+                        // FileMaker runs to end of line — appending `]` would make
+                        // it read as part of the comment. Put `]` on its own line.
+                        if has_line_comment(calc_lines.last().copied().unwrap_or("")) {
+                            line.push('\n');
+                            line.push_str(&indent);
                         }
                         line.push(']');
                     } else {
@@ -2680,6 +2759,28 @@ fn split_smart(content: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use crate::xmss;
+
+    #[test]
+    fn line_comment_detection_ignores_strings() {
+        assert!(super::has_line_comment("a + b // note"));
+        assert!(super::has_line_comment("// whole line"));
+        assert!(!super::has_line_comment("\"http://example\" & x")); // // inside a string
+        assert!(!super::has_line_comment("a + b /* block */ c"));
+    }
+
+    #[test]
+    fn inline_calc_converts_line_comments_to_blocks() {
+        // Multi-line with a `//` mid-calc → one line, comment becomes /* */ so it
+        // no longer swallows what follows.
+        let calc = "Let ( [\n  a = 1\n  ] ;\n  // step\n  a\n)";
+        let inline = super::inline_calc(calc);
+        assert!(!inline.contains('\n'));
+        assert!(inline.contains("/* step */"));
+        assert!(!inline.contains("//"));
+        // A trailing-only comment keeps its text.
+        assert_eq!(super::convert_line_comment("a + b // sum"), "a + b /* sum */");
+        assert_eq!(super::convert_line_comment("x // "), "x");
+    }
 
     // Real capture from FileMaker (debug_raw.xml). Replace Field Contents carries
     // a dialog flag, replace mode, serial-number options and a target field — all

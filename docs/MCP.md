@@ -31,12 +31,18 @@ Las dos puertas son el **mismo motor**, activadas por separado:
 
 Si tenés la extensión instalada, no escribas rutas a mano:
 
-1. Command Palette → **fm-bridge: Copy MCP config for an AI agent**.
+1. Command Palette → **fm-bridge: Set up MCP for an AI agent**.
 2. Elegí tu cliente (OpenCode / Claude Desktop / Cursor).
-3. Te copia al portapapeles el bloque JSON correcto **con la ruta real del
-   binario empaquetado ya rellenada**. Pegalo en el archivo de config del cliente
-   (el mensaje te dice cuál), mergeando si la clave ya existe.
+3. Elegí **Apply to <cliente>'s config**: la extensión **ubica el archivo de
+   config de ese cliente para tu SO y escribe/mergea la entrada MCP sola** (con
+   la ruta real del binario ya puesta, y un backup `.bak` del original). O elegí
+   **Copy to clipboard instead** para el camino manual.
 4. Reiniciá el cliente. Listo.
+
+> ¿Ya tenés un agente que puede editar archivos (este mismo, OpenCode, Claude
+> Code)? Salteate el comando y pedíselo: *"configurá el MCP de fm-bridge en
+> OpenCode"* — te edita el archivo. El comando es el fallback universal para
+> cuando todavía no tenés un agente con acceso a archivos.
 
 ### A mano (lo mismo, si no usás la extensión)
 

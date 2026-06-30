@@ -76,7 +76,7 @@
       },
       {
         "command": "fm-bridge.copyMcpConfig",
-        "title": "Copy MCP config for an AI agent",
+        "title": "Set up MCP for an AI agent",
         "category": "fm-bridge"
       },
       {

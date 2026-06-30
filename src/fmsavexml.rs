@@ -294,6 +294,16 @@ enum Section {
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
+/// Decode XML entities (`&lt;` `&amp;` `&#13;` …) in an attribute value.
+/// FileMaker stores placeholders like `<Table Missing>` and names with `&`
+/// escaped; schema output (and the audit/xref reports built from it) should be
+/// human-readable, so we unescape, falling back to the lossy bytes on error.
+fn attr_text(attr: &quick_xml::events::attributes::Attribute) -> String {
+    attr.unescape_value()
+        .map(|c| c.into_owned())
+        .unwrap_or_else(|_| attr_text(&attr))
+}
+
 pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
     let raw = std::fs::read(xml_path).map_err(|e| format!("Cannot read {}: {}", xml_path, e))?;
 
@@ -431,7 +441,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                         b"FMSaveAsXML" => {
                             for attr in e.attributes().flatten() {
                                 if attr.key.as_ref() == b"File" {
-                                    file_name = String::from_utf8_lossy(&attr.value).to_string();
+                                    file_name = attr_text(&attr);
                                 }
                             }
                         }
@@ -549,11 +559,11 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                     match attr.key.as_ref() {
                                         b"type" => {
                                             obj.object_type =
-                                                String::from_utf8_lossy(&attr.value).to_string();
+                                                attr_text(&attr);
                                         }
                                         b"name" => {
                                             obj.object_name =
-                                                String::from_utf8_lossy(&attr.value).to_string();
+                                                attr_text(&attr);
                                         }
                                         _ => {}
                                     }
@@ -587,7 +597,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                     match attr.key.as_ref() {
                                         b"action" => {
                                             event =
-                                                String::from_utf8_lossy(&attr.value).to_string();
+                                                attr_text(&attr);
                                         }
                                         b"browseMode" if &attr.value[..] == b"True" => {
                                             modes.push("browseMode".to_string());
@@ -625,7 +635,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                     let mut b_s = String::new();
                                     let mut r_s = String::new();
                                     for attr in e.attributes().flatten() {
-                                        let v = String::from_utf8_lossy(&attr.value).to_string();
+                                        let v = attr_text(&attr);
                                         match attr.key.as_ref() {
                                             b"top" => t_s = v,
                                             b"left" => l_s = v,
@@ -701,7 +711,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                     }
                                     b"name" => {
                                         cur_field_table_name =
-                                            String::from_utf8_lossy(&attr.value).to_string()
+                                            attr_text(&attr)
                                     }
                                     _ => {}
                                 }
@@ -720,17 +730,17 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                             .unwrap_or(0)
                                     }
                                     b"name" => {
-                                        name = String::from_utf8_lossy(&attr.value).to_string()
+                                        name = attr_text(&attr)
                                     }
                                     b"fieldtype" => {
                                         field_type =
-                                            String::from_utf8_lossy(&attr.value).to_string()
+                                            attr_text(&attr)
                                     }
                                     b"datatype" => {
-                                        data_type = String::from_utf8_lossy(&attr.value).to_string()
+                                        data_type = attr_text(&attr)
                                     }
                                     b"comment" => {
-                                        comment = String::from_utf8_lossy(&attr.value).to_string()
+                                        comment = attr_text(&attr)
                                     }
                                     _ => {}
                                 }
@@ -756,7 +766,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                     match attr.key.as_ref() {
                                         b"index" => {
                                             let v =
-                                                String::from_utf8_lossy(&attr.value).to_string();
+                                                attr_text(&attr);
                                             f.indexed = Some(v != "None");
                                             f.index = Some(v);
                                         }
@@ -799,11 +809,11 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                             .unwrap_or(0)
                                     }
                                     b"name" => {
-                                        name = String::from_utf8_lossy(&attr.value).to_string()
+                                        name = attr_text(&attr)
                                     }
                                     b"type" => {
                                         source_type =
-                                            String::from_utf8_lossy(&attr.value).to_string()
+                                            attr_text(&attr)
                                     }
                                     _ => {}
                                 }
@@ -825,7 +835,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             let mut source_type = String::new();
                             for attr in e.attributes().flatten() {
                                 if attr.key.as_ref() == b"type" {
-                                    source_type = String::from_utf8_lossy(&attr.value).to_string();
+                                    source_type = attr_text(&attr);
                                 }
                             }
                             if !seen_to_ids.contains(&id) {
@@ -842,14 +852,14 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 for attr in e.attributes().flatten() {
                                     if attr.key.as_ref() == b"name" {
                                         to.data_source =
-                                            String::from_utf8_lossy(&attr.value).to_string();
+                                            attr_text(&attr);
                                     }
                                 }
                             } else if local == b"BaseTableReference" {
                                 for attr in e.attributes().flatten() {
                                     if attr.key.as_ref() == b"name" {
                                         to.base_table =
-                                            String::from_utf8_lossy(&attr.value).to_string();
+                                            attr_text(&attr);
                                     }
                                 }
                             }
@@ -899,7 +909,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 let mut op = String::new();
                                 for attr in e.attributes().flatten() {
                                     if attr.key.as_ref() == b"type" {
-                                        op = String::from_utf8_lossy(&attr.value).to_string();
+                                        op = attr_text(&attr);
                                     }
                                 }
                                 cur_predicate = Some(JoinPredicate {
@@ -949,10 +959,10 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                             .unwrap_or(0)
                                     }
                                     b"name" => {
-                                        name = String::from_utf8_lossy(&attr.value).to_string()
+                                        name = attr_text(&attr)
                                     }
                                     b"access" => {
-                                        access = String::from_utf8_lossy(&attr.value).to_string()
+                                        access = attr_text(&attr)
                                     }
                                     _ => {}
                                 }
@@ -970,7 +980,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 for attr in e.attributes().flatten() {
                                     if attr.key.as_ref() == b"name" {
                                         cf.parameters
-                                            .push(String::from_utf8_lossy(&attr.value).to_string());
+                                            .push(attr_text(&attr));
                                     }
                                 }
                             }
@@ -1363,6 +1373,129 @@ impl LayoutFull {
 
 // ─── Output generation ────────────────────────────────────────────────────────
 
+// ─── Inline accessors (no disk) ────────────────────────────────────────────────
+// These mirror what `write_inspection` puts on disk, but return the data inline
+// so an MCP client with no filesystem access can still drive a single XML.
+
+/// One-call overview: counts plus the names of every table, script, layout,
+/// custom function and external source. The natural first call to orient on a
+/// database before drilling in with `table_inline` / `script_text_inline`.
+pub fn describe(db: &ParsedDatabase) -> serde_json::Value {
+    let scripts: Vec<serde_json::Value> = db
+        .scripts
+        .iter()
+        .filter(|s| !s.is_folder && !s.is_separator)
+        .map(|s| {
+            serde_json::json!({
+                "id": s.id,
+                "name": s.name,
+                "folder": s.folder,
+                "steps": s.step_count,
+            })
+        })
+        .collect();
+    let layouts: Vec<serde_json::Value> = db
+        .layouts
+        .iter()
+        .filter(|l| !l.is_folder)
+        .map(|l| {
+            serde_json::json!({
+                "id": l.id,
+                "name": l.name,
+                "table_occurrence": l.table_occurrence,
+            })
+        })
+        .collect();
+    let tables: Vec<serde_json::Value> = db
+        .tables
+        .iter()
+        .map(|t| serde_json::json!({ "name": t.name, "fields": t.fields.len() }))
+        .collect();
+    let total_fields: usize = db.tables.iter().map(|t| t.fields.len()).sum();
+
+    serde_json::json!({
+        "file_name": db.file_name,
+        "counts": {
+            "scripts": scripts.len(),
+            "layouts": layouts.len(),
+            "tables": db.tables.len(),
+            "fields": total_fields,
+            "table_occurrences": db.table_occurrences.len(),
+            "relationships": db.relationships.len(),
+            "custom_functions": db.custom_functions.len(),
+            "external_sources": db.external_sources.len(),
+        },
+        "tables": tables,
+        "scripts": scripts,
+        "layouts": layouts,
+        "custom_functions": db.custom_functions.iter().map(|c| &c.name).collect::<Vec<_>>(),
+        "external_sources": db.external_sources.iter().map(|e| &e.name).collect::<Vec<_>>(),
+    })
+}
+
+/// Full field definitions for one base table (type, calculation, indexing,
+/// global, stored), matched case-insensitively. On a miss, the error names the
+/// closest substring matches so the caller can retry without a full `describe`.
+pub fn table_inline(db: &ParsedDatabase, name: &str) -> Result<serde_json::Value, String> {
+    if let Some(t) = db.tables.iter().find(|t| t.name.eq_ignore_ascii_case(name)) {
+        return Ok(serde_json::to_value(t).unwrap_or(serde_json::Value::Null));
+    }
+    Err(not_found("Table", name, db.tables.iter().map(|t| t.name.as_str())))
+}
+
+/// A single script's `.fmscript` text — the exact rendering `inspect` writes to
+/// disk — looked up by name (case-insensitive) or `#id`. On a miss, suggests
+/// close matches.
+pub fn script_text_inline(db: &ParsedDatabase, query: &str) -> Result<serde_json::Value, String> {
+    let by_id = query.strip_prefix('#').and_then(|n| n.trim().parse::<u32>().ok());
+    let found = db.scripts.iter().find(|s| match by_id {
+        Some(id) => s.id == id,
+        None => s.name.eq_ignore_ascii_case(query),
+    });
+    let script = match found {
+        Some(s) if !s.is_folder && !s.is_separator => s,
+        Some(s) => return Err(format!("'{}' is a folder/separator, not a script.", s.name)),
+        None => {
+            return Err(not_found(
+                "Script",
+                query,
+                db.scripts
+                    .iter()
+                    .filter(|s| !s.is_folder && !s.is_separator)
+                    .map(|s| s.name.as_str()),
+            ));
+        }
+    };
+    let steps = db
+        .script_steps
+        .get(&script.id)
+        .ok_or_else(|| format!("Script '{}' has no steps captured.", script.name))?;
+    let fmscript = crate::xmss::FmScript {
+        steps: steps.clone(),
+    };
+    Ok(serde_json::json!({
+        "id": script.id,
+        "name": script.name,
+        "folder": script.folder,
+        "script_text": format_script(&fmscript),
+    }))
+}
+
+/// Build a "not found" error that lists up to 8 substring matches, falling back
+/// to a pointer at `describe` when nothing is close.
+fn not_found<'a>(kind: &str, query: &str, candidates: impl Iterator<Item = &'a str>) -> String {
+    let q = query.to_lowercase();
+    let hits: Vec<&str> = candidates
+        .filter(|n| n.to_lowercase().contains(&q))
+        .take(8)
+        .collect();
+    if hits.is_empty() {
+        format!("{} '{}' not found. Use describe_database to list what exists.", kind, query)
+    } else {
+        format!("{} '{}' not found. Did you mean: {}", kind, query, hits.join(", "))
+    }
+}
+
 pub fn write_inspection(db: &ParsedDatabase, output_dir: &str) -> Result<InspectionStats, String> {
     let out = std::path::Path::new(output_dir);
     std::fs::create_dir_all(out).map_err(|e| format!("Cannot create {}: {}", output_dir, e))?;
@@ -1666,7 +1799,7 @@ fn parse_script_attrs(e: &quick_xml::events::BytesStart) -> (u32, String, bool, 
     for attr in e.attributes().flatten() {
         match attr.key.as_ref() {
             b"id" => id = String::from_utf8_lossy(&attr.value).parse().unwrap_or(0),
-            b"name" => name = String::from_utf8_lossy(&attr.value).to_string(),
+            b"name" => name = attr_text(&attr),
             b"isFolder" => is_folder = &attr.value[..] == b"True",
             b"isSeparatorItem" => is_sep = &attr.value[..] == b"True",
             _ => {}
@@ -1681,7 +1814,7 @@ fn parse_id_name_attrs(e: &quick_xml::events::BytesStart) -> (u32, String) {
     for attr in e.attributes().flatten() {
         match attr.key.as_ref() {
             b"id" => id = String::from_utf8_lossy(&attr.value).parse().unwrap_or(0),
-            b"name" => name = String::from_utf8_lossy(&attr.value).to_string(),
+            b"name" => name = attr_text(&attr),
             _ => {}
         }
     }

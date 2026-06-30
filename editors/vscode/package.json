@@ -56,27 +56,32 @@
     "commands": [
       {
         "command": "fm-bridge.readFromClipboard",
-        "title": "fm-bridge: Read script from clipboard",
+        "title": "Read script from clipboard",
         "category": "fm-bridge"
       },
       {
         "command": "fm-bridge.writeToClipboard",
-        "title": "fm-bridge: Write script to clipboard",
+        "title": "Write script to clipboard",
         "category": "fm-bridge"
       },
       {
         "command": "fm-bridge.inspectXml",
-        "title": "fm-bridge: Inspect FMSaveAsXML export",
+        "title": "Inspect FMSaveAsXML export",
         "category": "fm-bridge"
       },
       {
         "command": "fm-bridge.slice",
-        "title": "fm-bridge: Slice inspect output around layouts",
+        "title": "Slice inspect output around layouts",
+        "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.copyMcpConfig",
+        "title": "Set up MCP for an AI agent",
         "category": "fm-bridge"
       },
       {
         "command": "fm-bridge.showLog",
-        "title": "fm-bridge: Show log",
+        "title": "Show log",
         "category": "fm-bridge"
       }
     ],

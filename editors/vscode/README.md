@@ -116,7 +116,7 @@ platform's binary, bundles them all, and attaches the `.vsix` to the release.
 Install the resulting `.vsix`:
 
 ```bash
-code --install-extension fm-bridge-0.1.0.vsix
+code --install-extension fm-bridge-0.1.1.vsix
 ```
 
 or in VS Code: **Extensions** panel → `…` menu → **Install from VSIX…**
@@ -128,7 +128,7 @@ Antigravity is a VS Code fork, so the same `.vsix` works there too — but its
 
 ```bash
 "/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide" \
-  --install-extension fm-bridge-0.1.0.vsix
+  --install-extension fm-bridge-0.1.1.vsix
 ```
 
 or from the GUI: **Extensions** panel → `…` menu → **Install from VSIX…**.

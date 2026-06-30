@@ -393,14 +393,11 @@ pub fn format_step(step: &ScriptStep) -> String {
             if let Some(calc) = &step.calculation {
                 let trimmed = calc.trim();
                 if !trimmed.is_empty() {
-                    // Import/Export Records: render the readable DSL instead of the
-                    // raw XML blob, but only when it round-trips exactly (else keep
-                    // the verbatim XML so we never lose data).
-                    let dsl = if matches!(step.name.as_str(), "Import Records" | "Export Records") {
-                        crate::import_records::xml_to_dsl(trimmed)
-                    } else {
-                        None
-                    };
+                    // Opaque steps with modeled options (Import/Export Records,
+                    // Commit Records, Go to Related Record): render the readable DSL
+                    // instead of the raw XML blob, but only when it round-trips
+                    // exactly (else keep the verbatim XML so we never lose data).
+                    let dsl = crate::step_dsl::to_dsl(&step.name, trimmed);
                     match dsl {
                         Some(dsl) => {
                             // Indent the DSL block under the step for readability;
@@ -1935,13 +1932,13 @@ fn build_step_from_name(
                 enable: enabled,
                 id,
                 text: None,
-                // Import/Export Records may carry the readable DSL instead of raw
-                // XML; convert it back to the exact FM payload. Raw XML (starts
-                // with `<`) and everything else pass through unchanged.
+                // Opaque steps may carry the readable DSL instead of raw XML;
+                // convert it back to the exact FM payload. Raw XML (starts with
+                // `<`) and everything else pass through unchanged.
                 calculation: content.map(|c| {
                     let t = c.trim();
-                    if matches!(name, "Import Records" | "Export Records") && !t.starts_with('<') {
-                        crate::import_records::dsl_to_xml(t).unwrap_or_else(|| c.to_string())
+                    if !t.starts_with('<') {
+                        crate::step_dsl::from_dsl(name, t).unwrap_or_else(|| c.to_string())
                     } else {
                         c.to_string()
                     }

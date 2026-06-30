@@ -11,6 +11,7 @@ mod normalization;
 #[cfg(windows)]
 mod ole_clipboard;
 mod slice;
+mod step_dsl;
 mod steps;
 mod text_format;
 mod xmss;

@@ -250,7 +250,9 @@ kind = "CommitRecords"
 id = 75
 en = "Commit Records/Requests"
 es = "Consignar registros/peticiones"
-shape = "plain"
+# Opaque: carries its options (dialog, skip validation, ESS force commit)
+# verbatim so they round-trip; a readable DSL is layered on in text_format.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -277,7 +279,9 @@ kind = "GoToRelatedRecord"
 id = 74
 en = "Go to Related Record"
 es = "Ir al registro relacionado"
-shape = "plain"
+# Opaque: carries target table/layout + options (match all, new window,
+# window styles) verbatim so they round-trip; readable DSL in text_format.
+shape = "opaque"
 opens_block = false
 closes_block = false
 

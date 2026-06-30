@@ -6,6 +6,26 @@ over the `fm-bridge` Rust binary (see [docs/USAGE.md](../../docs/USAGE.md)), whi
 does all the FileMaker-specific encoding/decoding — so the editor never drifts
 from what the binary actually supports.
 
+## Install (recommended — no build, no Rust)
+
+Download the latest packaged extension and install it. The binary for your OS is
+already inside the `.vsix`, so this is all you need:
+
+1. **Download** `fm-bridge-<version>.vsix` from the latest release:
+   **<https://github.com/LucasVaroneW/fm-bridge/releases/latest>**
+   (it's under **Assets**).
+2. **Install** it in VS Code:
+   `Cmd/Ctrl+Shift+P` → **Extensions: Install from VSIX…** → pick the file
+   (or: **Extensions** panel → `…` menu → **Install from VSIX…**).
+3. **Reload** the window: `Cmd/Ctrl+Shift+P` → **Developer: Reload Window**.
+
+That's it — no Rust, no npm. To check it loaded, open the Command Palette and
+type `fm-bridge`; you should see the commands listed below. Upgrading later is
+the same steps with a newer `.vsix` (VS Code replaces the old version).
+
+> Using **Antigravity** or another VS Code fork? Same step 2 from the `…` menu →
+> **Install from VSIX…**.
+
 ## Features
 
 - **Syntax highlighting** for `.fmscript` — step names, `# comments`,
@@ -109,9 +129,24 @@ npm run package:bundled   # build the native binary + produce a self-contained .
 machine with no separate install. (`npm run package` alone skips the binary and
 relies on `~/.cargo/bin`/`PATH`.)
 
-For a **universal** `.vsix` that works on macOS (arm64/x64), Windows and Linux,
-push a `v*` tag (or run the *Package extension* workflow): CI builds every
-platform's binary, bundles them all, and attaches the `.vsix` to the release.
+## Publish a release (maintainers)
+
+To cut a version everyone can install **without building** (the universal `.vsix`
+that works on macOS arm64/x64, Windows and Linux):
+
+1. Bump the version in `editors/vscode/package.json` (and `Cargo.toml`, to keep
+   the binary's reported version in sync), commit, push `main`.
+2. Tag it and push the tag:
+   ```bash
+   git tag v0.1.1
+   git push origin v0.1.1
+   ```
+3. The **Package extension** workflow fires on the `v*` tag: it builds each
+   platform's binary, bundles them all into one `.vsix`, and **attaches it to a
+   GitHub Release** for that tag. ~3 minutes later it's at
+   <https://github.com/LucasVaroneW/fm-bridge/releases/latest>.
+4. Share that link — collaborators just download and install (see **Install** at
+   the top). No Rust, no npm on their side.
 
 Install the resulting `.vsix`:
 

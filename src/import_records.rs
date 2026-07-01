@@ -128,10 +128,16 @@ pub fn dsl_to_xml(dsl: &str) -> Option<String> {
             continue;
         }
         if in_mapping {
-            // `<name> #<id> <map> [opts=N]` — anchor on " #" so names may have spaces.
-            let hash = line.rfind(" #")?;
-            let name = line[..hash].to_string();
-            let rest: Vec<&str> = line[hash + 2..].split_whitespace().collect();
+            // `<name> #<id> <map> [opts=N]` — anchor on " #" so names may contain
+            // spaces. FileMaker pads the target list with empty fields
+            // (`name="" id="0"`); those render as a line that starts with `#`.
+            let (name, after_hash) = if let Some(rest) = line.strip_prefix('#') {
+                (String::new(), rest)
+            } else {
+                let hash = line.rfind(" #")?;
+                (line[..hash].to_string(), &line[hash + 2..])
+            };
+            let rest: Vec<&str> = after_hash.split_whitespace().collect();
             let id = rest.first()?.to_string();
             let map = rest.get(1)?.to_string();
             let opts = rest
@@ -286,6 +292,29 @@ mod tests {
         assert!(dsl.contains("PryVen_RK_OfeVerConJT_Sel Copia #1022 DoNotImport"));
         // Byte-exact rebuild.
         assert_eq!(dsl_to_xml(&dsl).as_deref(), Some(XML));
+    }
+
+    /// FileMaker pads the target field list with empty fields (`name=""
+    /// id="0"`). Those must still round-trip — the empty-name mapping line starts
+    /// with `#`. A whole real payload fell back to raw XML before this.
+    #[test]
+    fn empty_target_field_name_round_trips() {
+        let xml = concat!(
+            "<NoInteract state=\"True\"></NoInteract><Restore state=\"True\"></Restore>",
+            "<VerifySSLCertificates state=\"False\"></VerifySSLCertificates>",
+            "<DataSourceType value=\"File\"></DataSourceType>",
+            "<Profile FieldDelimiter=\"&#09;\" DataType=\"FMPR\"></Profile>",
+            "<UniversalPathList>fmnet:/1.2.3.4/x.fmp12</UniversalPathList>",
+            "<ImportOptions CharacterSet=\"Macintosh\" method=\"Add\"></ImportOptions>",
+            "<Table id=\"1\" name=\"T\"></Table>",
+            "<TargetFields>",
+            "<Field FieldOptions=\"0\" map=\"Import\" id=\"8\" name=\"id\"></Field>",
+            "<Field FieldOptions=\"0\" map=\"DoNotImport\" id=\"0\" name=\"\"></Field>",
+            "</TargetFields>",
+        );
+        let dsl = xml_to_dsl(xml).expect("should produce DSL (round-trips)");
+        assert!(dsl.contains("id #8 Import"));
+        assert_eq!(dsl_to_xml(&dsl).as_deref(), Some(xml));
     }
 
     #[test]

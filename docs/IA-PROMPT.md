@@ -473,21 +473,37 @@ Set Variable [$query = Let (
 
 ## Steps with `opaque` Shape (Lossless XML Preservation)
 
-A few steps preserve their full inner XML inside the brackets because their
-FM configuration is too rich for a flat DSL. Treat the bracket content as
-**raw XML** — do NOT modify it manually. If you need to author one of these
-from scratch, set it up in FM first, copy, run `fm-bridge read`, and use
-the resulting XML as a template.
+A few steps carry an FM configuration too rich for a flat DSL. They are
+**opaque**: the codec captures their inner XML verbatim so it always
+round-trips byte-exact. On top of that, several render a **readable DSL** —
+but only when that DSL rebuilds the original XML exactly. If it can't, the
+raw XML is kept inside the brackets instead (never lossy).
 
-* `Import Records`
+Steps that render a readable DSL:
+
+* `Import Records` — shows Source / Target / **Mapping**.
+* `Commit Records/Requests` — shows its options.
+* `Go to Related Record` — shows table, layout and options.
+
+`Import Records` Mapping — each row is `[N] <field> #<id> <action>`, where
+`[N]` is the **source column** that feeds that field (`[-]` = a target row
+past the last source column). The `[N]` prefix is read-only annotation:
+it's recomputed on render and ignored on write, so you can edit the field
+list freely and it still round-trips.
+
+```
+Import Records [ ... 
+  Mapping:
+    [1] id #8 Import
+    [2] nombre #67 Import
+    [3]  #0 DoNotImport
+]
+```
+
+Steps that stay as raw XML (no DSL yet — do not hand-edit):
+
 * `Export Records`
 * `Export Field Contents`
-
-Example (do not hand-edit):
-
-```
-Import Records [<ImportSource>...<TargetFields>...</TargetFields></ImportSource>]
-```
 
 ---
 

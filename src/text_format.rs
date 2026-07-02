@@ -449,22 +449,15 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
             }
         }
         Some(StepShape::PerformFind) => {
-            // Multi-line by default for readability. Each request becomes one section:
-            //   Find: T::F1 => v1; T::F2 => v2
-            //   Omit: T::F3 => v3
-            // Sections are on their own line; criteria within a section are `;`-separated.
-            if step.find_requests.is_empty() {
-                // nothing to render
-            } else {
-                line.push_str(" [");
-                let line_indent = "  ".repeat(step.indent_level as usize);
-                let cont_indent = format!("{}  ", line_indent);
+            // Each request is one `Find: T::F => v; T::F => v` / `Omit: …` section;
+            // criteria within a section are `;`-separated. In indented mode sections
+            // are spread on their own lines for readability; in inline mode they're
+            // joined with ` | ` so the whole step fits on a single .fmscript line
+            // (matches FileMaker's Script Workspace line numbers).
+            if !step.find_requests.is_empty() {
+                let mut sections: Vec<String> = Vec::with_capacity(step.find_requests.len());
                 for req in &step.find_requests {
-                    let header = if req.operation == "Omit" {
-                        "Omit"
-                    } else {
-                        "Find"
-                    };
+                    let header = if req.operation == "Omit" { "Omit" } else { "Find" };
                     let crits: Vec<String> = req
                         .criteria
                         .iter()
@@ -477,13 +470,26 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
                             format!("{} => {}", target, c.text)
                         })
                         .collect();
-                    line.push('\n');
-                    line.push_str(&cont_indent);
-                    line.push_str(&format!("{}: {}", header, crits.join("; ")));
+                    sections.push(format!("{}: {}", header, crits.join("; ")));
                 }
-                line.push('\n');
-                line.push_str(&line_indent);
-                line.push(']');
+                match style {
+                    FormatStyle::Inline => {
+                        line.push_str(&format!(" [{}]", sections.join(" | ")));
+                    }
+                    FormatStyle::Indented => {
+                        let line_indent = "  ".repeat(step.indent_level as usize);
+                        let cont_indent = format!("{}  ", line_indent);
+                        line.push_str(" [");
+                        for sec in &sections {
+                            line.push('\n');
+                            line.push_str(&cont_indent);
+                            line.push_str(sec);
+                        }
+                        line.push('\n');
+                        line.push_str(&line_indent);
+                        line.push(']');
+                    }
+                }
             }
         }
         Some(StepShape::Comment) | Some(StepShape::Plain) | Some(StepShape::Opaque) => {
@@ -2674,6 +2680,10 @@ fn parse_perform_find_content(content: Option<&str>) -> Vec<crate::xmss::FindReq
         Some(c) => c,
         None => return Vec::new(),
     };
+    // Inline form (FormatStyle::Inline) joins requests with " | " so the step fits
+    // on a single .fmscript line; normalise back to newlines so both styles parse
+    // through the same path.
+    let content = content.replace(" | ", "\n");
     let mut requests: Vec<FindRequest> = Vec::new();
     // Split on logical lines (newlines), then within a line look for the `Find:` /
     // `Omit:` header. Bracket-aware splitting is overkill here — the DSL is intentionally
@@ -3028,5 +3038,95 @@ mod tests {
         let calc = script.steps[0].calculation.as_deref().unwrap();
         assert!(calc.contains("Sample preview text"));
         assert!(calc.ends_with("*/"));
+    }
+
+    // ── Perform Find: inline mode must fit on a single .fmscript line ──────────
+
+    // Real capture shape: a single Find request with one criterion. FileMaker's
+    // Perform Find XML wraps the <Query> in a <Restore state="True"> envelope.
+    const PERFORM_FIND_SINGLE: &str = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"28\" name=\"Perform Find\"><Restore state=\"True\"></Restore><Query><RequestRow operation=\"Include\"><Criteria><Field table=\"Ta_i_Productos\" name=\"Pro_Imp_EsSX\"></Field><Text>1</Text></Criteria></RequestRow></Query></Step></fmxmlsnippet>";
+
+    // Two requests (Find + Omit) with two criteria each — covers the ` | ` join.
+    const PERFORM_FIND_MULTI: &str = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"28\" name=\"Perform Find\"><Restore state=\"True\"></Restore><Query>\
+        <RequestRow operation=\"Include\"><Criteria><Field table=\"Ta_i_Productos\" name=\"Pro_Imp_EsSX\"></Field><Text>1</Text></Criteria><Criteria><Field table=\"Ta_i_Productos\" name=\"Pro_Activo\"></Field><Text>1</Text></Criteria></RequestRow>\
+        <RequestRow operation=\"Omit\"><Criteria><Field table=\"Ta_i_Productos\" name=\"Pro_id\"></Field><Text>0</Text></Criteria></RequestRow>\
+        </Query></Step></fmxmlsnippet>";
+
+    #[test]
+    fn perform_find_inline_renders_one_line() {
+        // The whole bug: FormatStyle::Inline used to ignore `style` for Perform
+        // Find and always emit the indented multi-line shape (3 lines for one
+        // request). The .fmscript line numbers must line up with FileMaker's
+        // Script Workspace, so this must collapse to a single line.
+        let script = xmss::parse_fmxml_snippet(PERFORM_FIND_SINGLE).unwrap();
+        let text = super::format_script_with(&script, super::FormatStyle::Inline);
+        assert!(!text.contains('\n'), "inline Perform Find must be one line, got: {text:?}");
+        assert_eq!(
+            text,
+            "Perform Find [Find: Ta_i_Productos::Pro_Imp_EsSX => 1]"
+        );
+    }
+
+    #[test]
+    fn perform_find_indented_keeps_multi_line_shape() {
+        // Indented stays readable: one section per line, criteria `;`-separated.
+        let script = xmss::parse_fmxml_snippet(PERFORM_FIND_SINGLE).unwrap();
+        let text = super::format_script(&script);
+        assert_eq!(
+            text,
+            "Perform Find [\n  Find: Ta_i_Productos::Pro_Imp_EsSX => 1\n]"
+        );
+    }
+
+    #[test]
+    fn perform_find_inline_multi_request_uses_pipe_separator() {
+        // Multiple requests get joined with " | " in inline mode so the whole
+        // step still fits on one .fmscript line. The parser splits " | " back
+        // out to newlines (see next test).
+        let script = xmss::parse_fmxml_snippet(PERFORM_FIND_MULTI).unwrap();
+        let text = super::format_script_with(&script, super::FormatStyle::Inline);
+        assert!(!text.contains('\n'), "inline Perform Find must be one line, got: {text:?}");
+        assert_eq!(
+            text,
+            "Perform Find [Find: Ta_i_Productos::Pro_Imp_EsSX => 1; Ta_i_Productos::Pro_Activo => 1 | Omit: Ta_i_Productos::Pro_id => 0]"
+        );
+    }
+
+    #[test]
+    fn perform_find_inline_round_trips() {
+        // The full tool path: decode → format inline → parse → encode must
+        // reproduce the original XML byte-for-byte (modulo the same whitespace
+        // the indented form already normalised away).
+        let script = xmss::parse_fmxml_snippet(PERFORM_FIND_SINGLE).unwrap();
+        let text = super::format_script_with(&script, super::FormatStyle::Inline);
+        let script2 = super::parse_text_to_script(&text).unwrap();
+        let rebuilt = xmss::build_xml_from_script(&script2).unwrap();
+        assert_eq!(rebuilt, PERFORM_FIND_SINGLE);
+    }
+
+    #[test]
+    fn perform_find_inline_multi_request_round_trips() {
+        // Inline + ` | ` between requests must parse back identically.
+        let script = xmss::parse_fmxml_snippet(PERFORM_FIND_MULTI).unwrap();
+        let text = super::format_script_with(&script, super::FormatStyle::Inline);
+        let script2 = super::parse_text_to_script(&text).unwrap();
+        let rebuilt = xmss::build_xml_from_script(&script2).unwrap();
+        assert_eq!(rebuilt, PERFORM_FIND_MULTI);
+    }
+
+    #[test]
+    fn perform_find_authored_inline_parses() {
+        // A user typing inline by hand (no " | " in the single-request case) is
+        // also valid: a bare `Find: …` inside the brackets parses to one request.
+        let script =
+            super::parse_text_to_script("Perform Find [Find: Ta_i_Productos::Pro_Imp_EsSX => 1]")
+                .unwrap();
+        let reqs = &script.steps[0].find_requests;
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].operation, "Include");
+        assert_eq!(reqs[0].criteria.len(), 1);
+        assert_eq!(reqs[0].criteria[0].table, "Ta_i_Productos");
+        assert_eq!(reqs[0].criteria[0].field, "Pro_Imp_EsSX");
+        assert_eq!(reqs[0].criteria[0].text, "1");
     }
 }

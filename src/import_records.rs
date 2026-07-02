@@ -19,12 +19,17 @@
 //   Source: File
 //   Path: $file
 //   Profile: FileName="$file" WorksheetName="" ... DataType="XLSX"
+//   SourceList: id="…" BaseTable="…" Size="66" fields=1,2,3,…   (File sources)
 //   Options: CharacterSet="Windows" ... method="Add"
 //   Target: Ta_d_ProyectosVentas #1068202
-//   Mapping:
-//     PryVen_PK #4 Import
-//     PryVen_RK_OfeVerConJT_Sel Copia #1022 DoNotImport
-//     PryVen_SelecBoo #69 DoNotImport opts=2
+//   Mapping:                     ← the row order IS the source column
+//     [1] PryVen_PK #4 Import          (source column 1 → PryVen_PK)
+//     [2] PryVen_RK_… Copia #1022 DoNotImport
+//     [-]  #0 DoNotImport              (target row past the last source column)
+//
+// The `[N]` / `[-]` source-column tag and `SourceList` only appear for File
+// sources (which carry a `<List>` of source fields). They are reading aids —
+// `dsl_to_xml` ignores `[N]` and rebuilds the exact XML either way.
 
 /// Convert the Import/Export Records inner XML to the indented DSL, but only if
 /// the conversion round-trips exactly. Returns `None` to signal "keep the raw
@@ -88,15 +93,36 @@ fn build_dsl(xml: &str) -> Option<String> {
     let table_name = element_attr(xml, "Table", "name")?;
     lines.push(format!("Target: {} #{}", table_name, table_id));
 
-    // Ordered field map.
+    // Number of source columns (the <List> of source <InputField>s), used to
+    // annotate each target row with the source column that feeds it. FileMaker
+    // maps positionally: the Nth target field row takes the Nth source column
+    // (confirmed by the FMSaveAsXML `<Map index="N">` form). Rows past the source
+    // count have no source. 0 = no source list → skip the annotation.
+    let source_count = element_inner(xml, "Profile")
+        .and_then(|p| element_inner(p, "List"))
+        .map(|l| iter_tags(l, "InputField").count())
+        .unwrap_or(0);
+
+    // Ordered field map — the row index IS the source column (1-based).
     lines.push("Mapping:".to_string());
     let fields_inner = element_inner(xml, "TargetFields")?;
-    for field_tag in iter_tags(&fields_inner, "Field") {
+    for (i, field_tag) in iter_tags(&fields_inner, "Field").enumerate() {
         let name = tag_attr(field_tag, "name")?;
         let id = tag_attr(field_tag, "id")?;
         let map = tag_attr(field_tag, "map")?;
         let opts = tag_attr(field_tag, "FieldOptions").unwrap_or("0");
-        let mut line = format!("  {} #{} {}", name, id, map);
+        // `[N]` = source column N feeds this field; `[-]` = no source column.
+        // Purely a reading aid: dsl_to_xml ignores it and it's recomputed here.
+        let mut line = if source_count > 0 {
+            let src = if i < source_count {
+                format!("[{}]", i + 1)
+            } else {
+                "[-]".to_string()
+            };
+            format!("  {} {} #{} {}", src, name, id, map)
+        } else {
+            format!("  {} #{} {}", name, id, map)
+        };
         if opts != "0" {
             line.push_str(&format!(" opts={}", opts));
         }
@@ -128,6 +154,13 @@ pub fn dsl_to_xml(dsl: &str) -> Option<String> {
             continue;
         }
         if in_mapping {
+            // Optional `[N]`/`[-]` source-column annotation is a reading aid only —
+            // strip it before parsing (it's recomputed on render).
+            let line = line
+                .strip_prefix('[')
+                .and_then(|r| r.split_once("] "))
+                .map(|(_, rest)| rest)
+                .unwrap_or(line);
             // `<name> #<id> <map> [opts=N]` — anchor on " #" so names may contain
             // spaces. FileMaker pads the target list with empty fields
             // (`name="" id="0"`); those render as a line that starts with `#`.
@@ -314,6 +347,32 @@ mod tests {
         );
         let dsl = xml_to_dsl(xml).expect("should produce DSL (round-trips)");
         assert!(dsl.contains("id #8 Import"));
+        assert_eq!(dsl_to_xml(&dsl).as_deref(), Some(xml));
+    }
+
+    /// With a source `<List>`, each mapping row is annotated with its source
+    /// column `[N]` (a reading aid), and it still round-trips exactly.
+    #[test]
+    fn source_column_annotation_round_trips() {
+        let xml = concat!(
+            "<NoInteract state=\"True\"></NoInteract><Restore state=\"True\"></Restore>",
+            "<VerifySSLCertificates state=\"False\"></VerifySSLCertificates>",
+            "<DataSourceType value=\"File\"></DataSourceType>",
+            "<Profile table=\"9\" DataType=\"FMPR\"><List id=\"9\" BaseTable=\"2\" Size=\"2\">",
+            "<InputField id=\"1\"></InputField><InputField id=\"2\"></InputField></List></Profile>",
+            "<UniversalPathList>fmnet:/1.2.3.4/x.fmp12</UniversalPathList>",
+            "<ImportOptions CharacterSet=\"Macintosh\" method=\"Add\"></ImportOptions>",
+            "<Table id=\"1\" name=\"T\"></Table>",
+            "<TargetFields>",
+            "<Field FieldOptions=\"0\" map=\"Import\" id=\"8\" name=\"id\"></Field>",
+            "<Field FieldOptions=\"0\" map=\"Import\" id=\"9\" name=\"ref\"></Field>",
+            "<Field FieldOptions=\"0\" map=\"DoNotImport\" id=\"0\" name=\"\"></Field>",
+            "</TargetFields>",
+        );
+        let dsl = xml_to_dsl(xml).expect("should produce DSL");
+        assert!(dsl.contains("[1] id #8 Import"));
+        assert!(dsl.contains("[2] ref #9 Import"));
+        assert!(dsl.contains("[-]  #0 DoNotImport")); // 3rd row past the 2 source cols
         assert_eq!(dsl_to_xml(&dsl).as_deref(), Some(xml));
     }
 

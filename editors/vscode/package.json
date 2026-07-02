@@ -2,7 +2,7 @@
   "name": "fm-bridge",
   "displayName": "fm-bridge — FileMaker scripts",
   "description": "Edit FileMaker scripts as plain-text .fmscript files: syntax highlighting, snippets, clipboard read/write, diagnostics and step autocomplete. Backed by the fm-bridge Rust binary.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "lucasvarone",
   "license": "MIT",
   "repository": {

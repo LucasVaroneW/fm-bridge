@@ -136,6 +136,50 @@ pub struct FieldInfo {
     /// Repetition count (`<Storage maxRepetitions>`), when > 1.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_repetitions: Option<u32>,
+    /// Field-level validation (`<Validation>`): the rule that blocks a value.
+    /// This is the field data most often needed to explain "why can't I change
+    /// this field" — captured here so callers never have to read the raw XML.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation: Option<FieldValidation>,
+    /// Auto-enter behaviour (`<AutoEnter>`): its type ("Looked_up",
+    /// "Calculation", "Serial", …) and, for calculated auto-enter, the calc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_enter: Option<FieldAutoEnter>,
+}
+
+/// A field's `<Validation>` block: what makes a value legal. Mirrors the
+/// FileMaker "Validation" tab. `calculation`/`message` are only present when the
+/// field validates by calculation.
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct FieldValidation {
+    /// "Always" | "OnlyDuringDataEntry" (the `type` attribute).
+    #[serde(rename = "type")]
+    pub validation_type: String,
+    /// Whether the user can override the validation (`allowOverride`).
+    pub allow_override: bool,
+    /// `alwaysValidate` — validate even on programmatic edits.
+    pub always_validate: bool,
+    pub not_empty: bool,
+    pub unique: bool,
+    pub existing: bool,
+    /// The validation calculation, when the field validates "by calculation".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calculation: Option<String>,
+    /// Custom failure message shown to the user.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// A field's `<AutoEnter>` block. Today we surface the `type` (and, for
+/// calculated auto-enter, the calc). Lookup source resolution is a follow-up.
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct FieldAutoEnter {
+    /// "Looked_up" | "Calculation" | "Serial" | "" (none) — the `type` attribute.
+    #[serde(rename = "type")]
+    pub auto_enter_type: String,
+    /// The auto-enter calculation, when `type` is "Calculation".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calculation: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -403,6 +447,13 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
     // capture only the field's own calc (Calculated fields). Expression is CDATA.
     let mut in_field_autoenter = false;
     let mut reading_field_calc = false;
+    // Auto-enter calc capture: the <Calculation> nested inside <AutoEnter>.
+    let mut reading_autoenter_calc = false;
+    // Validation state: while inside a field's <Validation>, its own
+    // <Calculation>/<Message> must NOT be mistaken for the field's calc.
+    let mut in_field_validation = false;
+    let mut reading_validation_calc = false;
+    let mut reading_validation_message = false;
 
     // ExternalDataSource state
     let mut cur_eds: Option<ExternalDataSource> = None;
@@ -776,6 +827,8 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 global: None,
                                 stored: None,
                                 max_repetitions: None,
+                                validation: None,
+                                auto_enter: None,
                             });
                             in_field_autoenter = false;
                             reading_field_calc = false;
@@ -807,11 +860,52 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             }
                         } else if local == b"AutoEnter" && cur_field.is_some() {
                             in_field_autoenter = true;
-                        } else if local == b"Calculation"
-                            && cur_field.is_some()
-                            && !in_field_autoenter
-                        {
-                            reading_field_calc = true;
+                            let mut ae = FieldAutoEnter::default();
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"type" {
+                                    ae.auto_enter_type = attr_text(&attr);
+                                }
+                            }
+                            if let Some(f) = cur_field.as_mut() {
+                                // Only record an auto-enter block when there's an
+                                // actual behaviour (empty type = none).
+                                if !ae.auto_enter_type.is_empty() {
+                                    f.auto_enter = Some(ae);
+                                }
+                            }
+                        } else if local == b"Validation" && cur_field.is_some() {
+                            in_field_validation = true;
+                            let mut v = FieldValidation::default();
+                            for attr in e.attributes().flatten() {
+                                match attr.key.as_ref() {
+                                    b"type" => v.validation_type = attr_text(&attr),
+                                    b"allowOverride" => v.allow_override = &attr.value[..] == b"True",
+                                    b"alwaysValidate" => {
+                                        v.always_validate = &attr.value[..] == b"True"
+                                    }
+                                    b"notEmpty" => v.not_empty = &attr.value[..] == b"True",
+                                    b"unique" => v.unique = &attr.value[..] == b"True",
+                                    b"existing" => v.existing = &attr.value[..] == b"True",
+                                    _ => {}
+                                }
+                            }
+                            if let Some(f) = cur_field.as_mut() {
+                                f.validation = Some(v);
+                            }
+                        } else if local == b"Message" && in_field_validation {
+                            reading_validation_message = true;
+                        } else if local == b"Calculation" && cur_field.is_some() {
+                            // Disambiguate the three <Calculation> shapes under a Field:
+                            //   Field > Calculation                       → field calc
+                            //   Field > AutoEnter > … > Calculation       → auto-enter calc
+                            //   Field > Validation > Calculated > Calc…   → validation calc
+                            if in_field_validation {
+                                reading_validation_calc = true;
+                            } else if in_field_autoenter {
+                                reading_autoenter_calc = true;
+                            } else {
+                                reading_field_calc = true;
+                            }
                         }
                     }
 
@@ -1238,10 +1332,34 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             }
                             in_field_autoenter = false;
                             reading_field_calc = false;
+                            reading_autoenter_calc = false;
+                            in_field_validation = false;
+                            reading_validation_calc = false;
+                            reading_validation_message = false;
                         } else if local == b"AutoEnter" {
                             in_field_autoenter = false;
+                            reading_autoenter_calc = false;
+                            // FM stores calc line breaks as bare CR; normalize to LF.
+                            if let Some(ae) = cur_field.as_mut().and_then(|f| f.auto_enter.as_mut()) {
+                                if let Some(c) = ae.calculation.as_mut() {
+                                    *c = c.replace("\r\n", "\n").replace('\r', "\n");
+                                }
+                            }
+                        } else if local == b"Validation" {
+                            in_field_validation = false;
+                            reading_validation_calc = false;
+                            reading_validation_message = false;
+                            if let Some(v) = cur_field.as_mut().and_then(|f| f.validation.as_mut()) {
+                                if let Some(c) = v.calculation.as_mut() {
+                                    *c = c.replace("\r\n", "\n").replace('\r', "\n");
+                                }
+                            }
+                        } else if local == b"Message" {
+                            reading_validation_message = false;
                         } else if local == b"Calculation" {
                             reading_field_calc = false;
+                            reading_autoenter_calc = false;
+                            reading_validation_calc = false;
                         }
                         if depth == sec_depth {
                             section = Section::Root;
@@ -1377,6 +1495,13 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                         let text = e.unescape().unwrap_or_default().to_string();
                         cf.display.push_str(text.trim());
                     }
+                } else if reading_validation_message {
+                    if let Some(f) = cur_field.as_mut() {
+                        if let Some(v) = f.validation.as_mut() {
+                            let text = e.unescape().unwrap_or_default().to_string();
+                            v.message.get_or_insert_with(String::new).push_str(&text);
+                        }
+                    }
                 }
             }
 
@@ -1390,6 +1515,20 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                         f.calculation
                             .get_or_insert_with(String::new)
                             .push_str(&text);
+                    }
+                } else if reading_validation_calc {
+                    if let Some(f) = cur_field.as_mut() {
+                        if let Some(v) = f.validation.as_mut() {
+                            let text = String::from_utf8_lossy(e.as_ref()).to_string();
+                            v.calculation.get_or_insert_with(String::new).push_str(&text);
+                        }
+                    }
+                } else if reading_autoenter_calc {
+                    if let Some(f) = cur_field.as_mut() {
+                        if let Some(ae) = f.auto_enter.as_mut() {
+                            let text = String::from_utf8_lossy(e.as_ref()).to_string();
+                            ae.calculation.get_or_insert_with(String::new).push_str(&text);
+                        }
                     }
                 }
             }
@@ -1514,10 +1653,192 @@ pub fn describe(db: &ParsedDatabase) -> serde_json::Value {
 /// global, stored), matched case-insensitively. On a miss, the error names the
 /// closest substring matches so the caller can retry without a full `describe`.
 pub fn table_inline(db: &ParsedDatabase, name: &str) -> Result<serde_json::Value, String> {
-    if let Some(t) = db.tables.iter().find(|t| t.name.eq_ignore_ascii_case(name)) {
-        return Ok(serde_json::to_value(t).unwrap_or(serde_json::Value::Null));
+    table_inline_opts(db, name, None, false)
+}
+
+/// Size-controlled variant of `table_inline`. A single base table's fields can
+/// run to 150k+ characters — too big to sit in an AI's context, which pushes it
+/// back to grepping the raw XML. Two levers keep the output small:
+///   - `fields`: return the full definition of only the named fields.
+///   - `summary`: return one compact line per field (name, type, key flags)
+///     instead of every field's full definition.
+/// With neither lever, a table with more than `SUMMARY_THRESHOLD` fields is
+/// summarised automatically, and the payload tells the caller how to get detail
+/// (get_field / get_table with `fields`).
+pub fn table_inline_opts(
+    db: &ParsedDatabase,
+    name: &str,
+    fields: Option<&[String]>,
+    summary: bool,
+) -> Result<serde_json::Value, String> {
+    /// Above this field count, a full dump is too large for an AI context, so an
+    /// unfiltered call summarises instead of returning everything.
+    const SUMMARY_THRESHOLD: usize = 40;
+
+    let table = db
+        .tables
+        .iter()
+        .find(|t| t.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| not_found("Table", name, db.tables.iter().map(|t| t.name.as_str())))?;
+
+    // Explicit field filter: return just those fields' full definitions.
+    if let Some(wanted) = fields {
+        let mut hits: Vec<&FieldInfo> = Vec::new();
+        let mut missing: Vec<String> = Vec::new();
+        for want in wanted {
+            match table.fields.iter().find(|f| f.name.eq_ignore_ascii_case(want)) {
+                Some(f) => hits.push(f),
+                None => missing.push(want.clone()),
+            }
+        }
+        let mut out = serde_json::json!({
+            "id": table.id,
+            "name": table.name,
+            "field_count": table.fields.len(),
+            "fields": hits,
+        });
+        if !missing.is_empty() {
+            out["missing"] = serde_json::json!(missing);
+        }
+        return Ok(out);
     }
-    Err(not_found("Table", name, db.tables.iter().map(|t| t.name.as_str())))
+
+    let want_summary = summary || table.fields.len() > SUMMARY_THRESHOLD;
+    if want_summary {
+        let fields: Vec<serde_json::Value> = table.fields.iter().map(field_summary_row).collect();
+        let mut out = serde_json::json!({
+            "id": table.id,
+            "name": table.name,
+            "field_count": table.fields.len(),
+            "view": "summary",
+            "fields": fields,
+        });
+        if !summary {
+            // Auto-summarised (not requested): tell the caller how to drill in.
+            out["note"] = serde_json::json!(format!(
+                "Summarised because the table has {} fields. For a field's full \
+                 definition (validation, auto-enter, calc) call get_field(table, \
+                 field), or get_table with fields=[…].",
+                table.fields.len()
+            ));
+        }
+        return Ok(out);
+    }
+
+    Ok(serde_json::to_value(table).unwrap_or(serde_json::Value::Null))
+}
+
+/// One compact line for a field in `summary` view: `name: DataType [flags]`.
+/// A flat string (not a nested object) so a 400+-field table stays small even
+/// pretty-printed — enough to decide which fields to pull in full via get_field.
+/// Flags mark the things worth drilling into: a non-plain field type (Calculated,
+/// Summary), global storage, a validation rule, and auto-enter behaviour.
+fn field_summary_row(f: &FieldInfo) -> serde_json::Value {
+    let mut flags: Vec<&str> = Vec::new();
+    if !f.field_type.eq_ignore_ascii_case("Normal") && !f.field_type.is_empty() {
+        // Surface calc/summary fields; the bare type name is the clearest flag.
+        flags.push(f.field_type.as_str());
+    }
+    if f.global.unwrap_or(false) {
+        flags.push("global");
+    }
+    if f.validation.is_some() {
+        flags.push("validation");
+    }
+    if f.auto_enter.is_some() {
+        flags.push("auto-enter");
+    }
+    let suffix = if flags.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", flags.join(", "))
+    };
+    serde_json::Value::String(format!("{}: {}{}", f.name, f.data_type, suffix))
+}
+
+/// A single field's full definition (type, storage, auto-enter, and the full
+/// `<Validation>` block). The precise, small-output answer to "what is this one
+/// field and why does it behave this way" — no need to pull a whole table or
+/// grep the XML. Table and field are matched case-insensitively.
+pub fn field_inline(
+    db: &ParsedDatabase,
+    table_name: &str,
+    field_name: &str,
+) -> Result<serde_json::Value, String> {
+    let table = db
+        .tables
+        .iter()
+        .find(|t| t.name.eq_ignore_ascii_case(table_name))
+        .ok_or_else(|| {
+            not_found("Table", table_name, db.tables.iter().map(|t| t.name.as_str()))
+        })?;
+    let field = table
+        .fields
+        .iter()
+        .find(|f| f.name.eq_ignore_ascii_case(field_name))
+        .ok_or_else(|| {
+            not_found(
+                &format!("Field in table '{}'", table.name),
+                field_name,
+                table.fields.iter().map(|f| f.name.as_str()),
+            )
+        })?;
+    Ok(serde_json::json!({
+        "table": table.name,
+        "field": field,
+    }))
+}
+
+/// Relationships as a compact inline list. FileMaker's validation and lookup
+/// behaviour hangs off relationships (e.g. `Count(recepMt::x)=0` only makes
+/// sense once you know which TOs and join keys `recepMt` connects) — so an AI
+/// needs "describe this relationship / list a TO's relationships" without
+/// standing up a whole inspect directory. With `filter`:
+///   - `#<id>`  → the single relationship with that id.
+///   - a name   → every relationship touching that table occurrence.
+///   - omitted  → all relationships (they're small: two TOs + join predicates).
+pub fn relationships_inline(
+    db: &ParsedDatabase,
+    filter: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let selected: Vec<&Relationship> = match filter.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(f) => {
+            if let Some(id) = f.strip_prefix('#').and_then(|n| n.trim().parse::<u32>().ok()) {
+                let hit = db
+                    .relationships
+                    .iter()
+                    .find(|r| r.id == id)
+                    .ok_or_else(|| format!("Relationship #{} not found.", id))?;
+                vec![hit]
+            } else {
+                let hits: Vec<&Relationship> = db
+                    .relationships
+                    .iter()
+                    .filter(|r| {
+                        r.left_to.eq_ignore_ascii_case(f) || r.right_to.eq_ignore_ascii_case(f)
+                    })
+                    .collect();
+                if hits.is_empty() {
+                    let tos: Vec<&str> = db
+                        .table_occurrences
+                        .iter()
+                        .map(|t| t.name.as_str())
+                        .collect();
+                    return Err(not_found(
+                        "Table occurrence",
+                        f,
+                        tos.into_iter(),
+                    ));
+                }
+                hits
+            }
+        }
+        None => db.relationships.iter().collect(),
+    };
+    Ok(serde_json::json!({
+        "count": selected.len(),
+        "relationships": selected,
+    }))
 }
 
 /// One layout's full structure inline (base TO, recursive objects incl. fields,
@@ -2515,6 +2836,124 @@ mod tests {
             .filter(|s| !s.is_folder && !s.is_separator)
             .count();
         assert_eq!(real_scripts, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A field with an auto-enter lookup AND a by-calculation validation: the
+    /// validation calc/message must land in `field.validation` (not in the
+    /// field's own `calculation`), and its bare-CR line breaks normalize to LF.
+    const VALIDATION_FIXTURE: &str = "<FMSaveAsXML File=\"V.fmp12\">
+  <FieldsForTables>
+    <BaseTableReference id=\"1\" name=\"PEDIDOS\"/>
+    <Field id=\"7\" name=\"codProveedor\" fieldtype=\"Normal\" datatype=\"Text\" comment=\"\">
+      <AutoEnter type=\"Looked_up\" prohibitModification=\"False\"></AutoEnter>
+      <Validation alwaysValidate=\"False\" type=\"Always\" allowOverride=\"False\" notEmpty=\"False\" unique=\"False\" existing=\"False\">
+        <Calculated><Calculation><Text><![CDATA[Count (recep::x)=0\rand True]]></Text></Calculation></Calculated>
+        <Message>No se puede</Message>
+      </Validation>
+      <Storage index=\"All\" global=\"False\" maxRepetitions=\"1\"/>
+    </Field>
+    <Field id=\"8\" name=\"nombre\" fieldtype=\"Normal\" datatype=\"Text\">
+      <Validation type=\"OnlyDuringDataEntry\" allowOverride=\"True\" notEmpty=\"False\" unique=\"False\" existing=\"False\"></Validation>
+      <Storage index=\"All\" global=\"False\" maxRepetitions=\"1\"/>
+    </Field>
+  </FieldsForTables>
+  <RelationshipCatalog>
+    <Relationship id=\"85\">
+      <LeftTable><TableOccurrenceReference id=\"1\" name=\"PEDIDOS\"/></LeftTable>
+      <RightTable><TableOccurrenceReference id=\"2\" name=\"recep\"/></RightTable>
+      <JoinPredicateList membercount=\"1\">
+        <JoinPredicate type=\"Equal\">
+          <LeftField><FieldReference id=\"1\" name=\"id\"><TableOccurrenceReference id=\"1\" name=\"PEDIDOS\"/></FieldReference></LeftField>
+          <RightField><FieldReference id=\"9\" name=\"idPedidoBy\"><TableOccurrenceReference id=\"2\" name=\"recep\"/></FieldReference></RightField>
+        </JoinPredicate>
+      </JoinPredicateList>
+    </Relationship>
+  </RelationshipCatalog>
+</FMSaveAsXML>";
+
+    #[test]
+    fn validation_and_autoenter_are_captured_on_the_field() {
+        let dir = temp_dir("validation");
+        let xml_path = dir.join("v.xml");
+        std::fs::write(&xml_path, VALIDATION_FIXTURE).unwrap();
+
+        let db = parse(xml_path.to_str().unwrap()).unwrap();
+        let f = &db.tables[0].fields[0];
+        assert_eq!(f.name, "codProveedor");
+        // The validation calc must NOT leak into the field's own calculation.
+        assert!(f.calculation.is_none(), "validation calc leaked into field calc");
+        let v = f.validation.as_ref().expect("validation captured");
+        assert_eq!(v.validation_type, "Always");
+        assert!(!v.allow_override);
+        assert_eq!(v.message.as_deref(), Some("No se puede"));
+        let calc = v.calculation.as_deref().unwrap();
+        assert!(calc.contains("Count (recep::x)=0"));
+        assert!(!calc.contains('\r'), "bare CR should be normalized to LF");
+        // Auto-enter type is captured.
+        assert_eq!(f.auto_enter.as_ref().unwrap().auto_enter_type, "Looked_up");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn field_inline_returns_one_field_with_validation() {
+        let dir = temp_dir("field-inline");
+        let xml_path = dir.join("v.xml");
+        std::fs::write(&xml_path, VALIDATION_FIXTURE).unwrap();
+        let db = parse(xml_path.to_str().unwrap()).unwrap();
+
+        let v = field_inline(&db, "pedidos", "codproveedor").unwrap(); // case-insensitive
+        assert_eq!(v["table"], "PEDIDOS");
+        assert_eq!(v["field"]["validation"]["type"], "Always");
+
+        // A miss suggests near matches rather than dumping the table.
+        let miss = field_inline(&db, "PEDIDOS", "codProv").unwrap_err();
+        assert!(miss.contains("codProveedor"), "miss should suggest: {}", miss);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn relationships_inline_filters_by_occurrence_and_id() {
+        let dir = temp_dir("rels-inline");
+        let xml_path = dir.join("v.xml");
+        std::fs::write(&xml_path, VALIDATION_FIXTURE).unwrap();
+        let db = parse(xml_path.to_str().unwrap()).unwrap();
+
+        let by_to = relationships_inline(&db, Some("recep")).unwrap();
+        assert_eq!(by_to["count"], 1);
+        let rel = &by_to["relationships"][0];
+        assert_eq!(rel["id"], 85);
+        assert_eq!(rel["predicates"][0]["left_field"], "id");
+        assert_eq!(rel["predicates"][0]["right_field"], "idPedidoBy");
+
+        let by_id = relationships_inline(&db, Some("#85")).unwrap();
+        assert_eq!(by_id["count"], 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn get_table_field_filter_returns_only_requested() {
+        let dir = temp_dir("table-filter");
+        let xml_path = dir.join("v.xml");
+        std::fs::write(&xml_path, VALIDATION_FIXTURE).unwrap();
+        let db = parse(xml_path.to_str().unwrap()).unwrap();
+
+        let filtered =
+            table_inline_opts(&db, "PEDIDOS", Some(&["codProveedor".to_string()]), false).unwrap();
+        assert_eq!(filtered["fields"].as_array().unwrap().len(), 1);
+        assert_eq!(filtered["fields"][0]["name"], "codProveedor");
+        assert_eq!(filtered["field_count"], 2);
+
+        // Summary view yields compact string rows, not full definitions.
+        let summary = table_inline_opts(&db, "PEDIDOS", None, true).unwrap();
+        assert_eq!(summary["view"], "summary");
+        let first = summary["fields"][0].as_str().unwrap();
+        assert!(first.starts_with("codProveedor: Text"), "row was: {}", first);
+        assert!(first.contains("validation"));
 
         std::fs::remove_dir_all(&dir).ok();
     }

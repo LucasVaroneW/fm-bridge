@@ -43,11 +43,17 @@ struct Command {
     script: Option<String>,
     #[serde(default)]
     field: Option<String>,
-    // ── inline-read params (get_table / get_layout) ──
+    // ── inline-read params (get_table / get_layout / get_field) ──
     #[serde(default)]
     table: Option<String>,
     #[serde(default)]
     layout: Option<String>,
+    /// get_table: return only these fields' full definitions (size control).
+    #[serde(default)]
+    fields: Option<Vec<String>>,
+    /// get_table: one compact line per field instead of full definitions.
+    #[serde(default)]
+    summary: Option<bool>,
     // ── format style (reformat): "inline" | "indented" ──
     #[serde(default)]
     style: Option<String>,
@@ -306,7 +312,48 @@ fn handle_command(cmd: &Command) -> Response {
                 None => return Response::error("No table provided".to_string()),
             };
             match fmsavexml::parse(xml_path) {
-                Ok(db) => match fmsavexml::table_inline(&db, table) {
+                Ok(db) => {
+                    match fmsavexml::table_inline_opts(
+                        &db,
+                        table,
+                        cmd.fields.as_deref(),
+                        cmd.summary.unwrap_or(false),
+                    ) {
+                        Ok(v) => Response::ok_data(v),
+                        Err(e) => Response::error(e),
+                    }
+                }
+                Err(e) => Response::error(e),
+            }
+        }
+        "get_field" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            let table = match &cmd.table {
+                Some(t) => t,
+                None => return Response::error("No table provided".to_string()),
+            };
+            let field = match &cmd.field {
+                Some(f) => f,
+                None => return Response::error("No field provided".to_string()),
+            };
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => match fmsavexml::field_inline(&db, table, field) {
+                    Ok(v) => Response::ok_data(v),
+                    Err(e) => Response::error(e),
+                },
+                Err(e) => Response::error(e),
+            }
+        }
+        "get_relationships" => {
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            match fmsavexml::parse(xml_path) {
+                Ok(db) => match fmsavexml::relationships_inline(&db, cmd.table.as_deref()) {
                     Ok(v) => Response::ok_data(v),
                     Err(e) => Response::error(e),
                 },
@@ -486,11 +533,13 @@ fn run_cli_mode() -> Result<(), String> {
         "reformat" => run_reformat_cli(&args[1..]),
         "describe" => run_describe_cli(&args[1..]),
         "get-table" => run_get_table_cli(&args[1..]),
+        "get-field" => run_get_field_cli(&args[1..]),
+        "get-relationships" => run_get_relationships_cli(&args[1..]),
         "get-script" => run_get_script_cli(&args[1..]),
         "get-layout" => run_get_layout_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, who-calls, who-uses-field, describe, get-table, get-script",
+            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script",
             args[0]
         )),
     }
@@ -684,14 +733,50 @@ fn run_describe_cli(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// `get-table`: one table's full field definitions as pretty JSON.
+/// `get-table`: one table's field definitions as pretty JSON. Size control:
+/// `--summary` for one line per field, or a list of field names for just those.
 fn run_get_table_cli(args: &[String]) -> Result<(), String> {
     if args.len() < 2 {
-        return Err("Usage: fm-bridge get-table <FMSaveAsXML.xml> <TableName>".to_string());
+        return Err(
+            "Usage: fm-bridge get-table <FMSaveAsXML.xml> <TableName> [--summary | FieldName…]"
+                .to_string(),
+        );
     }
     let db = fmsavexml::parse(&args[0])?;
-    let table = fmsavexml::table_inline(&db, &args[1])?;
+    let rest = &args[2..];
+    let summary = rest.iter().any(|a| a == "--summary");
+    let field_filter: Vec<String> =
+        rest.iter().filter(|a| !a.starts_with("--")).cloned().collect();
+    let fields = if field_filter.is_empty() { None } else { Some(field_filter.as_slice()) };
+    let table = fmsavexml::table_inline_opts(&db, &args[1], fields, summary)?;
     println!("{}", serde_json::to_string_pretty(&table).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
+/// `get-field`: a single field's full definition (type, storage, auto-enter,
+/// validation) as pretty JSON — the small, precise answer to "why does this
+/// field behave this way".
+fn run_get_field_cli(args: &[String]) -> Result<(), String> {
+    if args.len() < 3 {
+        return Err("Usage: fm-bridge get-field <FMSaveAsXML.xml> <TableName> <FieldName>".to_string());
+    }
+    let db = fmsavexml::parse(&args[0])?;
+    let data = fmsavexml::field_inline(&db, &args[1], &args[2])?;
+    println!("{}", serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
+/// `get-relationships`: relationships as a compact list — all of them, or (with
+/// a second arg) those touching one table occurrence, or `#id` for one.
+fn run_get_relationships_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err(
+            "Usage: fm-bridge get-relationships <FMSaveAsXML.xml> [TableOccurrence|#id]".to_string(),
+        );
+    }
+    let db = fmsavexml::parse(&args[0])?;
+    let data = fmsavexml::relationships_inline(&db, args.get(1).map(|s| s.as_str()))?;
+    println!("{}", serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?);
     Ok(())
 }
 
@@ -979,6 +1064,8 @@ mod tests {
             field: None,
             table: None,
             layout: None,
+            fields: None,
+            summary: None,
             style: None,
         }
     }

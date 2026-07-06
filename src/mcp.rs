@@ -104,8 +104,18 @@ fn tools_list_result() -> Value {
         },
         {
             "name": "get_table",
-            "description": "Return one base table's full field definitions inline (type, calculation, indexing, global, stored) from a single FMSaveAsXML export. Writes nothing to disk. Use describe_database first to get table names.",
-            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." }, "table": { "type": "string", "description": "Base table name (case-insensitive)." } }, "required": ["xml_path", "table"] }
+            "description": "List a base table's fields from a single FMSaveAsXML export (no disk writes). Big tables (>40 fields) auto-summarise to one line per field to stay context-sized; pass summary=true to force that, or fields=[…] to get the full definition (validation, auto-enter, calc, storage) of just some fields. For a single field prefer get_field. Use describe_database first for table names.",
+            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." }, "table": { "type": "string", "description": "Base table name (case-insensitive)." }, "fields": { "type": "array", "items": { "type": "string" }, "description": "Optional: return only these fields' full definitions." }, "summary": { "type": "boolean", "description": "Optional: one compact line per field instead of full definitions." } }, "required": ["xml_path", "table"] }
+        },
+        {
+            "name": "get_field",
+            "description": "Return ONE field's full definition inline: type, storage/indexing, auto-enter, and the complete <Validation> block (type, allowOverride, alwaysValidate, notEmpty, unique, existing, calc, message). This is the precise, small-output answer to 'what is this field / why can't I change it / what rule blocks this value' — use it instead of get_table (whole table) or reading the raw XML. Table and field are case-insensitive.",
+            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." }, "table": { "type": "string", "description": "Base table name (case-insensitive)." }, "field": { "type": "string", "description": "Field name (case-insensitive)." } }, "required": ["xml_path", "table", "field"] }
+        },
+        {
+            "name": "get_relationships",
+            "description": "Describe relationships inline: base/left and right table occurrences plus every join predicate (leftField <op> rightField). This is how you resolve what a related table occurrence (e.g. one named in a validation or lookup like 'Count(recepMt::x)') actually joins on — without an inspect directory. Omit table_occurrence for all relationships; pass a TO name for every relationship touching it, or '#id' for one.",
+            "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string", "description": "Path to the FMSaveAsXML .xml export." }, "table_occurrence": { "type": "string", "description": "Optional: a table-occurrence name (all relationships touching it) or '#id' (one relationship)." } }, "required": ["xml_path"] }
         },
         {
             "name": "get_script",
@@ -187,6 +197,26 @@ fn tools_call(params: Option<&Value>) -> Result<Value, RpcError> {
             cmd.command = "get_table".to_string();
             cmd.xml_path = Some(arg_str(&args, "xml_path")?);
             cmd.table = Some(arg_str(&args, "table")?);
+            cmd.fields = args
+                .get("fields")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+            cmd.summary = args.get("summary").and_then(|v| v.as_bool());
+        }
+        "get_field" => {
+            cmd.command = "get_field".to_string();
+            cmd.xml_path = Some(arg_str(&args, "xml_path")?);
+            cmd.table = Some(arg_str(&args, "table")?);
+            cmd.field = Some(arg_str(&args, "field")?);
+        }
+        "get_relationships" => {
+            cmd.command = "get_relationships".to_string();
+            cmd.xml_path = Some(arg_str(&args, "xml_path")?);
+            // Optional filter: a table-occurrence name or "#id".
+            cmd.table = args
+                .get("table_occurrence")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
         }
         "get_script" => {
             cmd.command = "get_script".to_string();
@@ -247,6 +277,8 @@ fn base_command() -> Command {
         field: None,
         table: None,
         layout: None,
+        fields: None,
+        summary: None,
         style: None,
     }
 }
@@ -294,6 +326,8 @@ mod tests {
             "script_to_json",
             "describe_database",
             "get_table",
+            "get_field",
+            "get_relationships",
             "get_script",
             "get_layout",
             "inspect_database",

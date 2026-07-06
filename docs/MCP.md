@@ -109,7 +109,9 @@ binario, args = `["mcp"]`.
 | `validate_script` | Linter: todos los errores de formato/estructura | `script_text` |
 | `script_to_json` | Árbol estructurado del script (steps, calcs, campos) | `script_text` |
 | `describe_database` | **Inline**: conteos + nombres de tablas/scripts/layouts/CFs/externos. Primera llamada para orientarse. No escribe a disco | `xml_path` |
-| `get_table` | **Inline**: campos de una tabla (tipo, cálculo, indexación, global, stored). No escribe a disco | `xml_path`, `table` |
+| `get_table` | **Inline**: campos de una tabla. Tablas grandes (>40 campos) se resumen a una línea por campo; `summary=true` fuerza el resumen y `fields=[…]` trae la definición completa sólo de esos campos. No escribe a disco | `xml_path`, `table`, `fields[]?`, `summary?` |
+| `get_field` | **Inline**: un solo campo con su `<Validation>` completa (type, allowOverride, notEmpty, unique, calc, message), auto-enter y storage. La respuesta chica a "¿qué es este campo / por qué no puedo cambiarlo?" | `xml_path`, `table`, `field` |
+| `get_relationships` | **Inline**: relaciones con sus TOs y predicados de join (`campoIzq <op> campoDer`). Sin filtro = todas; nombre de TO = las que la tocan; `#id` = una | `xml_path`, `table_occurrence?` |
 | `get_script` | **Inline**: el `.fmscript` de un script por nombre o `#id`. No escribe a disco | `xml_path`, `script` |
 | `get_layout` | **Inline**: estructura de un layout (objetos, campos, portales, tooltips, **URL de web viewers**, triggers) por nombre o `#id`. No escribe a disco | `xml_path`, `layout` |
 | `inspect_database` | Parsea un export `FMSaveAsXML` → **directorio navegable en disco** + conteos | `xml_path`, `output_dir?` |
@@ -125,8 +127,9 @@ Cada tool devuelve un bloque de texto con el JSON de la respuesta del motor
 > **¿Cliente MCP sin acceso a archivos?** (p. ej. Claude Desktop "pelado", sin un
 > filesystem-MCP). Entonces `inspect_database` / `slice_inspect` escriben a disco
 > pero no podés volver a leer esa carpeta. Usá las tools **inline**
-> (`describe_database` → `get_table` / `get_script`, más `audit_database`,
-> `who_calls`, `who_uses_field`): devuelven todo en la respuesta, sin tocar disco.
+> (`describe_database` → `get_table` / `get_field` / `get_relationships` /
+> `get_script`, más `audit_database`, `who_calls`, `who_uses_field`): devuelven
+> todo en la respuesta, sin tocar disco.
 > Con un solo XML eso alcanza para orientarse y razonar.
 
 ## Ejemplo de uso

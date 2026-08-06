@@ -617,12 +617,10 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 for attr in e.attributes().flatten() {
                                     match attr.key.as_ref() {
                                         b"type" => {
-                                            obj.object_type =
-                                                attr_text(&attr);
+                                            obj.object_type = attr_text(&attr);
                                         }
                                         b"name" => {
-                                            obj.object_name =
-                                                attr_text(&attr);
+                                            obj.object_name = attr_text(&attr);
                                         }
                                         _ => {}
                                     }
@@ -655,8 +653,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 for attr in e.attributes().flatten() {
                                     match attr.key.as_ref() {
                                         b"action" => {
-                                            event =
-                                                attr_text(&attr);
+                                            event = attr_text(&attr);
                                         }
                                         b"browseMode" if &attr.value[..] == b"True" => {
                                             modes.push("browseMode".to_string());
@@ -779,10 +776,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                         cur_field_table_id =
                                             String::from_utf8_lossy(&attr.value).parse().ok()
                                     }
-                                    b"name" => {
-                                        cur_field_table_name =
-                                            attr_text(&attr)
-                                    }
+                                    b"name" => cur_field_table_name = attr_text(&attr),
                                     _ => {}
                                 }
                             }
@@ -799,19 +793,10 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                             .parse()
                                             .unwrap_or(0)
                                     }
-                                    b"name" => {
-                                        name = attr_text(&attr)
-                                    }
-                                    b"fieldtype" => {
-                                        field_type =
-                                            attr_text(&attr)
-                                    }
-                                    b"datatype" => {
-                                        data_type = attr_text(&attr)
-                                    }
-                                    b"comment" => {
-                                        comment = attr_text(&attr)
-                                    }
+                                    b"name" => name = attr_text(&attr),
+                                    b"fieldtype" => field_type = attr_text(&attr),
+                                    b"datatype" => data_type = attr_text(&attr),
+                                    b"comment" => comment = attr_text(&attr),
                                     _ => {}
                                 }
                             }
@@ -837,8 +822,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 for attr in e.attributes().flatten() {
                                     match attr.key.as_ref() {
                                         b"index" => {
-                                            let v =
-                                                attr_text(&attr);
+                                            let v = attr_text(&attr);
                                             f.indexed = Some(v != "None");
                                             f.index = Some(v);
                                         }
@@ -879,7 +863,9 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             for attr in e.attributes().flatten() {
                                 match attr.key.as_ref() {
                                     b"type" => v.validation_type = attr_text(&attr),
-                                    b"allowOverride" => v.allow_override = &attr.value[..] == b"True",
+                                    b"allowOverride" => {
+                                        v.allow_override = &attr.value[..] == b"True"
+                                    }
                                     b"alwaysValidate" => {
                                         v.always_validate = &attr.value[..] == b"True"
                                     }
@@ -921,13 +907,8 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                             .parse()
                                             .unwrap_or(0)
                                     }
-                                    b"name" => {
-                                        name = attr_text(&attr)
-                                    }
-                                    b"type" => {
-                                        source_type =
-                                            attr_text(&attr)
-                                    }
+                                    b"name" => name = attr_text(&attr),
+                                    b"type" => source_type = attr_text(&attr),
                                     _ => {}
                                 }
                             }
@@ -964,15 +945,13 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             if local == b"DataSourceReference" {
                                 for attr in e.attributes().flatten() {
                                     if attr.key.as_ref() == b"name" {
-                                        to.data_source =
-                                            attr_text(&attr);
+                                        to.data_source = attr_text(&attr);
                                     }
                                 }
                             } else if local == b"BaseTableReference" {
                                 for attr in e.attributes().flatten() {
                                     if attr.key.as_ref() == b"name" {
-                                        to.base_table =
-                                            attr_text(&attr);
+                                        to.base_table = attr_text(&attr);
                                     }
                                 }
                             }
@@ -1100,12 +1079,8 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                             .parse()
                                             .unwrap_or(0)
                                     }
-                                    b"name" => {
-                                        name = attr_text(&attr)
-                                    }
-                                    b"access" => {
-                                        access = attr_text(&attr)
-                                    }
+                                    b"name" => name = attr_text(&attr),
+                                    b"access" => access = attr_text(&attr),
                                     _ => {}
                                 }
                             }
@@ -1121,8 +1096,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             } else if local == b"Parameter" {
                                 for attr in e.attributes().flatten() {
                                     if attr.key.as_ref() == b"name" {
-                                        cf.parameters
-                                            .push(attr_text(&attr));
+                                        cf.parameters.push(attr_text(&attr));
                                     }
                                 }
                             }
@@ -1340,7 +1314,8 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             in_field_autoenter = false;
                             reading_autoenter_calc = false;
                             // FM stores calc line breaks as bare CR; normalize to LF.
-                            if let Some(ae) = cur_field.as_mut().and_then(|f| f.auto_enter.as_mut()) {
+                            if let Some(ae) = cur_field.as_mut().and_then(|f| f.auto_enter.as_mut())
+                            {
                                 if let Some(c) = ae.calculation.as_mut() {
                                     *c = c.replace("\r\n", "\n").replace('\r', "\n");
                                 }
@@ -1349,7 +1324,8 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                             in_field_validation = false;
                             reading_validation_calc = false;
                             reading_validation_message = false;
-                            if let Some(v) = cur_field.as_mut().and_then(|f| f.validation.as_mut()) {
+                            if let Some(v) = cur_field.as_mut().and_then(|f| f.validation.as_mut())
+                            {
                                 if let Some(c) = v.calculation.as_mut() {
                                     *c = c.replace("\r\n", "\n").replace('\r', "\n");
                                 }
@@ -1520,14 +1496,18 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                     if let Some(f) = cur_field.as_mut() {
                         if let Some(v) = f.validation.as_mut() {
                             let text = String::from_utf8_lossy(e.as_ref()).to_string();
-                            v.calculation.get_or_insert_with(String::new).push_str(&text);
+                            v.calculation
+                                .get_or_insert_with(String::new)
+                                .push_str(&text);
                         }
                     }
                 } else if reading_autoenter_calc {
                     if let Some(f) = cur_field.as_mut() {
                         if let Some(ae) = f.auto_enter.as_mut() {
                             let text = String::from_utf8_lossy(e.as_ref()).to_string();
-                            ae.calculation.get_or_insert_with(String::new).push_str(&text);
+                            ae.calculation
+                                .get_or_insert_with(String::new)
+                                .push_str(&text);
                         }
                     }
                 }
@@ -1686,7 +1666,11 @@ pub fn table_inline_opts(
         let mut hits: Vec<&FieldInfo> = Vec::new();
         let mut missing: Vec<String> = Vec::new();
         for want in wanted {
-            match table.fields.iter().find(|f| f.name.eq_ignore_ascii_case(want)) {
+            match table
+                .fields
+                .iter()
+                .find(|f| f.name.eq_ignore_ascii_case(want))
+            {
                 Some(f) => hits.push(f),
                 None => missing.push(want.clone()),
             }
@@ -1770,7 +1754,11 @@ pub fn field_inline(
         .iter()
         .find(|t| t.name.eq_ignore_ascii_case(table_name))
         .ok_or_else(|| {
-            not_found("Table", table_name, db.tables.iter().map(|t| t.name.as_str()))
+            not_found(
+                "Table",
+                table_name,
+                db.tables.iter().map(|t| t.name.as_str()),
+            )
         })?;
     let field = table
         .fields
@@ -1803,7 +1791,10 @@ pub fn relationships_inline(
 ) -> Result<serde_json::Value, String> {
     let selected: Vec<&Relationship> = match filter.map(str::trim).filter(|s| !s.is_empty()) {
         Some(f) => {
-            if let Some(id) = f.strip_prefix('#').and_then(|n| n.trim().parse::<u32>().ok()) {
+            if let Some(id) = f
+                .strip_prefix('#')
+                .and_then(|n| n.trim().parse::<u32>().ok())
+            {
                 let hit = db
                     .relationships
                     .iter()
@@ -1824,11 +1815,7 @@ pub fn relationships_inline(
                         .iter()
                         .map(|t| t.name.as_str())
                         .collect();
-                    return Err(not_found(
-                        "Table occurrence",
-                        f,
-                        tos.into_iter(),
-                    ));
+                    return Err(not_found("Table occurrence", f, tos.into_iter()));
                 }
                 hits
             }
@@ -1846,7 +1833,9 @@ pub fn relationships_inline(
 /// (case-insensitive) or `#id`. The same data inspect writes to
 /// `layouts/<id>_<name>.json`, but without touching disk.
 pub fn layout_inline(db: &ParsedDatabase, query: &str) -> Result<serde_json::Value, String> {
-    let by_id = query.strip_prefix('#').and_then(|n| n.trim().parse::<u32>().ok());
+    let by_id = query
+        .strip_prefix('#')
+        .and_then(|n| n.trim().parse::<u32>().ok());
     let found = db.layouts.iter().find(|l| match by_id {
         Some(id) => l.id == id,
         None => l.name.eq_ignore_ascii_case(query),
@@ -1857,7 +1846,10 @@ pub fn layout_inline(db: &ParsedDatabase, query: &str) -> Result<serde_json::Val
         None => Err(not_found(
             "Layout",
             query,
-            db.layouts.iter().filter(|l| !l.is_folder).map(|l| l.name.as_str()),
+            db.layouts
+                .iter()
+                .filter(|l| !l.is_folder)
+                .map(|l| l.name.as_str()),
         )),
     }
 }
@@ -1866,7 +1858,9 @@ pub fn layout_inline(db: &ParsedDatabase, query: &str) -> Result<serde_json::Val
 /// disk — looked up by name (case-insensitive) or `#id`. On a miss, suggests
 /// close matches.
 pub fn script_text_inline(db: &ParsedDatabase, query: &str) -> Result<serde_json::Value, String> {
-    let by_id = query.strip_prefix('#').and_then(|n| n.trim().parse::<u32>().ok());
+    let by_id = query
+        .strip_prefix('#')
+        .and_then(|n| n.trim().parse::<u32>().ok());
     let found = db.scripts.iter().find(|s| match by_id {
         Some(id) => s.id == id,
         None => s.name.eq_ignore_ascii_case(query),
@@ -1909,9 +1903,17 @@ fn not_found<'a>(kind: &str, query: &str, candidates: impl Iterator<Item = &'a s
         .take(8)
         .collect();
     if hits.is_empty() {
-        format!("{} '{}' not found. Use describe_database to list what exists.", kind, query)
+        format!(
+            "{} '{}' not found. Use describe_database to list what exists.",
+            kind, query
+        )
     } else {
-        format!("{} '{}' not found. Did you mean: {}", kind, query, hits.join(", "))
+        format!(
+            "{} '{}' not found. Did you mean: {}",
+            kind,
+            query,
+            hits.join(", ")
+        )
     }
 }
 
@@ -2883,7 +2885,10 @@ mod tests {
         let f = &db.tables[0].fields[0];
         assert_eq!(f.name, "codProveedor");
         // The validation calc must NOT leak into the field's own calculation.
-        assert!(f.calculation.is_none(), "validation calc leaked into field calc");
+        assert!(
+            f.calculation.is_none(),
+            "validation calc leaked into field calc"
+        );
         let v = f.validation.as_ref().expect("validation captured");
         assert_eq!(v.validation_type, "Always");
         assert!(!v.allow_override);
@@ -2910,7 +2915,11 @@ mod tests {
 
         // A miss suggests near matches rather than dumping the table.
         let miss = field_inline(&db, "PEDIDOS", "codProv").unwrap_err();
-        assert!(miss.contains("codProveedor"), "miss should suggest: {}", miss);
+        assert!(
+            miss.contains("codProveedor"),
+            "miss should suggest: {}",
+            miss
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -2952,7 +2961,11 @@ mod tests {
         let summary = table_inline_opts(&db, "PEDIDOS", None, true).unwrap();
         assert_eq!(summary["view"], "summary");
         let first = summary["fields"][0].as_str().unwrap();
-        assert!(first.starts_with("codProveedor: Text"), "row was: {}", first);
+        assert!(
+            first.starts_with("codProveedor: Text"),
+            "row was: {}",
+            first
+        );
         assert!(first.contains("validation"));
 
         std::fs::remove_dir_all(&dir).ok();
@@ -3117,7 +3130,10 @@ mod tests {
             .iter()
             .find(|o| o.object_type == "Web Viewer")
             .unwrap();
-        assert_eq!(wv.web_viewer_url.as_deref(), Some("\"http://x/\" & Tab::Field"));
+        assert_eq!(
+            wv.web_viewer_url.as_deref(),
+            Some("\"http://x/\" & Tab::Field")
+        );
 
         let j = layout_inline(&db, "dash").unwrap(); // case-insensitive
         assert!(j.to_string().contains("web_viewer_url"));

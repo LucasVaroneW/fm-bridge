@@ -11,10 +11,10 @@
 // (no `id`) don't. Anything we can't model is surfaced as a JSON-RPC error, not
 // a panic.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 
-use crate::{handle_command, steps, Command};
+use crate::{Command, handle_command, steps};
 
 /// A JSON-RPC error as (code, message).
 type RpcError = (i64, String);
@@ -58,7 +58,8 @@ pub fn run() -> Result<(), String> {
                 }
             };
             writeln!(out, "{}", envelope).map_err(|e| format!("stdout write error: {}", e))?;
-            out.flush().map_err(|e| format!("stdout flush error: {}", e))?;
+            out.flush()
+                .map_err(|e| format!("stdout flush error: {}", e))?;
         }
     }
     Ok(())
@@ -169,12 +170,15 @@ fn tools_call(params: Option<&Value>) -> Result<Value, RpcError> {
         .get("name")
         .and_then(|v| v.as_str())
         .ok_or((-32602, "Missing tool name".to_string()))?;
-    let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let args = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
 
     // list_steps is the one tool not backed by handle_command.
     if name == "list_steps" {
-        let text = serde_json::to_string_pretty(&steps::catalog())
-            .unwrap_or_else(|_| "[]".to_string());
+        let text =
+            serde_json::to_string_pretty(&steps::catalog()).unwrap_or_else(|_| "[]".to_string());
         return Ok(tool_result(&text, false));
     }
 
@@ -197,10 +201,11 @@ fn tools_call(params: Option<&Value>) -> Result<Value, RpcError> {
             cmd.command = "get_table".to_string();
             cmd.xml_path = Some(arg_str(&args, "xml_path")?);
             cmd.table = Some(arg_str(&args, "table")?);
-            cmd.fields = args
-                .get("fields")
-                .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+            cmd.fields = args.get("fields").and_then(|v| v.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            });
             cmd.summary = args.get("summary").and_then(|v| v.as_bool());
         }
         "get_field" => {
@@ -301,9 +306,15 @@ fn arg_strings(args: &Value, key: &str) -> Result<Vec<String>, RpcError> {
         .get(key)
         .and_then(|v| v.as_array())
         .ok_or((-32602, format!("Missing or non-array argument: {}", key)))?;
-    let out: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    let out: Vec<String> = arr
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
     if out.is_empty() {
-        return Err((-32602, format!("Argument {} must be a non-empty string array", key)));
+        return Err((
+            -32602,
+            format!("Argument {} must be a non-empty string array", key),
+        ));
     }
     Ok(out)
 }
@@ -376,10 +387,13 @@ mod tests {
         let parsed: Value =
             serde_json::from_str(res["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(parsed["status"], "error");
-        assert!(parsed["errors"].as_array().unwrap().iter().any(|e| e["message"]
-            .as_str()
-            .unwrap()
-            .contains("never closed")));
+        assert!(
+            parsed["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["message"].as_str().unwrap().contains("never closed"))
+        );
     }
 
     #[test]

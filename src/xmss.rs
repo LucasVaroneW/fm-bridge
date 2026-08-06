@@ -591,10 +591,8 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"Condition" => {
                         // Inner <Calculation> pushes its own target; value is moved on </Condition>.
                     }
-                    b"ErrorCode" => {
-                    }
-                    b"ErrorMessage" => {
-                    }
+                    b"ErrorCode" => {}
+                    b"ErrorMessage" => {}
                     b"ESSForceCommit" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"state" {
@@ -1550,32 +1548,59 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             let opt = step.flush_cached_joins.as_deref().unwrap_or("False");
             xml.push_str(&format!("<Option state=\"{}\"></Option>", xml_escape(opt)));
             if let Some(cond) = &step.error_condition {
-                xml.push_str(&format!("<Condition><Calculation>{}</Calculation></Condition>", cdata(cond)));
+                xml.push_str(&format!(
+                    "<Condition><Calculation>{}</Calculation></Condition>",
+                    cdata(cond)
+                ));
             }
             if let Some(code) = &step.error_code {
-                xml.push_str(&format!("<ErrorCode><Calculation>{}</Calculation></ErrorCode>", cdata(code)));
+                xml.push_str(&format!(
+                    "<ErrorCode><Calculation>{}</Calculation></ErrorCode>",
+                    cdata(code)
+                ));
             }
             if let Some(msg) = &step.error_message {
-                xml.push_str(&format!("<ErrorMessage><Calculation>{}</Calculation></ErrorMessage>", cdata(msg)));
+                xml.push_str(&format!(
+                    "<ErrorMessage><Calculation>{}</Calculation></ErrorMessage>",
+                    cdata(msg)
+                ));
             }
         }
         Some(StepShape::OpenTransaction) => {
             let opt = step.flush_cached_joins.as_deref().unwrap_or("False");
             xml.push_str(&format!("<Option state=\"{}\"></Option>", xml_escape(opt)));
             let ess = step.ess_force_commit.as_deref().unwrap_or("False");
-            xml.push_str(&format!("<ESSForceCommit state=\"{}\"></ESSForceCommit>", xml_escape(ess)));
+            xml.push_str(&format!(
+                "<ESSForceCommit state=\"{}\"></ESSForceCommit>",
+                xml_escape(ess)
+            ));
             let skip = step.skip_auto_entry.as_deref().unwrap_or("False");
-            xml.push_str(&format!("<SkipAutoEntry state=\"{}\"></SkipAutoEntry>", xml_escape(skip)));
+            xml.push_str(&format!(
+                "<SkipAutoEntry state=\"{}\"></SkipAutoEntry>",
+                xml_escape(skip)
+            ));
             let restore = step.restore_state.as_deref().unwrap_or("False");
-            xml.push_str(&format!("<Restore state=\"{}\"></Restore>", xml_escape(restore)));
+            xml.push_str(&format!(
+                "<Restore state=\"{}\"></Restore>",
+                xml_escape(restore)
+            ));
         }
         Some(StepShape::ShowHideToolbars) => {
             let lock = step.lock_state.as_deref().unwrap_or("False");
             xml.push_str(&format!("<Lock state=\"{}\"></Lock>", xml_escape(lock)));
             let sh = step.show_hide_value.as_deref().unwrap_or("Hide");
-            xml.push_str(&format!("<ShowHide value=\"{}\"></ShowHide>", xml_escape(sh)));
-            let edit = step.include_edit_record_toolbar.as_deref().unwrap_or("False");
-            xml.push_str(&format!("<IncludeEditRecordToolbar state=\"{}\"></IncludeEditRecordToolbar>", xml_escape(edit)));
+            xml.push_str(&format!(
+                "<ShowHide value=\"{}\"></ShowHide>",
+                xml_escape(sh)
+            ));
+            let edit = step
+                .include_edit_record_toolbar
+                .as_deref()
+                .unwrap_or("False");
+            xml.push_str(&format!(
+                "<IncludeEditRecordToolbar state=\"{}\"></IncludeEditRecordToolbar>",
+                xml_escape(edit)
+            ));
         }
         Some(StepShape::InsertFromUrl) => {
             // FM emits these 4 flags in a fixed order; preserve it to match the

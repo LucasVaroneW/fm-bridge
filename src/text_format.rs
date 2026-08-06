@@ -540,7 +540,11 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
             if !step.find_requests.is_empty() {
                 let mut sections: Vec<String> = Vec::with_capacity(step.find_requests.len());
                 for req in &step.find_requests {
-                    let header = if req.operation == "Omit" { "Omit" } else { "Find" };
+                    let header = if req.operation == "Omit" {
+                        "Omit"
+                    } else {
+                        "Find"
+                    };
                     let crits: Vec<String> = req
                         .criteria
                         .iter()
@@ -591,11 +595,8 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
                             // One line: join the DSL fields with " | " so the step
                             // occupies a single .fmscript line (matches FileMaker's
                             // line numbering). parse_text splits " | " back out.
-                            let one: String = dsl
-                                .lines()
-                                .map(str::trim)
-                                .collect::<Vec<_>>()
-                                .join(" | ");
+                            let one: String =
+                                dsl.lines().map(str::trim).collect::<Vec<_>>().join(" | ");
                             line.push_str(&format!(" [{}]", one));
                         }
                         Some(dsl) => {
@@ -715,13 +716,18 @@ pub struct ParseError {
     pub severity: String,
 }
 
+#[allow(dead_code)]
 fn default_severity() -> String {
     "error".to_string()
 }
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let prefix = if self.severity == "warning" { "Warning" } else { "Error" };
+        let prefix = if self.severity == "warning" {
+            "Warning"
+        } else {
+            "Error"
+        };
         if self.line > 0 {
             write!(f, "Line {}: {}: {}", self.line, prefix, self.message)
         } else {
@@ -732,10 +738,18 @@ impl std::fmt::Display for ParseError {
 
 impl ParseError {
     fn error(line: usize, message: String) -> Self {
-        ParseError { line, message, severity: "error".to_string() }
+        ParseError {
+            line,
+            message,
+            severity: "error".to_string(),
+        }
     }
     fn warning(line: usize, message: String) -> Self {
-        ParseError { line, message, severity: "warning".to_string() }
+        ParseError {
+            line,
+            message,
+            severity: "warning".to_string(),
+        }
     }
 }
 
@@ -743,7 +757,11 @@ impl ParseError {
 /// sites that know the line override it explicitly via `map_err`.
 impl From<String> for ParseError {
     fn from(message: String) -> Self {
-        ParseError { line: 0, message, severity: "error".to_string() }
+        ParseError {
+            line: 0,
+            message,
+            severity: "error".to_string(),
+        }
     }
 }
 
@@ -989,10 +1007,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
             let id = steps::id_for_en(&step_name)
                 .or(inline_id)
                 .ok_or_else(|| unknown_step_message(&step_name))
-                .map_err(|m| ParseError::error(
-                    step_line + 1,
-                    m,
-                ))?;
+                .map_err(|m| ParseError::error(step_line + 1, m))?;
             let step =
                 build_step_from_name(&step_name, Some(&bracket_content), enabled, id, indent);
             steps.push(step);
@@ -1003,10 +1018,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
             let id = steps::id_for_en(&step_name)
                 .or(inline_id)
                 .ok_or_else(|| unknown_step_message(&step_name))
-                .map_err(|m| ParseError::error(
-                    i + 1,
-                    m,
-                ))?;
+                .map_err(|m| ParseError::error(i + 1, m))?;
             let step = build_step_from_name(&step_name, None, enabled, id, indent);
             steps.push(step);
             i += 1;
@@ -3254,7 +3266,12 @@ fn parse_new_window_content(content: Option<&str>) -> ParsedNewWindow {
 /// Returns (calculation, select_all, no_interact, location).
 fn parse_go_to_portal_row_content(
     content: Option<&str>,
-) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     let content = match content {
         Some(c) => c.trim(),
         None => return (None, None, None, None),
@@ -3281,9 +3298,7 @@ fn parse_go_to_portal_row_content(
 
 /// Parse `Refresh Window` bracket content. Flags: `[FlushJoins; FlushSQLData]`
 /// Returns (flush_cached_joins, flush_cached_sql_data).
-fn parse_refresh_window_content(
-    content: Option<&str>,
-) -> (Option<String>, Option<String>) {
+fn parse_refresh_window_content(content: Option<&str>) -> (Option<String>, Option<String>) {
     let content = match content {
         Some(c) => c.trim(),
         None => return (None, None),
@@ -3337,7 +3352,12 @@ fn parse_show_hide_toolbars_content(
 /// Returns (option, condition, error_code, error_message).
 fn parse_revert_transaction_content(
     content: Option<&str>,
-) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     let content = match content {
         Some(c) => c.trim(),
         None => return (None, None, None, None),
@@ -3573,7 +3593,10 @@ mod tests {
         assert!(inline.contains("/* step */"));
         assert!(!inline.contains("//"));
         // A trailing-only comment keeps its text.
-        assert_eq!(super::convert_line_comment("a + b // sum"), "a + b /* sum */");
+        assert_eq!(
+            super::convert_line_comment("a + b // sum"),
+            "a + b /* sum */"
+        );
         assert_eq!(super::convert_line_comment("x // "), "x");
     }
 
@@ -3845,7 +3868,10 @@ mod tests {
         // Script Workspace, so this must collapse to a single line.
         let script = xmss::parse_fmxml_snippet(PERFORM_FIND_SINGLE).unwrap();
         let text = super::format_script_with(&script, super::FormatStyle::Inline);
-        assert!(!text.contains('\n'), "inline Perform Find must be one line, got: {text:?}");
+        assert!(
+            !text.contains('\n'),
+            "inline Perform Find must be one line, got: {text:?}"
+        );
         assert_eq!(
             text,
             "Perform Find [Find: Ta_i_Productos::Pro_Imp_EsSX => 1]"
@@ -3870,7 +3896,10 @@ mod tests {
         // out to newlines (see next test).
         let script = xmss::parse_fmxml_snippet(PERFORM_FIND_MULTI).unwrap();
         let text = super::format_script_with(&script, super::FormatStyle::Inline);
-        assert!(!text.contains('\n'), "inline Perform Find must be one line, got: {text:?}");
+        assert!(
+            !text.contains('\n'),
+            "inline Perform Find must be one line, got: {text:?}"
+        );
         assert_eq!(
             text,
             "Perform Find [Find: Ta_i_Productos::Pro_Imp_EsSX => 1; Ta_i_Productos::Pro_Activo => 1 | Omit: Ta_i_Productos::Pro_id => 0]"

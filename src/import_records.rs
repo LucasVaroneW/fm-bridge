@@ -85,7 +85,11 @@ fn build_dsl(xml: &str) -> Option<String> {
             .map(|t| tag_attr(t, "id"))
             .collect::<Option<Vec<_>>>()?;
         // Reject if there's markup we didn't account for (gate will also catch it).
-        lines.push(format!("SourceList: {} fields={}", list_attrs, ids.join(",")));
+        lines.push(format!(
+            "SourceList: {} fields={}",
+            list_attrs,
+            ids.join(",")
+        ));
     }
     lines.push(format!("Options: {}", element_attrs(xml, "ImportOptions")?));
 

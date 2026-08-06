@@ -35,7 +35,9 @@ pub struct WhoCallsReport {
 fn resolve_script(db: &ParsedDatabase, query: &str) -> Result<(u32, String), String> {
     let q = query.trim();
     if let Some(num) = q.strip_prefix('#') {
-        let id: u32 = num.parse().map_err(|_| format!("Invalid script id: {}", q))?;
+        let id: u32 = num
+            .parse()
+            .map_err(|_| format!("Invalid script id: {}", q))?;
         return db
             .scripts
             .iter()
@@ -82,7 +84,9 @@ pub fn who_calls(db: &ParsedDatabase, query: &str) -> Result<WhoCallsReport, Str
         collect_layout_callers(&l.objects, target_id, &l.name, &mut callers);
     }
 
-    callers.sort_by(|a, b| (a.location.as_str(), a.via.as_str()).cmp(&(b.location.as_str(), b.via.as_str())));
+    callers.sort_by(|a, b| {
+        (a.location.as_str(), a.via.as_str()).cmp(&(b.location.as_str(), b.via.as_str()))
+    });
     callers.dedup_by(|a, b| a.location == b.location && a.via == b.via);
 
     Ok(WhoCallsReport {

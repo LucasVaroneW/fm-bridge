@@ -150,7 +150,11 @@ impl Response {
         // If all are warnings (no errors), the status is still ok.
         let has_errors = errors.iter().any(|e| e.severity == "error");
         Response {
-            status: if has_errors { "error".to_string() } else { "ok".to_string() },
+            status: if has_errors {
+                "error".to_string()
+            } else {
+                "ok".to_string()
+            },
             script_text: None,
             error,
             version: None,
@@ -207,9 +211,9 @@ fn handle_command(cmd: &Command) -> Response {
                 None => return Response::error("No script_text provided".to_string()),
             };
             match text_format::parse_text_to_script(script_text) {
-                Ok(script) => {
-                    Response::ok_data(serde_json::to_value(&script).unwrap_or(serde_json::Value::Null))
-                }
+                Ok(script) => Response::ok_data(
+                    serde_json::to_value(&script).unwrap_or(serde_json::Value::Null),
+                ),
                 Err(pe) => Response::errors(vec![pe]),
             }
         }
@@ -226,9 +230,7 @@ fn handle_command(cmd: &Command) -> Response {
                 _ => text_format::FormatStyle::Indented,
             };
             match text_format::parse_text_to_script(script_text) {
-                Ok(script) => {
-                    Response::ok_text(text_format::format_script_with(&script, style))
-                }
+                Ok(script) => Response::ok_text(text_format::format_script_with(&script, style)),
                 Err(pe) => Response::errors(vec![pe]),
             }
         }
@@ -529,23 +531,25 @@ fn run_json_mode() -> Result<(), String> {
 
 /// Scan a FMSaveAsXML export for `<Layout id="..." name="...">` entries in
 /// the LayoutCatalog section. Returns a name→id map.
-fn scan_layout_catalog(xml_path: &str) -> Result<std::collections::HashMap<String, String>, String> {
-    let bytes = std::fs::read(xml_path)
-        .map_err(|e| format!("Cannot read {}: {}", xml_path, e))?;
+fn scan_layout_catalog(
+    xml_path: &str,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let bytes = std::fs::read(xml_path).map_err(|e| format!("Cannot read {}: {}", xml_path, e))?;
     let text = if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
         let u16s: Vec<u16> = bytes[2..]
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
-        String::from_utf16(&u16s)
-            .map_err(|e| format!("Invalid UTF-16 in {}: {}", xml_path, e))?
+        String::from_utf16(&u16s).map_err(|e| format!("Invalid UTF-16 in {}: {}", xml_path, e))?
     } else {
         String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8 in {}: {}", xml_path, e))?
     };
     let mut map = std::collections::HashMap::new();
     let start = text.find("<LayoutCatalog").unwrap_or(0);
-    let end = text[start..].find("</LayoutCatalog>")
-        .map(|p| start + p).unwrap_or(text.len());
+    let end = text[start..]
+        .find("</LayoutCatalog>")
+        .map(|p| start + p)
+        .unwrap_or(text.len());
     let section = &text[start..end];
     let mut pos = 0;
     while let Some(tag_start) = section[pos..].find("<Layout ") {
@@ -555,7 +559,10 @@ fn scan_layout_catalog(xml_path: &str) -> Result<std::collections::HashMap<Strin
             None => break,
         };
         let tag = &section[abs..tag_end];
-        if let (Some(id), Some(name)) = (extract_xml_attrib(tag, "id"), extract_xml_attrib(tag, "name")) {
+        if let (Some(id), Some(name)) = (
+            extract_xml_attrib(tag, "id"),
+            extract_xml_attrib(tag, "name"),
+        ) {
             map.insert(name.to_string(), id.to_string());
         }
         pos = abs + 1;
@@ -576,8 +583,8 @@ fn resolve_layout_ids_in_script(script_text: &str, xml_path: &str) -> Result<Str
     if catalog.is_empty() {
         return Err(format!("No layouts found in {}", xml_path));
     }
-    let script = crate::text_format::parse_text_to_script(script_text)
-        .map_err(|e| e.to_string())?;
+    let script =
+        crate::text_format::parse_text_to_script(script_text).map_err(|e| e.to_string())?;
     let mut updated = false;
     let mut steps = script.steps.clone();
     for step in &mut steps {
@@ -590,7 +597,9 @@ fn resolve_layout_ids_in_script(script_text: &str, xml_path: &str) -> Result<Str
         }
     }
     if updated {
-        Ok(crate::text_format::format_script(&crate::xmss::FmScript { steps }))
+        Ok(crate::text_format::format_script(&crate::xmss::FmScript {
+            steps,
+        }))
     } else {
         Ok(script_text.to_string())
     }
@@ -750,10 +759,7 @@ fn run_audit_cli(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
 
-    println!(
-        "\n{} issue(s) in {}:",
-        report.issue_count, report.file_name
-    );
+    println!("\n{} issue(s) in {}:", report.issue_count, report.file_name);
     let mut kinds: Vec<(&String, &usize)> = report.by_kind.iter().collect();
     kinds.sort();
     for (kind, n) in kinds {
@@ -775,7 +781,10 @@ fn run_who_calls_cli(args: &[String]) -> Result<(), String> {
     let db = fmsavexml::parse(&args[0])?;
     let report = xref::who_calls(&db, &args[1])?;
     if report.caller_count == 0 {
-        println!("Nothing calls '{}' (#{}).", report.target_name, report.target_id);
+        println!(
+            "Nothing calls '{}' (#{}).",
+            report.target_name, report.target_id
+        );
         return Ok(());
     }
     println!(
@@ -822,7 +831,12 @@ fn run_reformat_cli(args: &[String]) -> Result<(), String> {
     let style = match args[1].as_str() {
         "inline" => text_format::FormatStyle::Inline,
         "indented" | "indent" => text_format::FormatStyle::Indented,
-        other => return Err(format!("Unknown style '{}'. Use inline or indented.", other)),
+        other => {
+            return Err(format!(
+                "Unknown style '{}'. Use inline or indented.",
+                other
+            ));
+        }
     };
     let text = read_file_to_string(&args[0])?;
     let script = text_format::parse_text_to_script(&text).map_err(|e| e.to_string())?;
@@ -862,11 +876,21 @@ fn run_get_table_cli(args: &[String]) -> Result<(), String> {
     let db = fmsavexml::parse(&args[0])?;
     let rest = &args[2..];
     let summary = rest.iter().any(|a| a == "--summary");
-    let field_filter: Vec<String> =
-        rest.iter().filter(|a| !a.starts_with("--")).cloned().collect();
-    let fields = if field_filter.is_empty() { None } else { Some(field_filter.as_slice()) };
+    let field_filter: Vec<String> = rest
+        .iter()
+        .filter(|a| !a.starts_with("--"))
+        .cloned()
+        .collect();
+    let fields = if field_filter.is_empty() {
+        None
+    } else {
+        Some(field_filter.as_slice())
+    };
     let table = fmsavexml::table_inline_opts(&db, &args[1], fields, summary)?;
-    println!("{}", serde_json::to_string_pretty(&table).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&table).map_err(|e| e.to_string())?
+    );
     Ok(())
 }
 
@@ -875,11 +899,16 @@ fn run_get_table_cli(args: &[String]) -> Result<(), String> {
 /// field behave this way".
 fn run_get_field_cli(args: &[String]) -> Result<(), String> {
     if args.len() < 3 {
-        return Err("Usage: fm-bridge get-field <FMSaveAsXML.xml> <TableName> <FieldName>".to_string());
+        return Err(
+            "Usage: fm-bridge get-field <FMSaveAsXML.xml> <TableName> <FieldName>".to_string(),
+        );
     }
     let db = fmsavexml::parse(&args[0])?;
     let data = fmsavexml::field_inline(&db, &args[1], &args[2])?;
-    println!("{}", serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?
+    );
     Ok(())
 }
 
@@ -888,12 +917,16 @@ fn run_get_field_cli(args: &[String]) -> Result<(), String> {
 fn run_get_relationships_cli(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
-            "Usage: fm-bridge get-relationships <FMSaveAsXML.xml> [TableOccurrence|#id]".to_string(),
+            "Usage: fm-bridge get-relationships <FMSaveAsXML.xml> [TableOccurrence|#id]"
+                .to_string(),
         );
     }
     let db = fmsavexml::parse(&args[0])?;
     let data = fmsavexml::relationships_inline(&db, args.get(1).map(|s| s.as_str()))?;
-    println!("{}", serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?
+    );
     Ok(())
 }
 
@@ -905,7 +938,10 @@ fn run_get_layout_cli(args: &[String]) -> Result<(), String> {
     }
     let db = fmsavexml::parse(&args[0])?;
     let data = fmsavexml::layout_inline(&db, &args[1])?;
-    println!("{}", serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?
+    );
     Ok(())
 }
 

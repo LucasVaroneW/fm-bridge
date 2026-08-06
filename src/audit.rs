@@ -35,9 +35,7 @@ pub struct AuditReport {
 /// A literal name we can actually verify — not a `$variable` or a calculation.
 fn is_literal_name(s: &str) -> bool {
     let s = s.trim().trim_matches('"');
-    !s.is_empty()
-        && !s.starts_with('$')
-        && !s.contains(['(', ')', '&', ';', '"', '$'])
+    !s.is_empty() && !s.starts_with('$') && !s.contains(['(', ')', '&', ';', '"', '$'])
 }
 
 /// Run all integrity checks and return every issue found (sorted, stable order).
@@ -55,7 +53,12 @@ pub fn audit(db: &ParsedDatabase) -> AuditReport {
     let script_name_by_id: HashMap<u32, &str> =
         db.scripts.iter().map(|s| (s.id, s.name.as_str())).collect();
 
-    let layout_ids: HashSet<u32> = db.layouts.iter().filter(|l| !l.is_folder).map(|l| l.id).collect();
+    let layout_ids: HashSet<u32> = db
+        .layouts
+        .iter()
+        .filter(|l| !l.is_folder)
+        .map(|l| l.id)
+        .collect();
     let layout_names: HashSet<&str> = db
         .layouts
         .iter()
@@ -63,13 +66,20 @@ pub fn audit(db: &ParsedDatabase) -> AuditReport {
         .map(|l| l.name.as_str())
         .collect();
 
-    let to_names: HashSet<&str> = db.table_occurrences.iter().map(|t| t.name.as_str()).collect();
+    let to_names: HashSet<&str> = db
+        .table_occurrences
+        .iter()
+        .map(|t| t.name.as_str())
+        .collect();
     let to_ids: HashSet<u32> = db.table_occurrences.iter().map(|t| t.id).collect();
     let table_names: HashSet<&str> = db.tables.iter().map(|t| t.name.as_str()).collect();
 
     // ── A & B: per-script step references (Perform Script, Go to Layout) ──
     for (caller_id, steps) in &db.script_steps {
-        let caller = script_name_by_id.get(caller_id).copied().unwrap_or("(unknown)");
+        let caller = script_name_by_id
+            .get(caller_id)
+            .copied()
+            .unwrap_or("(unknown)");
         for st in steps {
             match st.name.as_str() {
                 "Perform Script" | "Perform Script on Server" => {
@@ -108,14 +118,18 @@ pub fn audit(db: &ParsedDatabase) -> AuditReport {
                         continue;
                     }
                     let id = st.layout_id.as_deref().and_then(|s| s.parse::<u32>().ok());
-                    let name = st.layout_name.as_deref().map(|n| n.trim().trim_matches('"'));
+                    let name = st
+                        .layout_name
+                        .as_deref()
+                        .map(|n| n.trim().trim_matches('"'));
                     let id_ok = id.map(|i| layout_ids.contains(&i)).unwrap_or(false);
                     let name_ok = name.map(|n| layout_names.contains(n)).unwrap_or(false);
                     let broken = if id.is_some() {
                         !id_ok && !name_ok
                     } else {
                         // No id: only flag a clearly-literal name we can trust.
-                        name.map(|n| is_literal_name(n) && !name_ok).unwrap_or(false)
+                        name.map(|n| is_literal_name(n) && !name_ok)
+                            .unwrap_or(false)
                     };
                     if broken {
                         issues.push(Issue {
@@ -251,7 +265,10 @@ fn check_objects(
                     kind: "broken-portal-to".to_string(),
                     severity: "error".to_string(),
                     location: format!("layout: {}", layout),
-                    detail: format!("portal bound to table occurrence '{}' which doesn't exist", to),
+                    detail: format!(
+                        "portal bound to table occurrence '{}' which doesn't exist",
+                        to
+                    ),
                 });
             }
         }
@@ -327,11 +344,25 @@ mod tests {
                 table_occurrence: Some("Ghost".to_string()),
                 ..Default::default()
             }],
-            tables: vec![TableInfo { id: 1, name: "Contacts".to_string(), fields: vec![] }],
+            tables: vec![TableInfo {
+                id: 1,
+                name: "Contacts".to_string(),
+                fields: vec![],
+            }],
             table_occurrences: vec![
-                TableOccurrence { id: 1, name: "Contacts".to_string(), base_table: "Contacts".to_string(), ..Default::default() },
+                TableOccurrence {
+                    id: 1,
+                    name: "Contacts".to_string(),
+                    base_table: "Contacts".to_string(),
+                    ..Default::default()
+                },
                 // internal TO whose base table is gone
-                TableOccurrence { id: 2, name: "Orphan_TO".to_string(), base_table: "DeletedTable".to_string(), ..Default::default() },
+                TableOccurrence {
+                    id: 2,
+                    name: "Orphan_TO".to_string(),
+                    base_table: "DeletedTable".to_string(),
+                    ..Default::default()
+                },
             ],
             relationships: vec![Relationship {
                 id: 5,
@@ -359,7 +390,11 @@ mod tests {
     fn clean_database_has_no_issues() {
         let db = ParsedDatabase {
             file_name: "Clean.fmp12".to_string(),
-            tables: vec![TableInfo { id: 1, name: "T".to_string(), fields: vec![] }],
+            tables: vec![TableInfo {
+                id: 1,
+                name: "T".to_string(),
+                fields: vec![],
+            }],
             table_occurrences: vec![TableOccurrence {
                 id: 1,
                 name: "T".to_string(),

@@ -72,7 +72,9 @@ fn import_fmsavexml_summary(xml: &str) -> Option<String> {
     if let Some(path) = crate::import_records::element_inner(xml, "FilePathList") {
         // FileMaker wraps the path in field-separator chars (decode to `â`); strip
         // those and surrounding whitespace.
-        let clean = path.trim().trim_matches(|c: char| !c.is_ascii_alphanumeric());
+        let clean = path
+            .trim()
+            .trim_matches(|c: char| !c.is_ascii_alphanumeric());
         if !clean.is_empty() {
             lines.push(format!("Source: {}", clean));
         }
@@ -116,7 +118,10 @@ fn import_fmsavexml_summary(xml: &str) -> Option<String> {
 fn commit_to_dsl(xml: &str) -> Option<String> {
     let mut lines = Vec::new();
     if let Some(s) = element_attr(xml, "NoInteract", "state") {
-        lines.push(format!("Dialog: {}", if s == "True" { "Off" } else { "On" }));
+        lines.push(format!(
+            "Dialog: {}",
+            if s == "True" { "Off" } else { "On" }
+        ));
     }
     if let Some(s) = element_attr(xml, "Option", "state") {
         lines.push(format!("SkipDataEntryValidation: {}", s));
@@ -156,7 +161,10 @@ fn commit_from_dsl(dsl: &str) -> Option<String> {
         xml.push_str(&format!("<Option state=\"{}\"></Option>", s));
     }
     if let Some(f) = force {
-        xml.push_str(&format!("<ESSForceCommit state=\"{}\"></ESSForceCommit>", f));
+        xml.push_str(&format!(
+            "<ESSForceCommit state=\"{}\"></ESSForceCommit>",
+            f
+        ));
     }
     if xml.is_empty() {
         return None;
@@ -175,14 +183,16 @@ fn commit_from_dsl(dsl: &str) -> Option<String> {
 
 fn gtrr_to_dsl(xml: &str) -> Option<String> {
     let mut lines = Vec::new();
-    if let (Some(id), Some(name)) =
-        (element_attr(xml, "Table", "id"), element_attr(xml, "Table", "name"))
-    {
+    if let (Some(id), Some(name)) = (
+        element_attr(xml, "Table", "id"),
+        element_attr(xml, "Table", "name"),
+    ) {
         lines.push(format!("Table: {} #{}", name, id));
     }
-    if let (Some(id), Some(name)) =
-        (element_attr(xml, "Layout", "id"), element_attr(xml, "Layout", "name"))
-    {
+    if let (Some(id), Some(name)) = (
+        element_attr(xml, "Layout", "id"),
+        element_attr(xml, "Layout", "name"),
+    ) {
         lines.push(format!("Layout: {} #{}", name, id));
     }
     if let Some(s) = element_attr(xml, "Option", "state") {
@@ -249,16 +259,25 @@ fn gtrr_from_dsl(dsl: &str) -> Option<String> {
         xml.push_str(&format!("<Option state=\"{}\"></Option>", s));
     }
     if let Some(s) = match_all {
-        xml.push_str(&format!("<MatchAllRecords state=\"{}\"></MatchAllRecords>", s));
+        xml.push_str(&format!(
+            "<MatchAllRecords state=\"{}\"></MatchAllRecords>",
+            s
+        ));
     }
     if let Some(s) = show_new {
-        xml.push_str(&format!("<ShowInNewWindow state=\"{}\"></ShowInNewWindow>", s));
+        xml.push_str(&format!(
+            "<ShowInNewWindow state=\"{}\"></ShowInNewWindow>",
+            s
+        ));
     }
     if let Some(s) = restore {
         xml.push_str(&format!("<Restore state=\"{}\"></Restore>", s));
     }
     if let Some(v) = layout_dest {
-        xml.push_str(&format!("<LayoutDestination value=\"{}\"></LayoutDestination>", v));
+        xml.push_str(&format!(
+            "<LayoutDestination value=\"{}\"></LayoutDestination>",
+            v
+        ));
     }
     if let Some(a) = styles {
         xml.push_str(&format!("<NewWndStyles {}></NewWndStyles>", a));
@@ -267,7 +286,10 @@ fn gtrr_from_dsl(dsl: &str) -> Option<String> {
         xml.push_str(&format!("<Table id=\"{}\" name=\"{}\"></Table>", id, name));
     }
     if let Some((id, name)) = layout {
-        xml.push_str(&format!("<Layout id=\"{}\" name=\"{}\"></Layout>", id, name));
+        xml.push_str(&format!(
+            "<Layout id=\"{}\" name=\"{}\"></Layout>",
+            id, name
+        ));
     }
     if xml.is_empty() {
         return None;
@@ -286,7 +308,10 @@ mod tests {
         let dsl = to_dsl("Commit Records/Requests", xml).expect("dsl");
         assert!(dsl.contains("SkipDataEntryValidation: True"));
         assert!(dsl.contains("ForceCommit: True"));
-        assert_eq!(from_dsl("Commit Records/Requests", &dsl).as_deref(), Some(xml));
+        assert_eq!(
+            from_dsl("Commit Records/Requests", &dsl).as_deref(),
+            Some(xml)
+        );
     }
 
     #[test]
@@ -340,6 +365,9 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" | ");
         assert!(!inline.contains('\n'));
-        assert_eq!(from_dsl("Commit Records/Requests", &inline).as_deref(), Some(xml));
+        assert_eq!(
+            from_dsl("Commit Records/Requests", &inline).as_deref(),
+            Some(xml)
+        );
     }
 }

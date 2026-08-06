@@ -202,6 +202,22 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
                     parts.push(format!("Buttons: {}", btns.join(", ")));
                 }
             }
+            if !step.input_fields.is_empty() {
+                for f in &step.input_fields {
+                    if f.field_name.is_empty() {
+                        continue;
+                    }
+                    let mut ip = format!("Input: {}", f.field_name.trim());
+                    let lbl = f.label.trim();
+                    if !lbl.is_empty() {
+                        ip.push_str(&format!("; Label: {}", lbl));
+                    }
+                    if f.use_password == "True" {
+                        ip.push_str("; Password");
+                    }
+                    parts.push(ip);
+                }
+            }
             if !parts.is_empty() {
                 line.push_str(&format!(" [{}]", parts.join("; ")));
             }
@@ -801,6 +817,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -881,6 +898,7 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -1277,6 +1295,7 @@ fn build_step_from_name(
             dialog_title: None,
             dialog_message: None,
             dialog_buttons: Vec::new(),
+            input_fields: Vec::new(),
             field_result: None,
             field_target: None,
             field_table: None,
@@ -1334,6 +1353,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -1390,6 +1410,7 @@ fn build_step_from_name(
             dialog_title: None,
             dialog_message: None,
             dialog_buttons: Vec::new(),
+            input_fields: Vec::new(),
             field_result: None,
             field_target: None,
             field_table: None,
@@ -1445,6 +1466,7 @@ fn build_step_from_name(
             dialog_title: None,
             dialog_message: None,
             dialog_buttons: Vec::new(),
+            input_fields: Vec::new(),
             field_result: None,
             field_target: None,
             field_table: None,
@@ -1485,7 +1507,7 @@ fn build_step_from_name(
             indent_level: indent,
         },
         Some(StepShape::Dialog) => {
-            let (title, message, buttons) = parse_dialog_content(content);
+            let d = parse_dialog_content(content);
             ScriptStep {
                 name: name.to_string(),
                 enable: enabled,
@@ -1499,9 +1521,10 @@ fn build_step_from_name(
                 parameters: Vec::new(),
                 restore_state: None,
                 set_state: None,
-                dialog_title: title,
-                dialog_message: message,
-                dialog_buttons: buttons,
+                dialog_title: d.title,
+                dialog_message: d.message,
+                dialog_buttons: d.buttons,
+                input_fields: d.input_fields,
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -1560,6 +1583,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: result,
                 field_target: target,
                 field_table: None,
@@ -1624,6 +1648,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -1684,6 +1709,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -1742,6 +1768,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: target,
                 field_table: None,
@@ -1800,6 +1827,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -1858,6 +1886,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -1916,6 +1945,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: target,
                 field_table: table,
@@ -1974,6 +2004,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: target,
                 field_table: table,
@@ -2036,6 +2067,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2094,6 +2126,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2152,6 +2185,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2210,6 +2244,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2268,6 +2303,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2326,6 +2362,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2384,6 +2421,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2442,6 +2480,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2500,6 +2539,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2558,6 +2598,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: p.target,
                 field_table: p.table,
@@ -2632,6 +2673,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2701,6 +2743,7 @@ fn build_step_from_name(
                 dialog_title: None,
                 dialog_message: None,
                 dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
                 field_result: None,
                 field_target: None,
                 field_table: None,
@@ -2765,28 +2808,79 @@ fn parse_set_variable_content(content: Option<&str>) -> (Option<String>, Option<
 
 /// Parse "Show Custom Dialog" bracket content: `Title: ...; Message: ...; Buttons: ...`
 /// Uses bracket-aware splitting so semicolons inside calculations don't break parsing.
-fn parse_dialog_content(content: Option<&str>) -> (Option<String>, Option<String>, Vec<String>) {
+struct ParsedDialog {
+    title: Option<String>,
+    message: Option<String>,
+    buttons: Vec<String>,
+    input_fields: Vec<crate::xmss::InputField>,
+}
+
+fn parse_dialog_content(content: Option<&str>) -> ParsedDialog {
     let content = match content {
         Some(c) => c,
-        None => return (None, None, Vec::new()),
+        None => return ParsedDialog { title: None, message: None, buttons: Vec::new(), input_fields: Vec::new() },
     };
 
     let mut title = None;
     let mut message = None;
     let mut buttons = Vec::new();
+    let mut input_fields: Vec<crate::xmss::InputField> = Vec::new();
+    let mut current_field: Option<crate::xmss::InputField> = None;
 
     for part in split_smart(content) {
-        let part = part.trim();
-        if part.starts_with("Title: ") {
-            title = Some(part[7..].to_string());
-        } else if part.starts_with("Message: ") {
-            message = Some(part[9..].to_string());
-        } else if part.starts_with("Buttons: ") {
-            buttons = part[9..].split(',').map(|b| b.trim().to_string()).collect();
+        let p = part.trim();
+        // Tolerant matching: case-insensitive, trim keys
+        if let Some(v) = try_key(p, "Title") {
+            title = Some(v.to_string());
+        } else if let Some(v) = try_key(p, "Message") {
+            message = Some(v.to_string());
+        } else if let Some(v) = try_key(p, "Buttons") {
+            buttons = v.split(',').map(|b| b.trim().to_string()).collect();
+        } else if let Some(v) = try_key(p, "Input") {
+            if let Some(f) = current_field.take() {
+                input_fields.push(f);
+            }
+            // Parse Input: $var or Input: Table::Field or bare text
+            let parts: Vec<&str> = v.split(';').collect();
+            let mut field = crate::xmss::InputField::default();
+            for sub in &parts {
+                let s = sub.trim();
+                if let Some(lbl) = try_key(s, "Label") {
+                    field.label = lbl.to_string();
+                } else if !s.is_empty() && !s.eq_ignore_ascii_case("Password") {
+                    field.field_name = s.to_string();
+                }
+                if s.eq_ignore_ascii_case("Password") {
+                    field.use_password = "True".to_string();
+                }
+            }
+            current_field = Some(field);
+        } else if p.eq_ignore_ascii_case("Password") && current_field.is_some() {
+            if let Some(ref mut f) = current_field {
+                f.use_password = "True".to_string();
+            }
         }
     }
+    if let Some(f) = current_field.take() {
+        input_fields.push(f);
+    }
+    // Filter out empty field names (third dummy input)
+    input_fields.retain(|f| !f.field_name.is_empty());
 
-    (title, message, buttons)
+    ParsedDialog { title, message, buttons, input_fields }
+}
+
+/// Try to match a key (case-insensitive, trims colon). Returns the value after the colon.
+fn try_key<'a>(s: &'a str, key: &str) -> Option<&'a str> {
+    let lower = s.to_lowercase();
+    let prefix = format!("{}:", key.to_lowercase());
+    if let Some(rest) = lower.strip_prefix(&prefix) {
+        Some(s[key.len() + 1..].trim())
+    } else if let Some(rest) = lower.strip_prefix(&format!("{}: ", key.to_lowercase())) {
+        Some(s[key.len() + 2..].trim())
+    } else {
+        None
+    }
 }
 
 /// Parse Execute FileMaker Data API content: `$target; query_calc` or just `query_calc`.

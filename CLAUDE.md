@@ -48,7 +48,7 @@ interchangeable.
   stdio), exposing engine commands as tools. Forwards to `handle_command`.
 - `editors/vscode/` — the VS Code extension (TypeScript).
 - `docs/VISION.md` — north star. `docs/MCP.md` — MCP setup + tools.
-  `docs/USAGE.md` — user guide (ES). `docs/IA-PROMPT.md` — `.fmscript` syntax for AI.
+  `docs/USAGE.md` — user guide (ES). `docs/RELEASE.md` — build & release flow.
 
 ## Build & test
 

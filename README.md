@@ -6,10 +6,10 @@ plano. Un solo motor Rust con dos puertas: **humana** (VS Code) y **IA** (MCP).
 ## Arquitectura
 
 ```
-                 ┌─ fm-bridge json ──▶ Extensión VS Code   (lectura/escritura,
-                 │                       diagnostics, autocomplete)
+                ┌─ fm-bridge json ──▶ Extensión VS Code   (lectura/escritura,
+                │                       diagnostics, autocomplete)
 fm-bridge.exe ──┤
-  (motor Rust)  └─ fm-bridge mcp ──▶ Cliente MCP           (tools para IA:
+  (motor Rust)  └─ fm-bridge mcp  ──▶ Cliente MCP           (tools para IA:
                                       (Claude, OpenCode…)    read, validate,
                                                             inspect, audit…)
 ```

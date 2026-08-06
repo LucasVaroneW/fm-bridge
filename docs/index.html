@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fm-bridge — Edit FileMaker scripts in VS Code</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    background: #0b1121; color: #e2e8f0; line-height: 1.6;
+  }
+  a { color: inherit; text-decoration: none; }
+  .container { max-width: 64rem; margin: 0 auto; padding: 0 1.5rem; }
+
+  /* Hero */
+  .hero {
+    position: relative; overflow: hidden;
+    padding: 8rem 0 6rem; text-align: center;
+  }
+  .hero-bg {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,.25), transparent 60%),
+                radial-gradient(ellipse at 80% 100%, rgba(168,85,247,.2), transparent 50%);
+    pointer-events: none;
+  }
+  .hero h1 {
+    font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 800;
+    letter-spacing: -.02em; line-height: 1.15;
+    background: linear-gradient(135deg, #818cf8, #c084fc, #818cf8);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; margin-bottom: 1rem;
+  }
+  .hero p {
+    font-size: 1.15rem; color: #94a3b8; max-width: 36rem; margin: 0 auto 2.5rem;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: .5rem;
+    padding: .85rem 2rem; border-radius: .6rem; font-weight: 600;
+    font-size: 1rem; transition: all .2s; border: 1px solid transparent;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff;
+    box-shadow: 0 0 20px rgba(99,102,241,.3);
+  }
+  .btn-primary:hover { box-shadow: 0 0 30px rgba(99,102,241,.5); transform: translateY(-1px); }
+  .btn-outline {
+    border-color: #334155; color: #cbd5e1;
+  }
+  .btn-outline:hover { border-color: #6366f1; color: #fff; }
+
+  /* Sections */
+  section { padding: 5rem 0; }
+  .section-title {
+    text-align: center; font-size: 1.75rem; font-weight: 700;
+    margin-bottom: .75rem; letter-spacing: -.01em;
+  }
+  .section-sub {
+    text-align: center; color: #64748b; margin-bottom: 3.5rem; font-size: 1.05rem;
+  }
+
+  /* Feature cards */
+  .grid { display: grid; gap: 1.5rem; }
+  .grid-3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .card {
+    background: #0f172a; border: 1px solid #1e293b;
+    border-radius: .75rem; padding: 1.75rem; transition: all .25s;
+    position: relative; overflow: hidden;
+  }
+  .card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    opacity: 0; transition: opacity .25s;
+  }
+  .card:hover { border-color: #334155; transform: translateY(-2px); }
+  .card:hover::before { opacity: 1; }
+  .card-blue::before  { background: linear-gradient(90deg, #6366f1, #8b5cf6); }
+  .card-green::before { background: linear-gradient(90deg, #22c55e, #10b981); }
+  .card-purple::before { background: linear-gradient(90deg, #a855f7, #6366f1); }
+  .card-orange::before { background: linear-gradient(90deg, #f97316, #ef4444); }
+  .card-yellow::before { background: linear-gradient(90deg, #eab308, #f97316); }
+  .card-emerald::before { background: linear-gradient(90deg, #10b981, #14b8a6); }
+
+  .card-icon {
+    width: 2.5rem; height: 2.5rem; border-radius: .5rem;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.25rem; margin-bottom: 1rem;
+    background: rgba(99,102,241,.1); color: #818cf8;
+  }
+  .card-icon.green { background: rgba(34,197,94,.1); color: #4ade80; }
+  .card-icon.purple { background: rgba(168,85,247,.1); color: #c084fc; }
+  .card-icon.orange { background: rgba(249,115,22,.1); color: #fb923c; }
+  .card-icon.yellow { background: rgba(234,179,8,.1); color: #facc15; }
+  .card-icon.emerald { background: rgba(16,185,129,.1); color: #34d399; }
+  .card h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: .5rem; }
+  .card p { color: #94a3b8; font-size: .92rem; line-height: 1.6; }
+
+  /* How it works */
+  .flow {
+    display: flex; align-items: center; justify-content: center;
+    flex-wrap: wrap; gap: 1rem; padding: 2rem 0;
+  }
+  .flow-box {
+    background: #0f172a; border: 1px solid #1e293b; border-radius: .75rem;
+    padding: 1.25rem 1.75rem; text-align: center; font-weight: 600;
+    font-size: .95rem; min-width: 120px;
+  }
+  .flow-box.fm { border-color: #4ade80; color: #4ade80; }
+  .flow-box.engine { border-color: #818cf8; color: #818cf8; }
+  .flow-box.vscode { border-color: #c084fc; color: #c084fc; }
+  .flow-box.ai { border-color: #fb923c; color: #fb923c; }
+  .flow-arrow { color: #475569; font-size: 1.5rem; }
+
+  /* Install */
+  .code-block {
+    background: #020617; border: 1px solid #1e293b; border-radius: .6rem;
+    padding: 1.25rem 1.5rem; font-family: ui-monospace, monospace;
+    font-size: .9rem; overflow-x: auto; color: #cbd5e1;
+    position: relative; margin: 1rem 0;
+  }
+  .code-block .copy-btn {
+    position: absolute; top: .75rem; right: .75rem;
+    background: #1e293b; border: none; color: #64748b;
+    padding: .35rem .75rem; border-radius: .35rem; cursor: pointer;
+    font-size: .8rem; font-family: inherit; transition: all .15s;
+  }
+  .code-block .copy-btn:hover { background: #334155; color: #cbd5e1; }
+  .code-block .cmd { color: #818cf8; }
+  .code-block .opt { color: #4ade80; }
+
+  /* Download */
+  .download-section {
+    text-align: center; padding: 4rem 0;
+    background: linear-gradient(180deg, transparent, rgba(99,102,241,.05), transparent);
+  }
+  .version-tag {
+    display: inline-block; background: rgba(99,102,241,.15);
+    color: #a5b4fc; padding: .2rem .7rem; border-radius: 1rem;
+    font-size: .8rem; margin-left: .5rem; font-family: monospace;
+  }
+
+  /* Footer */
+  footer {
+    border-top: 1px solid #1e293b; padding: 2rem 0;
+    text-align: center; color: #475569; font-size: .9rem;
+  }
+  footer a { color: #818cf8; }
+  footer a:hover { color: #a5b4fc; }
+
+  @media (max-width: 640px) {
+    .hero { padding: 5rem 0 3rem; }
+    .hero h1 { font-size: 1.75rem; }
+    .flow { flex-direction: column; }
+    .flow-arrow { transform: rotate(90deg); }
+  }
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div class="container" style="position:relative;z-index:1">
+    <h1>Edit FileMaker scripts<br>outside FileMaker</h1>
+    <p>Copy from the Script Workspace, edit as plain text in VS Code with syntax highlighting and autocomplete, paste back. No lock-in, no cloud — just a Rust binary and a VS Code extension.</p>
+    <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
+      <a href="#install" class="btn btn-primary">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download .vsix
+      </a>
+      <a href="https://github.com/LucasVaroneW/fm-bridge" class="btn btn-outline">GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section>
+  <div class="container">
+    <h2 class="section-title">Two doors, one engine</h2>
+    <p class="section-sub">The same Rust binary serves both the human developer in VS Code and the AI agent over MCP.</p>
+    <div class="grid grid-3">
+      <div class="card card-blue">
+        <div class="card-icon">&#128187;</div>
+        <h3>VS Code Extension</h3>
+        <p>Syntax highlighting, step autocomplete, diagnostics while you type. Read scripts from the FileMaker clipboard and write them back — all from the editor.</p>
+      </div>
+      <div class="card card-purple">
+        <div class="card-icon purple">&#129504;</div>
+        <h3>MCP Server for AI</h3>
+        <p>Any MCP client (Claude, OpenCode, Cursor) can read, validate, inspect, audit, and cross-reference your scripts and schema. The AI reads the same .fmscript files you do.</p>
+      </div>
+      <div class="card card-green">
+        <div class="card-icon green">&#128269;</div>
+        <h3>Database Inspector</h3>
+        <p>Parse FMSaveAsXML exports into navigable directories: tables, fields with calculations, layouts with triggers, relationships with joins, custom functions, scripts in folders.</p>
+      </div>
+      <div class="card card-orange">
+        <div class="card-icon orange">&#9888;</div>
+        <h3>Reference Audit</h3>
+        <p>Find broken references automatically: dangling Perform Script and Go to Layout targets, relationships pointing at deleted table occurrences, ghost fields on layouts.</p>
+      </div>
+      <div class="card card-yellow">
+        <div class="card-icon yellow">&#128269;</div>
+        <h3>Cross-Reference</h3>
+        <p>who-calls and who-uses-field: trace every caller of a script and every place a field is used — layouts, relationship keys, Set Field steps, calculation mentions.</p>
+      </div>
+      <div class="card card-emerald">
+        <div class="card-icon emerald">&#128221;</div>
+        <h3>Plain-text .fmscript</h3>
+        <p>Scripts are plain text files you can version in git, diff, search, and edit with any tool. The format is human-readable and AI-friendly — the same artifact for both.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section style="padding-top:0">
+  <div class="container">
+    <h2 class="section-title">How it works</h2>
+    <p class="section-sub">Copy in FileMaker, edit in VS Code, paste back. The AI path works the same way over MCP.</p>
+    <div class="flow">
+      <div class="flow-box fm">FileMaker<br><small style="font-weight:400;opacity:.7">Cmd+C</small></div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-box engine">fm-bridge<br><small style="font-weight:400;opacity:.7">Rust engine</small></div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-box vscode">.fmscript<br><small style="font-weight:400;opacity:.7">VS Code</small></div>
+    </div>
+    <div style="display:flex;justify-content:center;margin-top:.5rem">
+      <span style="color:#64748b">↙ AI path: same engine, different door →</span>
+      <div class="flow-box ai" style="margin-left:.75rem">MCP<br><small style="font-weight:400;opacity:.7">Claude / OpenCode</small></div>
+    </div>
+  </div>
+</section>
+
+<!-- Install -->
+<section id="install" style="padding-top:0">
+  <div class="container">
+    <h2 class="section-title">Install<span class="version-tag">v0.1.7</span></h2>
+    <p class="section-sub">Download the .vsix and install in VS Code. No Rust, no build tools needed.</p>
+    <div class="code-block">
+      <button class="copy-btn" onclick="navigator.clipboard.writeText(this.parentElement.textContent.replace('📋','').trim())">📋 copy</button>
+      <span style="color:#64748b"># 1. Download the extension</span><br>
+      <span class="cmd">curl</span> <span class="opt">-LO</span> https://github.com/LucasVaroneW/fm-bridge/releases/latest/download/fm-bridge.vsix<br><br>
+      <span style="color:#64748b"># 2. Install in VS Code</span><br>
+      <span class="cmd">code</span> <span class="opt">--install-extension</span> fm-bridge.vsix<br><br>
+      <span style="color:#64748b"># 3. Or: Extensions → ... → Install from VSIX</span><br>
+      <span style="color:#475569">#    Pick the downloaded file.</span>
+    </div>
+    <p style="text-align:center;color:#64748b;font-size:.9rem;margin-top:.75rem">
+      Or build from source: <code style="background:#1e293b;padding:.15rem .4rem;border-radius:.25rem">git clone</code> →
+      <code style="background:#1e293b;padding:.15rem .4rem;border-radius:.25rem">cargo install --path .</code>
+    </p>
+  </div>
+</section>
+
+<!-- Audio section -->
+<section class="download-section">
+  <div class="container">
+    <h2 class="section-title" style="background:linear-gradient(135deg,#818cf8,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Zero-install for end users</h2>
+    <p style="color:#94a3b8;max-width:32rem;margin:0 auto 1.5rem;font-size:1.05rem">
+      The .vsix bundles the Rust binary inside. Your users double-click the extension — no Rust, no terminal, no package managers. Works on Windows, macOS, and Linux.
+    </p>
+    <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:2rem">
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center">
+        <div style="font-size:1.5rem;font-weight:700;color:#818cf8">~150</div>
+        <div style="color:#64748b;font-size:.85rem">step types cataloged</div>
+      </div>
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center">
+        <div style="font-size:1.5rem;font-weight:700;color:#4ade80">85</div>
+        <div style="color:#64748b;font-size:.85rem">unit tests</div>
+      </div>
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center">
+        <div style="font-size:1.5rem;font-weight:700;color:#c084fc">3</div>
+        <div style="color:#64748b;font-size:.85rem">platforms supported</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p style="margin-bottom:.5rem">
+      fm-bridge · <a href="https://github.com/LucasVaroneW/fm-bridge">GitHub</a> ·
+      GPL-3.0 licensed
+    </p>
+    <p style="font-size:.85rem">
+      by <a href="https://datapilottax.es">Lucas Varone</a> — also created
+      <a href="https://datapilottax.es" style="border-bottom:1px solid #334155">DataPilot Tax</a>,
+      the FacturaE & VeriFactu API for Spanish developers
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

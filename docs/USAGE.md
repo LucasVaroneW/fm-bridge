@@ -35,7 +35,7 @@ FM (Cmd+V) ← fm-bridge write ← script.fmscript
 2. Ejecutarlo. Aceptar todas las opciones por defecto (1 → Enter).
 3. Cerrar y volver a abrir cualquier terminal (cmd, PowerShell, Git Bash).
 4. Verificar: `cargo --version` debe imprimir algo como `cargo 1.8x.x`.
-5. **Importante:** Necesitas MSYS2 con el toolchain mingw64. Si ya tenes MSYS2 instalado, abri **MSYS2 UCRT64** desde el menu de inicio y ejecuta:
+5. **Importante:** Necesitas MSYS2 con el toolchain mingw64. Si ya tenes MSYS2 instalado, abri **MSYS2 MINGW64** desde el menu de inicio y ejecuta:
    ```
    pacman -S mingw-w64-x86_64-gcc
    ```
@@ -491,10 +491,12 @@ Repetí el `dump-ids` para esa entrada y corregí el id en el toml.
 ### Pego en FM y aparece el step correcto pero con los parámetros vacíos
 
 La `shape` de ese step en `steps.toml` es `plain` pero el step en realidad lleva
-parámetros (cálculo, target, etc.). Hay que cambiarle la shape. Las shapes
-posibles están documentadas arriba del propio `steps.toml`. Para identificar
-cuál corresponde, mirá `debug_raw.xml` después de un `fm-bridge debug` con ese
-step en el clipboard.
+parámetros (cálculo, target, flags, etc.). Hay que cambiarle la shape y modelar
+sus campos en `src/xmss.rs` y `src/text_format.rs`. Para identificar qué
+elementos XML emite FM, mirá `debug_raw.xml` después de un `fm-bridge debug` con
+ese step en el clipboard. Las shapes ya modeladas (Set Field, Perform Script,
+Go to Layout, New Window, Go to Portal Row, Refresh Window, Open/Revert
+Transaction, Show/Hide Toolbars, etc.) no deberían tener este problema.
 
 ### "Cannot open clipboard after 30 attempts" (Windows)
 
@@ -524,17 +526,26 @@ instalar Rust, el PATH no está actualizado.
 fm-bridge/
 ├── Cargo.toml              ← dependencias y metadata
 ├── steps.toml              ← catálogo de tipos de step (id, nombre, shape)
-├── docs/USAGE.md           ← este archivo
-├── test_script.fmscript    ← script de ejemplo para probar
-├── ids.txt                 ← dump de referencia de IDs descubiertos
+├── docs/
+│   ├── VISION.md           ← visión y roadmap del proyecto
+│   ├── MCP.md              ← guía del servidor MCP (puerta IA)
+│   └── USAGE.md            ← este archivo
+├── editors/vscode/         ← extensión de VS Code (TypeScript)
 └── src/
-    ├── main.rs             ← entrypoint, dispatch de comandos
+    ├── main.rs             ← entrypoint, dispatch de comandos CLI + JSON
     ├── clipboard.rs        ← I/O al clipboard del SO (Win32 + macOS)
-    ├── xmss.rs             ← codec del formato XML de FM
-    ├── text_format.rs      ← codec del formato .fmscript de texto
+    ├── ole_clipboard.rs    ← clipboard OLE para Windows
+    ├── xmss.rs             ← codec del formato XML de FM (clipboard)
+    ├── text_format.rs      ← codec del formato .fmscript + linter
     ├── steps.rs            ← carga steps.toml, helpers de búsqueda
-    ├── fmsavexml.rs        ← parser del export FMSaveAsXML (comando `inspect`)
-    └── slice.rs            ← arma slices enfocados (comando `slice`)
+    ├── step_dsl.rs         ← DSL para pasos opacos (Import/Export, Go to Related)
+    ├── import_records.rs   ← parseo de bloques Import/Export Records
+    ├── fmsavexml.rs        ← parser del export FMSaveAsXML (comando inspect)
+    ├── slice.rs            ← arma slices enfocados (comando slice)
+    ├── audit.rs            ← auditoría de integridad referencial
+    ├── xref.rs             ← referencias cruzadas (who-calls, who-uses-field)
+    ├── mcp.rs              ← servidor MCP (JSON-RPC por stdio)
+    └── normalization.rs    ← normalización Unicode para nombres de paso
 ```
 
 ---

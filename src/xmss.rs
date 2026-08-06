@@ -1358,8 +1358,14 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                 xml.push_str("<InputFields>");
                 for f in &step.input_fields {
                     let pw = f.use_password.as_str();
-                    xml.push_str(&format!("<InputField UsePasswordCharacter=\"{}\">", xml_escape(pw)));
-                    if !f.field_table.is_empty() || !f.field_id.is_empty() || !f.field_name.is_empty() {
+                    xml.push_str(&format!(
+                        "<InputField UsePasswordCharacter=\"{}\">",
+                        xml_escape(pw)
+                    ));
+                    if !f.field_table.is_empty()
+                        || !f.field_id.is_empty()
+                        || !f.field_name.is_empty()
+                    {
                         xml.push_str("<Field");
                         if !f.field_table.is_empty() {
                             xml.push_str(&format!(" table=\"{}\"", xml_escape(&f.field_table)));
@@ -1377,7 +1383,10 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                         xml.push_str("<Field table=\"\" id=\"0\" name=\"\"></Field>");
                     }
                     if !f.label.is_empty() {
-                        xml.push_str(&format!("<Label><Calculation>{}</Calculation></Label>", cdata(&f.label)));
+                        xml.push_str(&format!(
+                            "<Label><Calculation>{}</Calculation></Label>",
+                            cdata(&f.label)
+                        ));
                     }
                     xml.push_str("</InputField>");
                 }

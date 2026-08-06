@@ -73,6 +73,26 @@ function templateFor(step: StepInfo): vscode.SnippetString {
       return new vscode.SnippetString(
         "Execute FileMaker Data API [${1:\\$result}; ${2:jsonCalc}]",
       );
+    case "Go to Portal Row":
+      return new vscode.SnippetString(
+        "Go to Portal Row [${1:calc}; ${2:SelectAll}]",
+      );
+    case "Refresh Window":
+      return new vscode.SnippetString(
+        "Refresh Window [${1:FlushJoins}; ${2:FlushSQLData}]",
+      );
+    case "Open Transaction":
+      return new vscode.SnippetString(
+        "Open Transaction [${1:ESSForceCommit}; ${2:SkipAutoEntry}]",
+      );
+    case "Revert Transaction":
+      return new vscode.SnippetString(
+        "Revert Transaction [Condition: ${1:calc}; ErrorCode: ${2:0}; ErrorMessage: ${3:\"msg\"}]",
+      );
+    case "Show/Hide Toolbars":
+      return new vscode.SnippetString(
+        "Show/Hide Toolbars [${1:Hide}; ${2:Lock}]",
+      );
   }
 
   // Generic fallback by shape.

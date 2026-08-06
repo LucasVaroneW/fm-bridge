@@ -62,7 +62,7 @@
       }
     },
     "section-label": {
-      "match": "\\b(Title|Message|Buttons|Find|Omit|Target|URL|cURL|Style|Layout|Object|Function|Height|Width|Top|Left|Dialog|Rep|Param|Style)\\b(?:\\[[0-9]+\\])?\\s*(:)",
+      "match": "\\b(Title|Message|Buttons|Find|Omit|Target|URL|cURL|Style|Layout|Object|Function|Height|Width|Top|Left|Dialog|Rep|Param|Condition|ErrorCode|ErrorMessage)\\b(?:\\[[0-9]+\\])?\\s*(:)",
       "captures": {
         "1": { "name": "entity.other.attribute-name.fmscript" },
         "2": { "name": "punctuation.separator.key-value.fmscript" }
@@ -100,7 +100,7 @@
       "name": "constant.numeric.fmscript"
     },
     "constant": {
-      "match": "\\b(True|False|On|Off|First|Last|Next|Previous|Current|original|Document|Floating|Dialog|Card|ResizeToFit|Maximize|Minimize|Restore|Hide|VerifySSL|SelectAll|DontEncode)\\b",
+      "match": "\\b(True|False|On|Off|First|Last|Next|Previous|Current|original|Document|Floating|Dialog|Card|ResizeToFit|Maximize|Minimize|Restore|Hide|Show|VerifySSL|SelectAll|DontEncode|FlushJoins|FlushSQLData|ESSForceCommit|SkipAutoEntry|Option|Lock|EditToolbar)\\b",
       "name": "constant.language.fmscript"
     },
     "function": {

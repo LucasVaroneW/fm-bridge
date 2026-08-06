@@ -290,7 +290,7 @@ kind = "GoToPortalRow"
 id = 99
 en = "Go to Portal Row"
 es = "Ir a la fila del portal"
-shape = "plain"
+shape = "go_to_portal_row"
 opens_block = false
 closes_block = false
 
@@ -938,7 +938,7 @@ kind = "RefreshWindow"
 id = 80
 en = "Refresh Window"
 es = "Refrescar ventana"
-shape = "plain"
+shape = "refresh_window"
 opens_block = false
 closes_block = false
 
@@ -974,7 +974,7 @@ kind = "ShowHideToolbars"
 id = 29
 en = "Show/Hide Toolbars"
 es = "Mostrar/Ocultar barras de herramientas"
-shape = "plain"
+shape = "show_hide_toolbars"
 opens_block = false
 closes_block = false
 
@@ -1236,7 +1236,7 @@ kind = "OpenTransaction"
 id = 205
 en = "Open Transaction"
 es = "Abrir transacción"
-shape = "plain"
+shape = "open_transaction"
 opens_block = false
 closes_block = false
 
@@ -1254,7 +1254,7 @@ kind = "RevertTransaction"
 id = 207
 en = "Revert Transaction"
 es = "Revertir transacción"
-shape = "plain"
+shape = "revert_transaction"
 opens_block = false
 closes_block = false
 
@@ -1263,7 +1263,7 @@ kind = "RevertTransactionOnError"
 id = 223
 en = "Revert Transaction on Error"
 es = "Revertir transacción en caso de error"
-shape = "plain"
+shape = "opaque"
 opens_block = false
 closes_block = false
 

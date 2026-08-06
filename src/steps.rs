@@ -76,6 +76,19 @@ pub enum StepShape {
     /// (Import/Export Records: <Profile>, <TargetFields> with N field maps, etc.).
     /// The raw inner XML round-trips losslessly via the `calculation` field.
     Opaque,
+    /// <NoInteract/> + <SelectAll/> + <RowPageLocation/> + <Calculation> (Go to Portal Row).
+    GoToPortalRow,
+    /// <Option state="..."/> + <FlushSQLData state="..."/> (Refresh Window).
+    RefreshWindow,
+    /// <Option state="..."/> + <ESSForceCommit state="..."/> + <SkipAutoEntry state="..."/>
+    /// + <Restore state="..."/> (Open Transaction).
+    OpenTransaction,
+    /// <Option state="..."/> + <Condition><Calculation> + <ErrorCode><Calculation>
+    /// + <ErrorMessage><Calculation> (Revert Transaction).
+    RevertTransaction,
+    /// <Lock state="..."/> + <ShowHide value="..."/> + <IncludeEditRecordToolbar state="..."/>
+    /// (Show/Hide Toolbars).
+    ShowHideToolbars,
 }
 
 /// Internal step kind identifier from steps.toml.

@@ -378,7 +378,10 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
                 parts.push(format!("Style: {}", s.trim()));
             }
             if let Some(l) = &step.layout_name {
-                parts.push(format!("Layout: \"{}\"", l));
+                match &step.layout_id {
+                    Some(id) => parts.push(format!("Layout: \"{}\" #{}", l, id)),
+                    None => parts.push(format!("Layout: \"{}\"", l)),
+                }
             }
             if let Some(h) = &step.window_height {
                 let t = h.trim();
@@ -406,6 +409,86 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
             }
             if !parts.is_empty() {
                 line.push_str(&format!(" [{}]", parts.join("; ")));
+            }
+        }
+        Some(StepShape::GoToPortalRow) => {
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(calc) = &step.calculation {
+                let c = calc.trim();
+                if !c.is_empty() {
+                    parts.push(c.to_string());
+                }
+            }
+            if step.select_all_state.as_deref() == Some("True") {
+                parts.push("SelectAll".to_string());
+            }
+            if step.goto_no_interact.as_deref() == Some("True") {
+                parts.push("Dialog: Off".to_string());
+            }
+            if !parts.is_empty() {
+                line.push_str(&format!(" [{}]", parts.join("; ")));
+            }
+        }
+        Some(StepShape::RefreshWindow) => {
+            let mut flags: Vec<String> = Vec::new();
+            if step.flush_cached_joins.as_deref() == Some("True") {
+                flags.push("FlushJoins".to_string());
+            }
+            if step.flush_cached_sql_data.as_deref() == Some("True") {
+                flags.push("FlushSQLData".to_string());
+            }
+            if !flags.is_empty() {
+                line.push_str(&format!(" [{}]", flags.join("; ")));
+            }
+        }
+        Some(StepShape::RevertTransaction) => {
+            let mut parts: Vec<String> = Vec::new();
+            if step.flush_cached_joins.as_deref() == Some("True") {
+                parts.push("Option".to_string());
+            }
+            if let Some(cond) = &step.error_condition {
+                parts.push(format!("Condition: {}", cond.trim()));
+            }
+            if let Some(code) = &step.error_code {
+                parts.push(format!("ErrorCode: {}", code.trim()));
+            }
+            if let Some(msg) = &step.error_message {
+                parts.push(format!("ErrorMessage: {}", msg.trim()));
+            }
+            if !parts.is_empty() {
+                line.push_str(&format!(" [{}]", parts.join("; ")));
+            }
+        }
+        Some(StepShape::OpenTransaction) => {
+            let mut flags: Vec<String> = Vec::new();
+            if step.flush_cached_joins.as_deref() == Some("True") {
+                flags.push("Option".to_string());
+            }
+            if step.ess_force_commit.as_deref() == Some("True") {
+                flags.push("ESSForceCommit".to_string());
+            }
+            if step.skip_auto_entry.as_deref() == Some("True") {
+                flags.push("SkipAutoEntry".to_string());
+            }
+            if !flags.is_empty() {
+                line.push_str(&format!(" [{}]", flags.join("; ")));
+            }
+        }
+        Some(StepShape::ShowHideToolbars) => {
+            let mut flags: Vec<String> = Vec::new();
+            if step.show_hide_value.as_deref() == Some("Show") {
+                flags.push("Show".to_string());
+            } else {
+                flags.push("Hide".to_string());
+            }
+            if step.lock_state.as_deref() == Some("True") {
+                flags.push("Lock".to_string());
+            }
+            if step.include_edit_record_toolbar.as_deref() == Some("True") {
+                flags.push("EditToolbar".to_string());
+            }
+            if !flags.is_empty() {
+                line.push_str(&format!(" [{}]", flags.join("; ")));
             }
         }
         Some(StepShape::InsertFromUrl) => {
@@ -711,6 +794,16 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: 0,
             });
             i += 1;
@@ -781,6 +874,16 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             });
             i += 1;
@@ -1152,6 +1255,16 @@ fn build_step_from_name(
             dont_encode_url: None,
             verify_ssl: None,
             select_all_state: None,
+            flush_cached_joins: None,
+            flush_cached_sql_data: None,
+            error_condition: None,
+            error_code: None,
+            error_message: None,
+            skip_auto_entry: None,
+            ess_force_commit: None,
+            lock_state: None,
+            show_hide_value: None,
+            include_edit_record_toolbar: None,
             indent_level: indent,
         },
         Some(StepShape::ValueCalcName) => {
@@ -1199,6 +1312,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1245,6 +1368,16 @@ fn build_step_from_name(
             dont_encode_url: None,
             verify_ssl: None,
             select_all_state: None,
+            flush_cached_joins: None,
+            flush_cached_sql_data: None,
+            error_condition: None,
+            error_code: None,
+            error_message: None,
+            skip_auto_entry: None,
+            ess_force_commit: None,
+            lock_state: None,
+            show_hide_value: None,
+            include_edit_record_toolbar: None,
             indent_level: indent,
         },
         Some(StepShape::SetState) => ScriptStep {
@@ -1290,6 +1423,16 @@ fn build_step_from_name(
             dont_encode_url: None,
             verify_ssl: None,
             select_all_state: None,
+            flush_cached_joins: None,
+            flush_cached_sql_data: None,
+            error_condition: None,
+            error_code: None,
+            error_message: None,
+            skip_auto_entry: None,
+            ess_force_commit: None,
+            lock_state: None,
+            show_hide_value: None,
+            include_edit_record_toolbar: None,
             indent_level: indent,
         },
         Some(StepShape::Dialog) => {
@@ -1337,6 +1480,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1385,6 +1538,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1439,6 +1602,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1489,6 +1662,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1537,6 +1720,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1585,6 +1778,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1633,6 +1836,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1681,6 +1894,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1733,6 +1956,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1781,6 +2014,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1829,6 +2072,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1877,6 +2130,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -1913,7 +2176,7 @@ fn build_step_from_name(
                 window_limit_current_file: None,
                 window_state: None,
                 layout_name: nw.layout,
-                layout_id: None,
+                layout_id: nw.layout_id,
                 layout_destination: None,
                 window_height: nw.height,
                 window_width: nw.width,
@@ -1925,6 +2188,306 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::GoToPortalRow) => {
+            let (calc, sel_all, no_int, location) = parse_go_to_portal_row_content(content);
+            ScriptStep {
+                name: name.to_string(),
+                enable: enabled,
+                id,
+                text: None,
+                calculation: calc,
+                var_name: None,
+                repetition: None,
+                object_name: None,
+                function_name: None,
+                parameters: Vec::new(),
+                restore_state: None,
+                set_state: None,
+                dialog_title: None,
+                dialog_message: None,
+                dialog_buttons: Vec::new(),
+                field_result: None,
+                field_target: None,
+                field_table: None,
+                field_numeric_id: None,
+                script_target_name: None,
+                script_target_id: None,
+                script_target_file: None,
+                current_script_mode: None,
+                goto_location: location,
+                goto_exit_after_last: None,
+                goto_no_interact: no_int,
+                window_mode: None,
+                window_limit_current_file: None,
+                window_state: None,
+                layout_name: None,
+                layout_id: None,
+                layout_destination: None,
+                window_height: None,
+                window_width: None,
+                window_top: None,
+                window_left: None,
+                window_style_name: None,
+                find_requests: Vec::new(),
+                curl_options: None,
+                dont_encode_url: None,
+                verify_ssl: None,
+                select_all_state: sel_all,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::RefreshWindow) => {
+            let (flush_joins, flush_sql) = parse_refresh_window_content(content);
+            ScriptStep {
+                name: name.to_string(),
+                enable: enabled,
+                id,
+                text: None,
+                calculation: None,
+                var_name: None,
+                repetition: None,
+                object_name: None,
+                function_name: None,
+                parameters: Vec::new(),
+                restore_state: None,
+                set_state: None,
+                dialog_title: None,
+                dialog_message: None,
+                dialog_buttons: Vec::new(),
+                field_result: None,
+                field_target: None,
+                field_table: None,
+                field_numeric_id: None,
+                script_target_name: None,
+                script_target_id: None,
+                script_target_file: None,
+                current_script_mode: None,
+                goto_location: None,
+                goto_exit_after_last: None,
+                goto_no_interact: None,
+                window_mode: None,
+                window_limit_current_file: None,
+                window_state: None,
+                layout_name: None,
+                layout_id: None,
+                layout_destination: None,
+                window_height: None,
+                window_width: None,
+                window_top: None,
+                window_left: None,
+                window_style_name: None,
+                find_requests: Vec::new(),
+                curl_options: None,
+                dont_encode_url: None,
+                verify_ssl: None,
+                select_all_state: None,
+                flush_cached_joins: flush_joins,
+                flush_cached_sql_data: flush_sql,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::RevertTransaction) => {
+            let (opt, cond, code, msg) = parse_revert_transaction_content(content);
+            ScriptStep {
+                name: name.to_string(),
+                enable: enabled,
+                id,
+                text: None,
+                calculation: None,
+                var_name: None,
+                repetition: None,
+                object_name: None,
+                function_name: None,
+                parameters: Vec::new(),
+                restore_state: None,
+                set_state: None,
+                dialog_title: None,
+                dialog_message: None,
+                dialog_buttons: Vec::new(),
+                field_result: None,
+                field_target: None,
+                field_table: None,
+                field_numeric_id: None,
+                script_target_name: None,
+                script_target_id: None,
+                script_target_file: None,
+                current_script_mode: None,
+                goto_location: None,
+                goto_exit_after_last: None,
+                goto_no_interact: None,
+                window_mode: None,
+                window_limit_current_file: None,
+                window_state: None,
+                layout_name: None,
+                layout_id: None,
+                layout_destination: None,
+                window_height: None,
+                window_width: None,
+                window_top: None,
+                window_left: None,
+                window_style_name: None,
+                find_requests: Vec::new(),
+                curl_options: None,
+                dont_encode_url: None,
+                verify_ssl: None,
+                select_all_state: None,
+                flush_cached_joins: opt,
+                flush_cached_sql_data: None,
+                error_condition: cond,
+                error_code: code,
+                error_message: msg,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::OpenTransaction) => {
+            let (opt, ess, skip) = parse_open_transaction_content(content);
+            ScriptStep {
+                name: name.to_string(),
+                enable: enabled,
+                id,
+                text: None,
+                calculation: None,
+                var_name: None,
+                repetition: None,
+                object_name: None,
+                function_name: None,
+                parameters: Vec::new(),
+                restore_state: None,
+                set_state: None,
+                dialog_title: None,
+                dialog_message: None,
+                dialog_buttons: Vec::new(),
+                field_result: None,
+                field_target: None,
+                field_table: None,
+                field_numeric_id: None,
+                script_target_name: None,
+                script_target_id: None,
+                script_target_file: None,
+                current_script_mode: None,
+                goto_location: None,
+                goto_exit_after_last: None,
+                goto_no_interact: None,
+                window_mode: None,
+                window_limit_current_file: None,
+                window_state: None,
+                layout_name: None,
+                layout_id: None,
+                layout_destination: None,
+                window_height: None,
+                window_width: None,
+                window_top: None,
+                window_left: None,
+                window_style_name: None,
+                find_requests: Vec::new(),
+                curl_options: None,
+                dont_encode_url: None,
+                verify_ssl: None,
+                select_all_state: None,
+                flush_cached_joins: opt,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: skip,
+                ess_force_commit: ess,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
+                indent_level: indent,
+            }
+        }
+        Some(StepShape::ShowHideToolbars) => {
+            let (lock, show_hide, edit_tb) = parse_show_hide_toolbars_content(content);
+            ScriptStep {
+                name: name.to_string(),
+                enable: enabled,
+                id,
+                text: None,
+                calculation: None,
+                var_name: None,
+                repetition: None,
+                object_name: None,
+                function_name: None,
+                parameters: Vec::new(),
+                restore_state: None,
+                set_state: None,
+                dialog_title: None,
+                dialog_message: None,
+                dialog_buttons: Vec::new(),
+                field_result: None,
+                field_target: None,
+                field_table: None,
+                field_numeric_id: None,
+                script_target_name: None,
+                script_target_id: None,
+                script_target_file: None,
+                current_script_mode: None,
+                goto_location: None,
+                goto_exit_after_last: None,
+                goto_no_interact: None,
+                window_mode: None,
+                window_limit_current_file: None,
+                window_state: None,
+                layout_name: None,
+                layout_id: None,
+                layout_destination: None,
+                window_height: None,
+                window_width: None,
+                window_top: None,
+                window_left: None,
+                window_style_name: None,
+                find_requests: Vec::new(),
+                curl_options: None,
+                dont_encode_url: None,
+                verify_ssl: None,
+                select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: lock,
+                show_hide_value: show_hide,
+                include_edit_record_toolbar: edit_tb,
                 indent_level: indent,
             }
         }
@@ -1989,6 +2552,16 @@ fn build_step_from_name(
                 } else {
                     None
                 },
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -2037,6 +2610,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -2096,6 +2679,16 @@ fn build_step_from_name(
                 dont_encode_url: None,
                 verify_ssl: None,
                 select_all_state: None,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
                 indent_level: indent,
             }
         }
@@ -2564,6 +3157,7 @@ fn parse_go_to_layout_content(
 struct ParsedNewWindow {
     style: Option<String>,
     layout: Option<String>,
+    layout_id: Option<String>,
     height: Option<String>,
     width: Option<String>,
     top: Option<String>,
@@ -2576,6 +3170,7 @@ fn parse_new_window_content(content: Option<&str>) -> ParsedNewWindow {
     let mut out = ParsedNewWindow {
         style: None,
         layout: None,
+        layout_id: None,
         height: None,
         width: None,
         top: None,
@@ -2590,7 +3185,20 @@ fn parse_new_window_content(content: Option<&str>) -> ParsedNewWindow {
         if let Some(v) = p.strip_prefix("Style:") {
             out.style = Some(v.trim().to_string());
         } else if let Some(v) = p.strip_prefix("Layout:") {
-            out.layout = Some(v.trim().trim_matches('"').to_string());
+            let raw = v.trim();
+            let name_part = raw.trim_matches('"');
+            // Split off optional ` #N` numeric id suffix.
+            if let Some(idx) = raw.find(" #") {
+                let after = &raw[idx + 2..];
+                if !after.is_empty() && after.chars().all(|c| c.is_ascii_digit()) {
+                    out.layout = Some(name_part[..idx].trim().trim_matches('"').to_string());
+                    out.layout_id = Some(after.to_string());
+                } else {
+                    out.layout = Some(name_part.to_string());
+                }
+            } else {
+                out.layout = Some(name_part.to_string());
+            }
         } else if let Some(v) = p.strip_prefix("Height:") {
             out.height = Some(v.trim().to_string());
         } else if let Some(v) = p.strip_prefix("Width:") {
@@ -2602,6 +3210,146 @@ fn parse_new_window_content(content: Option<&str>) -> ParsedNewWindow {
         }
     }
     out
+}
+
+/// Parse `Go to Portal Row` bracket content. Forms accepted:
+///   `[calc; SelectAll; Dialog: Off]`
+/// Returns (calculation, select_all, no_interact, location).
+fn parse_go_to_portal_row_content(
+    content: Option<&str>,
+) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+    let content = match content {
+        Some(c) => c.trim(),
+        None => return (None, None, None, None),
+    };
+    let mut calc: Option<String> = None;
+    let mut sel_all: Option<String> = None;
+    let mut no_int: Option<String> = None;
+    let mut location: Option<String> = None;
+    let mut first = true;
+    for part in split_smart(content) {
+        let p = part.trim();
+        if p.eq_ignore_ascii_case("SelectAll") {
+            sel_all = Some("True".to_string());
+        } else if p.eq_ignore_ascii_case("Dialog: Off") {
+            no_int = Some("True".to_string());
+        } else if first && !p.contains(':') && !p.eq_ignore_ascii_case("SelectAll") {
+            calc = Some(p.to_string());
+            location = Some("ByCalculation".to_string());
+        }
+        first = false;
+    }
+    (calc, sel_all, no_int, location)
+}
+
+/// Parse `Refresh Window` bracket content. Flags: `[FlushJoins; FlushSQLData]`
+/// Returns (flush_cached_joins, flush_cached_sql_data).
+fn parse_refresh_window_content(
+    content: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let content = match content {
+        Some(c) => c.trim(),
+        None => return (None, None),
+    };
+    let mut joins = None;
+    let mut sql = None;
+    for part in split_smart(content) {
+        let p = part.trim();
+        if p.eq_ignore_ascii_case("FlushJoins") {
+            joins = Some("True".to_string());
+        } else if p.eq_ignore_ascii_case("FlushSQLData") {
+            sql = Some("True".to_string());
+        }
+    }
+    (joins, sql)
+}
+
+/// Parse `Show/Hide Toolbars` bracket content. Flags separated by `;`:
+///   `Hide` | `Show` → default Hide
+///   `Lock` → lock the toolbar
+///   `EditToolbar` → include edit record toolbar
+/// Returns (lock_state, show_hide_value, include_edit_record_toolbar).
+fn parse_show_hide_toolbars_content(
+    content: Option<&str>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let content = match content {
+        Some(c) => c.trim(),
+        None => return (None, None, None),
+    };
+    let mut lock = None;
+    let mut show_hide = Some("Hide".to_string());
+    let mut edit_tb = None;
+    for part in split_smart(content) {
+        let p = part.trim();
+        if p.eq_ignore_ascii_case("Lock") {
+            lock = Some("True".to_string());
+        } else if p.eq_ignore_ascii_case("Show") {
+            show_hide = Some("Show".to_string());
+        } else if p.eq_ignore_ascii_case("EditToolbar") {
+            edit_tb = Some("True".to_string());
+        }
+    }
+    (lock, show_hide, edit_tb)
+}
+
+/// Parse `Revert Transaction` bracket content. Flags/values separated by `;`:
+///   `Option` → enable revert on condition
+///   `Condition: <calc>` → condition expression
+///   `ErrorCode: <calc>` → error code
+///   `ErrorMessage: <calc>` → error message
+/// Returns (option, condition, error_code, error_message).
+fn parse_revert_transaction_content(
+    content: Option<&str>,
+) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+    let content = match content {
+        Some(c) => c.trim(),
+        None => return (None, None, None, None),
+    };
+    let mut opt = None;
+    let mut cond = None;
+    let mut code = None;
+    let mut msg = None;
+    for part in split_smart(content) {
+        let p = part.trim();
+        if p.eq_ignore_ascii_case("Option") {
+            opt = Some("True".to_string());
+        } else if let Some(v) = p.strip_prefix("Condition:") {
+            cond = Some(v.trim().to_string());
+        } else if let Some(v) = p.strip_prefix("ErrorCode:") {
+            code = Some(v.trim().to_string());
+        } else if let Some(v) = p.strip_prefix("ErrorMessage:") {
+            msg = Some(v.trim().to_string());
+        }
+    }
+    (opt, cond, code, msg)
+}
+
+/// Parse `Open Transaction` bracket content. Flags separated by `;`:
+///   `Option` → enable transaction option
+///   `ESSForceCommit` → force ESS commit
+///   `SkipAutoEntry` → skip auto-entry
+/// Returns (option, ess_force_commit, skip_auto_entry).
+fn parse_open_transaction_content(
+    content: Option<&str>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let content = match content {
+        Some(c) => c.trim(),
+        None => return (None, None, None),
+    };
+    let mut opt = None;
+    let mut ess = None;
+    let mut skip = None;
+    for part in split_smart(content) {
+        let p = part.trim();
+        if p.eq_ignore_ascii_case("Option") {
+            opt = Some("True".to_string());
+        } else if p.eq_ignore_ascii_case("ESSForceCommit") {
+            ess = Some("True".to_string());
+        } else if p.eq_ignore_ascii_case("SkipAutoEntry") {
+            skip = Some("True".to_string());
+        }
+    }
+    (opt, ess, skip)
 }
 
 /// Parsed bag of Insert from URL fields. Filled by `parse_insert_from_url_content`.

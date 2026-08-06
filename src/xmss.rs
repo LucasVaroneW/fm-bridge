@@ -94,6 +94,30 @@ pub struct ScriptStep {
     pub dont_encode_url: Option<String>,
     pub verify_ssl: Option<String>,
     pub select_all_state: Option<String>,
+    // For Refresh Window (RefreshWindow shape): flush flags.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub flush_cached_joins: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub flush_cached_sql_data: Option<String>,
+    // For Revert Transaction (RevertTransaction shape).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error_condition: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error_message: Option<String>,
+    // For Open Transaction (OpenTransaction shape): boolean flags.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub skip_auto_entry: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ess_force_commit: Option<String>,
+    // For Show/Hide Toolbars (ShowHideToolbars shape).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub lock_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub show_hide_value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub include_edit_record_toolbar: Option<String>,
     pub indent_level: u32,
 }
 
@@ -548,6 +572,69 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"TargetName" => {
                         parser.push_target(TextTarget::FieldTarget);
                     }
+                    b"Option" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.flush_cached_joins =
+                                    String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"FlushSQLData" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.flush_sql_data =
+                                    String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"Condition" => {
+                        // Inner <Calculation> pushes its own target; value is moved on </Condition>.
+                    }
+                    b"ErrorCode" => {
+                    }
+                    b"ErrorMessage" => {
+                    }
+                    b"ESSForceCommit" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.ess_force_commit =
+                                    String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"SkipAutoEntry" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.skip_auto_entry =
+                                    String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"Lock" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.lock_state =
+                                    String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"ShowHide" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"value" {
+                                parser.show_hide_value =
+                                    String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"IncludeEditRecordToolbar" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.include_edit_record_toolbar =
+                                    String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -621,6 +708,18 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                         parser.pop_target(TextTarget::ValueCalc);
                     }
                     b"Restore" => {}
+                    b"Condition" => {
+                        parser.error_condition = parser.calculation.clone();
+                        parser.calculation.clear();
+                    }
+                    b"ErrorCode" => {
+                        parser.error_code = parser.calculation.clone();
+                        parser.calculation.clear();
+                    }
+                    b"ErrorMessage" => {
+                        parser.error_message = parser.calculation.clone();
+                        parser.calculation.clear();
+                    }
                     b"Set" => {
                         parser.pop_target(TextTarget::SetState);
                     }
@@ -785,6 +884,20 @@ struct StepParser {
     dont_encode_url: String,
     verify_ssl: String,
     select_all_state: String,
+    // Refresh Window
+    flush_cached_joins: String,
+    flush_sql_data: String,
+    // Revert Transaction
+    error_condition: String,
+    error_code: String,
+    error_message: String,
+    // Open Transaction
+    skip_auto_entry: String,
+    ess_force_commit: String,
+    // Show/Hide Toolbars
+    lock_state: String,
+    show_hide_value: String,
+    include_edit_record_toolbar: String,
     context_stack: Vec<TextTarget>,
 }
 
@@ -1011,6 +1124,56 @@ impl StepParser {
                 None
             } else {
                 Some(self.select_all_state.clone())
+            },
+            flush_cached_joins: if self.flush_cached_joins.is_empty() {
+                None
+            } else {
+                Some(self.flush_cached_joins.clone())
+            },
+            flush_cached_sql_data: if self.flush_sql_data.is_empty() {
+                None
+            } else {
+                Some(self.flush_sql_data.clone())
+            },
+            error_condition: if self.error_condition.is_empty() {
+                None
+            } else {
+                Some(self.error_condition.clone())
+            },
+            error_code: if self.error_code.is_empty() {
+                None
+            } else {
+                Some(self.error_code.clone())
+            },
+            error_message: if self.error_message.is_empty() {
+                None
+            } else {
+                Some(self.error_message.clone())
+            },
+            skip_auto_entry: if self.skip_auto_entry.is_empty() {
+                None
+            } else {
+                Some(self.skip_auto_entry.clone())
+            },
+            ess_force_commit: if self.ess_force_commit.is_empty() {
+                None
+            } else {
+                Some(self.ess_force_commit.clone())
+            },
+            lock_state: if self.lock_state.is_empty() {
+                None
+            } else {
+                Some(self.lock_state.clone())
+            },
+            show_hide_value: if self.show_hide_value.is_empty() {
+                None
+            } else {
+                Some(self.show_hide_value.clone())
+            },
+            include_edit_record_toolbar: if self.include_edit_record_toolbar.is_empty() {
+                None
+            } else {
+                Some(self.include_edit_record_toolbar.clone())
             },
             indent_level,
         }
@@ -1343,8 +1506,76 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                 xml_escape(style)
             ));
             if let Some(name) = &step.layout_name {
-                xml.push_str(&format!("<Layout name=\"{}\"></Layout>", xml_escape(name)));
+                xml.push_str("<Layout");
+                if let Some(id) = &step.layout_id {
+                    xml.push_str(&format!(" id=\"{}\"", xml_escape(id)));
+                }
+                xml.push_str(&format!(" name=\"{}\"></Layout>", xml_escape(name)));
             }
+        }
+        Some(StepShape::GoToPortalRow) => {
+            let no_int = step.goto_no_interact.as_deref().unwrap_or("False");
+            xml.push_str(&format!(
+                "<NoInteract state=\"{}\"></NoInteract>",
+                xml_escape(no_int)
+            ));
+            let sel_all = step.select_all_state.as_deref().unwrap_or("False");
+            xml.push_str(&format!(
+                "<SelectAll state=\"{}\"></SelectAll>",
+                xml_escape(sel_all)
+            ));
+            if let Some(loc) = &step.goto_location {
+                xml.push_str(&format!(
+                    "<RowPageLocation value=\"{}\"></RowPageLocation>",
+                    xml_escape(loc)
+                ));
+            }
+            if let Some(calc) = &step.calculation {
+                xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
+            }
+        }
+        Some(StepShape::RefreshWindow) => {
+            let joins = step.flush_cached_joins.as_deref().unwrap_or("False");
+            xml.push_str(&format!(
+                "<Option state=\"{}\"></Option>",
+                xml_escape(joins)
+            ));
+            let sql = step.flush_cached_sql_data.as_deref().unwrap_or("False");
+            xml.push_str(&format!(
+                "<FlushSQLData state=\"{}\"></FlushSQLData>",
+                xml_escape(sql)
+            ));
+        }
+        Some(StepShape::RevertTransaction) => {
+            let opt = step.flush_cached_joins.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<Option state=\"{}\"></Option>", xml_escape(opt)));
+            if let Some(cond) = &step.error_condition {
+                xml.push_str(&format!("<Condition><Calculation>{}</Calculation></Condition>", cdata(cond)));
+            }
+            if let Some(code) = &step.error_code {
+                xml.push_str(&format!("<ErrorCode><Calculation>{}</Calculation></ErrorCode>", cdata(code)));
+            }
+            if let Some(msg) = &step.error_message {
+                xml.push_str(&format!("<ErrorMessage><Calculation>{}</Calculation></ErrorMessage>", cdata(msg)));
+            }
+        }
+        Some(StepShape::OpenTransaction) => {
+            let opt = step.flush_cached_joins.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<Option state=\"{}\"></Option>", xml_escape(opt)));
+            let ess = step.ess_force_commit.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<ESSForceCommit state=\"{}\"></ESSForceCommit>", xml_escape(ess)));
+            let skip = step.skip_auto_entry.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<SkipAutoEntry state=\"{}\"></SkipAutoEntry>", xml_escape(skip)));
+            let restore = step.restore_state.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<Restore state=\"{}\"></Restore>", xml_escape(restore)));
+        }
+        Some(StepShape::ShowHideToolbars) => {
+            let lock = step.lock_state.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<Lock state=\"{}\"></Lock>", xml_escape(lock)));
+            let sh = step.show_hide_value.as_deref().unwrap_or("Hide");
+            xml.push_str(&format!("<ShowHide value=\"{}\"></ShowHide>", xml_escape(sh)));
+            let edit = step.include_edit_record_toolbar.as_deref().unwrap_or("False");
+            xml.push_str(&format!("<IncludeEditRecordToolbar state=\"{}\"></IncludeEditRecordToolbar>", xml_escape(edit)));
         }
         Some(StepShape::InsertFromUrl) => {
             // FM emits these 4 flags in a fixed order; preserve it to match the

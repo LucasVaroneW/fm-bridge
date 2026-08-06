@@ -18,7 +18,15 @@ pub struct FmScript {
     pub steps: Vec<ScriptStep>,
 }
 
-/// A single criterion inside a Perform Find request: one field = one text value.
+/// One input field inside a Show Custom Dialog (shape Dialog).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InputField {
+    pub field_name: String,
+    pub field_table: String,
+    pub field_id: String,
+    pub label: String,
+    pub use_password: String, // "True" or "False"
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FindCriterion {
     pub table: String,
@@ -51,6 +59,7 @@ pub struct ScriptStep {
     pub dialog_title: Option<String>,
     pub dialog_message: Option<String>,
     pub dialog_buttons: Vec<String>,
+    pub input_fields: Vec<InputField>,
     pub field_result: Option<String>,
     pub field_target: Option<String>,
     // For Set Field (FieldAndCalc shape): preserves <Field table=...> attribute.
@@ -426,7 +435,14 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                                 _ => {}
                             }
                         }
-                        if parser.in_find_criteria {
+                        if parser.in_input_field {
+                            if let Some(ref mut f) = parser.current_input_field {
+                                f.field_table = tbl;
+                                f.field_id = numeric_id;
+                                f.field_name = nm;
+                            }
+                            parser.push_target(TextTarget::InputFieldTarget);
+                        } else if parser.in_find_criteria {
                             // <Field> inside <Criteria> is the criterion's target — route to it,
                             // NOT to the Set Field target fields.
                             if let Some(c) = parser.current_find_criterion.as_mut() {
@@ -565,6 +581,27 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"Button" => {
                         parser.current_button.clear();
                         parser.push_target(TextTarget::DialogButton);
+                    }
+                    b"InputFields" => {
+                        // Container; per-field state is initialized on InputField.
+                    }
+                    b"InputField" => {
+                        let mut pw = "False".to_string();
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"UsePasswordCharacter" {
+                                pw = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                        parser.current_input_field = Some(InputField {
+                            use_password: pw,
+                            ..Default::default()
+                        });
+                        parser.in_input_field = true;
+                    }
+                    b"Label" => {
+                        if parser.in_input_field {
+                            // Inner <Calculation> pushes its own target; value moved on </Label>.
+                        }
                     }
                     b"Result" => {
                         parser.push_target(TextTarget::FieldResult);
@@ -734,6 +771,26 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             parser.current_button.clear();
                         }
                     }
+                    b"Label" => {
+                        if parser.in_input_field {
+                            if let Some(ref mut f) = parser.current_input_field {
+                                f.label = parser.calculation.clone();
+                                parser.calculation.clear();
+                            }
+                        }
+                    }
+                    b"Field" => {
+                        if parser.in_input_field {
+                            parser.pop_target(TextTarget::InputFieldTarget);
+                        }
+                    }
+                    b"InputField" => {
+                        if let Some(f) = parser.current_input_field.take() {
+                            parser.input_fields.push(f);
+                        }
+                        parser.in_input_field = false;
+                    }
+                    b"InputFields" => {}
                     b"Result" => {
                         parser.pop_target(TextTarget::FieldResult);
                     }
@@ -815,6 +872,8 @@ enum TextTarget {
     DialogTitle,
     DialogMessage,
     DialogButton,
+    InputFieldLabel,
+    InputFieldTarget,
     FieldResult,
     FieldTarget,
     FieldTextContent, // <Field>$var</Field> form used by Execute FileMaker Data API
@@ -849,6 +908,10 @@ struct StepParser {
     dialog_message: String,
     dialog_buttons: Vec<String>,
     current_button: String,
+    // Input fields (Show Custom Dialog)
+    input_fields: Vec<InputField>,
+    current_input_field: Option<InputField>,
+    in_input_field: bool,
     field_result: String,
     field_target: String,
     field_table: String,
@@ -926,6 +989,16 @@ impl StepParser {
             TextTarget::DialogTitle => self.dialog_title.push_str(text),
             TextTarget::DialogMessage => self.dialog_message.push_str(text),
             TextTarget::DialogButton => self.current_button.push_str(text),
+            TextTarget::InputFieldLabel => {
+                if let Some(ref mut f) = self.current_input_field {
+                    f.label.push_str(text);
+                }
+            }
+            TextTarget::InputFieldTarget => {
+                if let Some(ref mut f) = self.current_input_field {
+                    f.field_name.push_str(text);
+                }
+            }
             TextTarget::FieldResult => self.field_result.push_str(text),
             TextTarget::FieldTarget => self.field_target.push_str(text),
             TextTarget::FieldTextContent => self.field_target.push_str(text),
@@ -992,6 +1065,7 @@ impl StepParser {
                 Some(self.dialog_message.clone())
             },
             dialog_buttons: self.dialog_buttons.clone(),
+            input_fields: self.input_fields.clone(),
             field_result: if self.field_result.is_empty() {
                 None
             } else {
@@ -1279,6 +1353,35 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                     ));
                 }
                 xml.push_str("</Buttons>");
+            }
+            if !step.input_fields.is_empty() {
+                xml.push_str("<InputFields>");
+                for f in &step.input_fields {
+                    let pw = f.use_password.as_str();
+                    xml.push_str(&format!("<InputField UsePasswordCharacter=\"{}\">", xml_escape(pw)));
+                    if !f.field_table.is_empty() || !f.field_id.is_empty() || !f.field_name.is_empty() {
+                        xml.push_str("<Field");
+                        if !f.field_table.is_empty() {
+                            xml.push_str(&format!(" table=\"{}\"", xml_escape(&f.field_table)));
+                        }
+                        if !f.field_id.is_empty() && f.field_id != "0" {
+                            xml.push_str(&format!(" id=\"{}\"", xml_escape(&f.field_id)));
+                        }
+                        if !f.field_name.is_empty() {
+                            xml.push_str(&format!(" name=\"{}\"", xml_escape(&f.field_name)));
+                        }
+                        xml.push_str("></Field>");
+                    } else if !f.field_name.is_empty() {
+                        xml.push_str(&format!("<Field>{}</Field>", xml_escape(&f.field_name)));
+                    } else {
+                        xml.push_str("<Field table=\"\" id=\"0\" name=\"\"></Field>");
+                    }
+                    if !f.label.is_empty() {
+                        xml.push_str(&format!("<Label><Calculation>{}</Calculation></Label>", cdata(&f.label)));
+                    }
+                    xml.push_str("</InputField>");
+                }
+                xml.push_str("</InputFields>");
             }
         }
         Some(StepShape::FieldByName) => {

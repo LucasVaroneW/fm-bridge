@@ -3,7 +3,7 @@ name = "fm-bridge"
 version = "0.1.7"
 edition = "2024"
 description = "CLI tool to move FileMaker scripts between clipboard and plain-text .fmscript files"
-license = "MIT"
+license = "GPL-3.0"
 repository = "https://github.com/LucasVaroneW/fm-bridge"
 
 [dependencies]

@@ -70,9 +70,8 @@ workflow on a `v*` tag.
 
 - **JSON protocol is a stable contract** (the extension depends on it). New
   fields must be optional with `#[serde(skip_serializing_if = ...)]`.
-- **Don't run a project-wide `cargo fmt`.** The CI `lint` job is intentionally
-  non-blocking; the codebase isn't rustfmt/clippy-clean yet and a global reformat
-  collides with in-flight work in `text_format.rs`. Match the file's existing style.
+- **Cargo fmt is mandatory.** Run `cargo fmt` before committing Rust code. The CI
+  lint job enforces this.
 - **Opaque by default:** anything the codec doesn't model structurally must
   round-trip verbatim (see #2). Don't drop unknown data.
 - Steps are identified by exact name; the catalog lives in `steps.toml`.

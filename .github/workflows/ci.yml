@@ -25,17 +25,17 @@ jobs:
       - name: Test
         run: cargo test --verbose
 
-  # Lint informativo: NO bloquea el merge (continue-on-error). Solo clippy —
-  # el proyecto no sigue rustfmt globalmente (ver CLAUDE.md).
+  # Lint: fmt + clippy. Ambos obligatorios para mergear.
   lint:
-    name: lint (non-blocking)
+    name: lint
     runs-on: macos-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --check
       - name: clippy
         run: cargo clippy --all-targets

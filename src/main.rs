@@ -57,6 +57,9 @@ struct Command {
     // ── format style (reformat): "inline" | "indented" ──
     #[serde(default)]
     style: Option<String>,
+    /// resolve_from: path to a FMSaveAsXML export to resolve layout IDs from.
+    #[serde(default)]
+    resolve_from: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -144,8 +147,10 @@ impl Response {
         let first = errors.first();
         let error = first.map(|e| e.to_string());
         let error_line = first.map(|e| e.line);
+        // If all are warnings (no errors), the status is still ok.
+        let has_errors = errors.iter().any(|e| e.severity == "error");
         Response {
-            status: "error".to_string(),
+            status: if has_errors { "error".to_string() } else { "ok".to_string() },
             script_text: None,
             error,
             version: None,
@@ -176,7 +181,18 @@ fn handle_command(cmd: &Command) -> Response {
             };
             let errors = text_format::lint(script_text);
             if errors.is_empty() {
-                Response::ok()
+                // Run post_validate to catch warnings (missing layout IDs, etc.)
+                match text_format::parse_text_to_script(script_text) {
+                    Ok(script) => {
+                        let warnings = text_format::post_validate(&script);
+                        if warnings.is_empty() {
+                            Response::ok()
+                        } else {
+                            Response::errors(warnings)
+                        }
+                    }
+                    Err(pe) => Response::errors(vec![pe]),
+                }
             } else {
                 Response::errors(errors)
             }
@@ -217,17 +233,34 @@ fn handle_command(cmd: &Command) -> Response {
             }
         }
         "write" => {
-            let script_text = match &cmd.script_text {
-                Some(t) => t,
+            let mut script_text = match &cmd.script_text {
+                Some(t) => t.clone(),
                 None => return Response::error("No script_text provided".to_string()),
             };
+            // Auto-resolve layout IDs from a FMSaveAsXML export.
+            if let Some(xml_path) = &cmd.resolve_from {
+                match resolve_layout_ids_in_script(&script_text, xml_path) {
+                    Ok(resolved) => script_text = resolved,
+                    Err(e) => return Response::error(e),
+                }
+            }
             // Lint first: surface every format/structure error to the editor and
             // refuse to write a broken script to the clipboard.
-            let errors = text_format::lint(script_text);
+            let errors = text_format::lint(&script_text);
             if !errors.is_empty() {
                 return Response::errors(errors);
             }
-            match xmss::encode_xmss(script_text) {
+            // Run post_validate for warnings
+            match text_format::parse_text_to_script(&script_text) {
+                Ok(script) => {
+                    let warnings = text_format::post_validate(&script);
+                    if !warnings.is_empty() {
+                        return Response::errors(warnings);
+                    }
+                }
+                Err(pe) => return Response::errors(vec![pe]),
+            }
+            match xmss::encode_xmss(&script_text) {
                 Ok(xmss_data) => match clipboard::write_fm_clipboard(&xmss_data) {
                     Ok(()) => Response::ok(),
                     Err(e) => Response::error(e),
@@ -462,6 +495,21 @@ fn handle_command(cmd: &Command) -> Response {
                 Err(e) => Response::error(e),
             }
         }
+        // Resolve layout IDs in a script using a FMSaveAsXML export.
+        "resolve_ids" => {
+            let script_text = match &cmd.script_text {
+                Some(t) => t,
+                None => return Response::error("No script_text provided".to_string()),
+            };
+            let xml_path = match &cmd.xml_path {
+                Some(p) => p,
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            match resolve_layout_ids_in_script(script_text, xml_path) {
+                Ok(resolved) => Response::ok_text(resolved),
+                Err(e) => Response::error(e),
+            }
+        }
         _ => Response::error(format!("Unknown command: {}", cmd.command)),
     }
 }
@@ -477,6 +525,75 @@ fn run_json_mode() -> Result<(), String> {
         .map_err(|e| format!("Cannot serialize response: {}", e))?;
     print!("{}", output);
     Ok(())
+}
+
+/// Scan a FMSaveAsXML export for `<Layout id="..." name="...">` entries in
+/// the LayoutCatalog section. Returns a name→id map.
+fn scan_layout_catalog(xml_path: &str) -> Result<std::collections::HashMap<String, String>, String> {
+    let bytes = std::fs::read(xml_path)
+        .map_err(|e| format!("Cannot read {}: {}", xml_path, e))?;
+    let text = if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        let u16s: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        String::from_utf16(&u16s)
+            .map_err(|e| format!("Invalid UTF-16 in {}: {}", xml_path, e))?
+    } else {
+        String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8 in {}: {}", xml_path, e))?
+    };
+    let mut map = std::collections::HashMap::new();
+    let start = text.find("<LayoutCatalog").unwrap_or(0);
+    let end = text[start..].find("</LayoutCatalog>")
+        .map(|p| start + p).unwrap_or(text.len());
+    let section = &text[start..end];
+    let mut pos = 0;
+    while let Some(tag_start) = section[pos..].find("<Layout ") {
+        let abs = pos + tag_start;
+        let tag_end = match section[abs..].find('>') {
+            Some(p) => abs + p + 1,
+            None => break,
+        };
+        let tag = &section[abs..tag_end];
+        if let (Some(id), Some(name)) = (extract_xml_attrib(tag, "id"), extract_xml_attrib(tag, "name")) {
+            map.insert(name.to_string(), id.to_string());
+        }
+        pos = abs + 1;
+    }
+    Ok(map)
+}
+
+fn extract_xml_attrib<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
+    let pattern = format!(" {}=\"", attr);
+    let start = tag.find(&pattern)?;
+    let val_start = start + pattern.len();
+    let end = tag[val_start..].find('"')?;
+    Some(&tag[val_start..val_start + end])
+}
+
+fn resolve_layout_ids_in_script(script_text: &str, xml_path: &str) -> Result<String, String> {
+    let catalog = scan_layout_catalog(xml_path)?;
+    if catalog.is_empty() {
+        return Err(format!("No layouts found in {}", xml_path));
+    }
+    let script = crate::text_format::parse_text_to_script(script_text)
+        .map_err(|e| e.to_string())?;
+    let mut updated = false;
+    let mut steps = script.steps.clone();
+    for step in &mut steps {
+        if step.layout_name.is_some() && step.layout_id.is_none() {
+            let name = step.layout_name.as_ref().unwrap();
+            if let Some(id) = catalog.get(name) {
+                step.layout_id = Some(id.clone());
+                updated = true;
+            }
+        }
+    }
+    if updated {
+        Ok(crate::text_format::format_script(&crate::xmss::FmScript { steps }))
+    } else {
+        Ok(script_text.to_string())
+    }
 }
 
 // ─── CLI commands ───
@@ -1067,6 +1184,7 @@ mod tests {
             fields: None,
             summary: None,
             style: None,
+            resolve_from: None,
         }
     }
 

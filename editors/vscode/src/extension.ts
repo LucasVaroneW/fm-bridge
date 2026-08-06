@@ -16,6 +16,7 @@ import {
   reformat,
   resetBinaryCache,
   resolveBinaryPath,
+  resolveIds,
   writeClipboard,
 } from "./bridge";
 import { StepCompletionProvider, resetCatalogCache } from "./completion";
@@ -61,6 +62,10 @@ export function activate(context: vscode.ExtensionContext): void {
       reformatActive("indented"),
     ),
     vscode.commands.registerCommand("fm-bridge.showLog", () => output?.show()),
+    vscode.commands.registerCommand(
+      "fm-bridge.resolveLayoutIds",
+      resolveLayoutIds,
+    ),
     vscode.languages.registerCompletionItemProvider(
       LANGUAGE,
       new StepCompletionProvider(),
@@ -125,6 +130,38 @@ async function writeToClipboard(): Promise<void> {
       return;
     }
     await showWriteError(editor, resp.error, resp.error_line);
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+async function resolveLayoutIds(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    void vscode.window.showErrorMessage("fm-bridge: open a .fmscript file first.");
+    return;
+  }
+  try {
+    const files = await vscode.window.showOpenDialog({
+      filters: { "FMSaveAsXML": ["xml"] },
+      title: "Choose a FMSaveAsXML export to resolve layout IDs",
+    });
+    if (!files || files.length === 0) {
+      return;
+    }
+    const resp = await resolveIds(editor.document.getText(), files[0].fsPath);
+    if (resp.status !== "ok" || resp.script_text === undefined) {
+      void vscode.window.showErrorMessage(
+        `fm-bridge: ${resp.error ?? "could not resolve layout IDs"}`,
+      );
+      return;
+    }
+    const fullRange = new vscode.Range(
+      editor.document.positionAt(0),
+      editor.document.positionAt(editor.document.getText().length),
+    );
+    await editor.edit((eb) => eb.replace(fullRange, resp.script_text!));
+    void vscode.window.showInformationMessage("fm-bridge: layout IDs resolved.");
   } catch (err) {
     reportError(err);
   }
@@ -209,6 +246,15 @@ function registerDiagnostics(
     const name = doc.uri.path.split("/").pop() ?? doc.uri.path;
     try {
       const resp = await parseScript(doc.getText());
+      // Show warnings even when status is ok (e.g. missing layout IDs).
+      if (resp.errors && resp.errors.length > 0) {
+        collection.set(
+          doc.uri,
+          resp.errors.map((e) => toDiagnostic(doc, e.message, e.line, e.severity)),
+        );
+        log(`validated ${name}: ${resp.errors.length} warning(s)`);
+        return;
+      }
       if (resp.status === "ok") {
         collection.delete(doc.uri);
         log(`validated ${name}: ok`);
@@ -222,7 +268,7 @@ function registerDiagnostics(
           : [{ line: resp.error_line ?? 0, message: resp.error ?? "Invalid .fmscript" }];
       collection.set(
         doc.uri,
-        items.map((e) => toDiagnostic(doc, e.message, e.line)),
+        items.map((e) => toDiagnostic(doc, e.message, e.line, e.severity)),
       );
       log(`validated ${name}: ${items.length} error(s)`);
     } catch (err) {
@@ -283,6 +329,7 @@ function toDiagnostic(
   doc: vscode.TextDocument,
   message: string | undefined,
   line: number | undefined,
+  severity?: string,
 ): vscode.Diagnostic {
   const lineIndex =
     line && line > 0 ? Math.min(line - 1, doc.lineCount - 1) : 0;
@@ -293,10 +340,11 @@ function toDiagnostic(
     textLine.isEmptyOrWhitespace ? 0 : textLine.firstNonWhitespaceCharacterIndex,
   );
   const range = new vscode.Range(start, textLine.range.end);
+  const sev = severity === "warning" ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error;
   const diag = new vscode.Diagnostic(
     range,
     message ?? "Invalid .fmscript",
-    vscode.DiagnosticSeverity.Error,
+    sev,
   );
   diag.source = "fm-bridge";
   return diag;

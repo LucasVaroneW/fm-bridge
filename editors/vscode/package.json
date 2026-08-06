@@ -93,6 +93,11 @@
         "command": "fm-bridge.showLog",
         "title": "Show log",
         "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.resolveLayoutIds",
+        "title": "Resolve layout IDs from FMSaveAsXML",
+        "category": "fm-bridge"
       }
     ],
     "menus": {

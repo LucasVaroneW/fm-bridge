@@ -20,6 +20,7 @@ import * as vscode from "vscode";
 export interface BridgeError {
   line: number;
   message: string;
+  severity?: string;
 }
 
 /** Shape of the JSON-mode response (see `Response` in src/main.rs). */
@@ -226,6 +227,14 @@ export async function reformat(
   style: "inline" | "indented",
 ): Promise<BridgeResponse> {
   return runJson({ command: "reformat", script_text: scriptText, style });
+}
+
+/** Resolve layout IDs in a script using a FMSaveAsXML export. */
+export async function resolveIds(
+  scriptText: string,
+  xmlPath: string,
+): Promise<BridgeResponse> {
+  return runJson({ command: "resolve_ids", script_text: scriptText, xml_path: xmlPath });
 }
 
 /** Fetch the binary's version (also used as a reachability probe). */

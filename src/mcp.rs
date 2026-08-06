@@ -280,6 +280,7 @@ fn base_command() -> Command {
         fields: None,
         summary: None,
         style: None,
+        resolve_from: None,
     }
 }
 

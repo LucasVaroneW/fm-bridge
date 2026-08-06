@@ -711,15 +711,31 @@ fn preprocess_block_comments(text: &str) -> String {
 pub struct ParseError {
     pub line: usize,
     pub message: String,
+    #[serde(default = "default_severity")]
+    pub severity: String,
+}
+
+fn default_severity() -> String {
+    "error".to_string()
 }
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let prefix = if self.severity == "warning" { "Warning" } else { "Error" };
         if self.line > 0 {
-            write!(f, "Line {}: {}", self.line, self.message)
+            write!(f, "Line {}: {}: {}", self.line, prefix, self.message)
         } else {
-            write!(f, "{}", self.message)
+            write!(f, "{}: {}", prefix, self.message)
         }
+    }
+}
+
+impl ParseError {
+    fn error(line: usize, message: String) -> Self {
+        ParseError { line, message, severity: "error".to_string() }
+    }
+    fn warning(line: usize, message: String) -> Self {
+        ParseError { line, message, severity: "warning".to_string() }
     }
 }
 
@@ -727,7 +743,7 @@ impl std::fmt::Display for ParseError {
 /// sites that know the line override it explicitly via `map_err`.
 impl From<String> for ParseError {
     fn from(message: String) -> Self {
-        ParseError { line: 0, message }
+        ParseError { line: 0, message, severity: "error".to_string() }
     }
 }
 
@@ -945,10 +961,10 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
                 }
                 i += 1;
                 if i >= lines.len() {
-                    return Err(ParseError {
-                        line: step_line + 1,
-                        message: format!("Unclosed `[` in step '{}'", step_name),
-                    });
+                    return Err(ParseError::error(
+                        step_line + 1,
+                        format!("Unclosed `[` in step '{}'", step_name),
+                    ));
                 }
                 bracket_content.push('\n');
                 let raw_line = lines[i];
@@ -973,10 +989,10 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
             let id = steps::id_for_en(&step_name)
                 .or(inline_id)
                 .ok_or_else(|| unknown_step_message(&step_name))
-                .map_err(|m| ParseError {
-                    line: step_line + 1,
-                    message: m,
-                })?;
+                .map_err(|m| ParseError::error(
+                    step_line + 1,
+                    m,
+                ))?;
             let step =
                 build_step_from_name(&step_name, Some(&bracket_content), enabled, id, indent);
             steps.push(step);
@@ -987,10 +1003,10 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
             let id = steps::id_for_en(&step_name)
                 .or(inline_id)
                 .ok_or_else(|| unknown_step_message(&step_name))
-                .map_err(|m| ParseError {
-                    line: i + 1,
-                    message: m,
-                })?;
+                .map_err(|m| ParseError::error(
+                    i + 1,
+                    m,
+                ))?;
             let step = build_step_from_name(&step_name, None, enabled, id, indent);
             steps.push(step);
             i += 1;
@@ -1092,10 +1108,10 @@ pub fn lint(text: &str) -> Vec<ParseError> {
         // Unknown steps are only an error when they lack an inline `#id` — with one
         // they're valid opaque-by-default steps that round-trip verbatim.
         if steps::id_for_en(&step_name).is_none() && inline_id.is_none() {
-            errors.push(ParseError {
-                line: step_line + 1,
-                message: unknown_step_message(&step_name),
-            });
+            errors.push(ParseError::error(
+                step_line + 1,
+                unknown_step_message(&step_name),
+            ));
         }
 
         if let Some(idx) = bracket_at {
@@ -1125,10 +1141,10 @@ pub fn lint(text: &str) -> Vec<ParseError> {
                 }
                 i += 1;
                 if i >= lines.len() {
-                    errors.push(ParseError {
-                        line: step_line + 1,
-                        message: format!("Unclosed `[` in step '{}'", step_name),
-                    });
+                    errors.push(ParseError::error(
+                        step_line + 1,
+                        format!("Unclosed `[` in step '{}'", step_name),
+                    ));
                     break;
                 }
                 current_text = lines[i];
@@ -1139,10 +1155,10 @@ pub fn lint(text: &str) -> Vec<ParseError> {
 
     // Anything still open at EOF was never closed.
     for (name, line) in block_stack {
-        errors.push(ParseError {
+        errors.push(ParseError::error(
             line,
-            message: format!("`{}` is never closed (missing `End {}`)", name, name),
-        });
+            format!("`{}` is never closed (missing `End {}`)", name, name),
+        ));
     }
 
     errors.sort_by_key(|e| e.line);
@@ -1162,42 +1178,63 @@ fn check_block(
         "Loop" => stack.push(("Loop", line)),
         "Else" | "Else If" => {
             if top(stack) != Some("If") {
-                errors.push(ParseError {
+                errors.push(ParseError::error(
                     line,
-                    message: format!("`{}` without a matching `If`", name),
-                });
+                    format!("`{}` without a matching `If`", name),
+                ));
             }
         }
         "End If" => {
             if top(stack) == Some("If") {
                 stack.pop();
             } else {
-                errors.push(ParseError {
+                errors.push(ParseError::error(
                     line,
-                    message: "`End If` without a matching `If`".to_string(),
-                });
+                    "`End If` without a matching `If`".to_string(),
+                ));
             }
         }
         "End Loop" => {
             if top(stack) == Some("Loop") {
                 stack.pop();
             } else {
-                errors.push(ParseError {
+                errors.push(ParseError::error(
                     line,
-                    message: "`End Loop` without a matching `Loop`".to_string(),
-                });
+                    "`End Loop` without a matching `Loop`".to_string(),
+                ));
             }
         }
         "Exit Loop If" => {
             if !stack.iter().any(|(n, _)| *n == "Loop") {
-                errors.push(ParseError {
+                errors.push(ParseError::error(
                     line,
-                    message: "`Exit Loop If` outside of a `Loop`".to_string(),
-                });
+                    "`Exit Loop If` outside of a `Loop`".to_string(),
+                ));
             }
         }
         _ => {}
     }
+}
+
+/// Post-validate a parsed script for warnings: layout references without IDs
+/// that FM may not resolve, etc. Returns only warnings, never errors.
+pub fn post_validate(script: &crate::xmss::FmScript) -> Vec<ParseError> {
+    let mut warnings = Vec::new();
+    for (i, step) in script.steps.iter().enumerate() {
+        if step.name == "Go to Layout" || step.name == "New Window" {
+            if step.layout_name.is_some() && step.layout_id.is_none() {
+                warnings.push(ParseError::warning(
+                    i + 1,
+                    format!(
+                        "{} references '{}' without a layout #id — FM may show it as \"Desconocido\"",
+                        step.name,
+                        step.layout_name.as_deref().unwrap_or("")
+                    ),
+                ));
+            }
+        }
+    }
+    warnings
 }
 
 /// Build a ScriptStep from a name and optional bracket content.
@@ -3620,7 +3657,7 @@ mod tests {
         let err = super::parse_text_to_script(text).unwrap_err();
         assert_eq!(err.line, 3);
         assert!(err.message.contains("NoSuchStep"));
-        assert_eq!(err.to_string(), format!("Line 3: {}", err.message));
+        assert_eq!(err.to_string(), format!("Line 3: Error: {}", err.message));
     }
 
     #[test]

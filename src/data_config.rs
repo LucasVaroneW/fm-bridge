@@ -128,9 +128,17 @@ impl DataConfig {
                 None => break,
             }
         }
+        // Worth being explicit: an MCP server is started by the AI client, so
+        // its working directory is usually NOT the user's project. Without this
+        // nudge the caller sees "not found" and concludes the feature is broken,
+        // when the file exists one `config_path` away.
         Err(format!(
-            "No {} found in {} or any parent directory. Create one to describe \
-             your servers and databases (see docs/DATA.md).",
+            "No {} found in {} or any parent directory.\n\n\
+             If the project is somewhere else, pass `config_path` with the project \
+             folder — the working directory of an MCP server is not the user's \
+             workspace. If no connection has been set up yet, the user can run \
+             \"fm-bridge: Connect to a database (live data)…\" in VS Code, or see \
+             docs/DATA.md.",
             CONFIG_FILE,
             begin.display()
         ))

@@ -96,10 +96,43 @@ OpenCode ya es un agente con acceso a archivos, así que ahí también te sirven
 `inspect_database` / `slice_inspect` (puede leer las carpetas que generan), no
 solo las tools inline.
 
-### Cursor / Antigravity / otros
+### Cursor / Antigravity / Claude Code / VS Code
 
 Mismo patrón que Claude Desktop: en su archivo de MCP servers, comando = ruta al
 binario, args = `["mcp"]`.
+
+| Cliente | Archivo | Clave |
+|---|---|---|
+| Claude Code | `~/.claude.json` | `mcpServers` |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` |
+| Antigravity | `~/.antigravity/mcp_config.json` | `mcpServers` |
+| VS Code | `<proyecto>/.vscode/mcp.json` | `servers` |
+
+### Codex — ojo, es TOML
+
+Codex configura MCP en `~/.codex/config.toml`, **no** en JSON:
+
+```toml
+[mcp_servers.fm-bridge]
+command = "/ruta/a/fm-bridge"
+args = ["mcp"]
+env = { FMBRIDGE_CONFIG = "/ruta/al/proyecto/.fm-bridge.toml" }
+```
+
+El comando de la extensión lo escribe en TOML sin tocar los comentarios ni el
+orden del resto del archivo.
+
+### Dos cosas que evitan que se rompa
+
+**Apuntá a `~/.fm-bridge/bin/fm-bridge`, no al binario de la extensión.** El
+nombre de esa carpeta lleva la versión (`lucasvarone.fm-bridge-0.1.8`), así que
+al actualizar VS Code la borra y el cliente falla con un "archivo no
+encontrado" que parece un bug de la herramienta. La extensión mantiene esa copia
+estable al día en cada arranque.
+
+**Pasá `FMBRIDGE_CONFIG`** si vas a usar datos vivos: el cliente lanza el
+servidor desde su propio directorio, que nunca es tu proyecto. Ver
+[DATA.md](DATA.md).
 
 ## Tools que expone
 
@@ -120,6 +153,14 @@ binario, args = `["mcp"]`.
 | `who_calls` | Qué dispara un script (Perform Script, triggers, botones) | `xml_path`, `script` |
 | `who_uses_field` | Dónde se usa un campo (layouts, claves de relación, Set Field, menciones en cálculos) | `xml_path`, `field` |
 | `list_steps` | Catálogo de tipos de step soportados | — |
+| `list_databases` | **Datos vivos**: bases configuradas y el export XML mapeado a cada una. No conecta. Primera llamada del camino de datos | `config_path?` |
+| `query_table` | **Datos vivos**: filas sin escribir SQL — el motor compone y entrecomilla. `table` es una **table occurrence** | `database`, `table`, `fields[]?`, `filter?`, `order_by?`, `limit?` |
+| `count_rows` | **Datos vivos**: `COUNT(*)` con filtro opcional. Medir antes de traer | `database`, `table`, `filter?` |
+| `query_sql` | **Datos vivos**: un `SELECT` libre para joins y agregados. Se rechaza cualquier otra cosa | `database`, `sql` |
+| `data_doctor` | **Datos vivos**: diagnóstico con el arreglo de cada chequeo | `database?` |
+
+Las cinco de datos vivos necesitan una conexión configurada y el driver ODBC de
+Claris. Ver [DATA.md](DATA.md).
 
 Cada tool devuelve un bloque de texto con el JSON de la respuesta del motor
 (`status`, `data`, `errors`, …) e `isError` cuando el motor reporta error.

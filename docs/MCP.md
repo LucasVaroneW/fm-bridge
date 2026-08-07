@@ -125,7 +125,7 @@ orden del resto del archivo.
 ### Dos cosas que evitan que se rompa
 
 **Apuntá a `~/.fm-bridge/bin/fm-bridge`, no al binario de la extensión.** El
-nombre de esa carpeta lleva la versión (`lucasvarone.fm-bridge-0.1.8`), así que
+nombre de esa carpeta lleva la versión (`lucasvarone.fm-bridge-0.1.9`), así que
 al actualizar VS Code la borra y el cliente falla con un "archivo no
 encontrado" que parece un bug de la herramienta. La extensión mantiene esa copia
 estable al día en cada arranque.

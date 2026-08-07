@@ -7,7 +7,7 @@ default-members = ["."]
 
 [package]
 name = "fm-bridge"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 description = "CLI tool to move FileMaker scripts between clipboard and plain-text .fmscript files"
 license = "GPL-3.0"

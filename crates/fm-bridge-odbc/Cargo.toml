@@ -1,6 +1,6 @@
 [package]
 name = "fm-bridge-odbc"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 description = "ODBC sidecar for fm-bridge: runs one query in a disposable process"
 license = "GPL-3.0"

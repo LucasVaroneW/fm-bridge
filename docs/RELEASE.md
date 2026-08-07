@@ -57,7 +57,7 @@ Antes de release, actualizar la versión en:
 ## 6. Tag & push
 
 ```powershell
-git tag v0.1.8
+git tag v0.1.9
 git push --tags
 ```
 

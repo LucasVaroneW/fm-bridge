@@ -154,6 +154,51 @@ fn tools_list_result() -> Value {
             "inputSchema": { "type": "object", "properties": { "xml_path": { "type": "string" }, "field": { "type": "string", "description": "Field name, optionally 'TableOccurrence::Field'." } }, "required": ["xml_path", "field"] }
         },
         {
+            "name": "list_databases",
+            "description": "List the live databases configured in the workspace's .fm-bridge.toml, with the FMSaveAsXML export mapped to each one. Connects to nothing. Call this first on the live-data path: it tells you which logical database names the query tools accept, and which XML export describes each — so you can check a field's storage/calculation in the schema before spending a query on it.",
+            "inputSchema": { "type": "object", "properties": { "config_path": { "type": "string", "description": "Optional: a path to start searching for .fm-bridge.toml from (default: current directory)." } } }
+        },
+        {
+            "name": "query_table",
+            "description": "Read live rows from a hosted FileMaker database over ODBC, without writing SQL: the engine composes and quotes the statement for you. `table` is a TABLE OCCURRENCE (the name that goes in a FROM clause), not a base table — get it from describe_database on this database's XML export. Read-only. Results are capped by the workspace row limit; check `truncated` before concluding anything about totals.",
+            "inputSchema": { "type": "object", "properties": {
+                "database": { "type": "string", "description": "Logical database name from .fm-bridge.toml (see list_databases)." },
+                "table": { "type": "string", "description": "Table occurrence name." },
+                "fields": { "type": "array", "items": { "type": "string" }, "description": "Optional: only these columns (default: all)." },
+                "filter": { "type": "string", "description": "Optional WHERE body, without the WHERE keyword, e.g. \"status = 'open' AND qty > 0\". FileMaker often stores numeric-looking keys as text, so compare with quotes when unsure." },
+                "order_by": { "type": "string", "description": "Optional ORDER BY body, without the keywords." },
+                "limit": { "type": "integer", "description": "Optional row cap for this call (clamped to the workspace maximum)." },
+                "config_path": { "type": "string" }
+            }, "required": ["database", "table"] }
+        },
+        {
+            "name": "count_rows",
+            "description": "COUNT(*) over one table occurrence in a live database, with an optional filter. The cheap way to size a problem before pulling rows — and the right way to check whether a filter matches what you expect.",
+            "inputSchema": { "type": "object", "properties": {
+                "database": { "type": "string" },
+                "table": { "type": "string", "description": "Table occurrence name." },
+                "filter": { "type": "string", "description": "Optional WHERE body, without the WHERE keyword." },
+                "config_path": { "type": "string" }
+            }, "required": ["database", "table"] }
+        },
+        {
+            "name": "query_sql",
+            "description": "Run an arbitrary read-only SELECT against a live FileMaker database, for joins and aggregates that query_table cannot express. Rejected unless it is a single SELECT statement. FileMaker SQL notes: quote identifiers containing '_' or spaces with double quotes; row limits are 'FETCH FIRST n ROWS ONLY', never LIMIT; names in FROM are table occurrences. Beware unstored calculation fields — they are very slow over ODBC, and ones that call ExecuteSQL across files return '?' in an ODBC session, so query the source table in its own file instead.",
+            "inputSchema": { "type": "object", "properties": {
+                "database": { "type": "string" },
+                "sql": { "type": "string", "description": "A single SELECT statement." },
+                "config_path": { "type": "string" }
+            }, "required": ["database", "sql"] }
+        },
+        {
+            "name": "data_doctor",
+            "description": "Diagnose the live-data path end to end: sidecar present, credentials resolvable, driver loadable, host reachable, account accepted, ODBC/JDBC sharing enabled on the file. Returns each check with a plain-language fix. Run this whenever a query fails for a reason that is not about the SQL — the answer is usually a missing driver or a missing 'Access via ODBC/JDBC' (fmxdbc) extended privilege, not a bug in the query.",
+            "inputSchema": { "type": "object", "properties": {
+                "database": { "type": "string", "description": "Optional: check just this one (default: all configured)." },
+                "config_path": { "type": "string" }
+            } }
+        },
+        {
             "name": "list_steps",
             "description": "Return the catalog of supported FileMaker script step types (English/Spanish name, shape, block behavior).",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
@@ -255,6 +300,45 @@ fn tools_call(params: Option<&Value>) -> Result<Value, RpcError> {
             cmd.xml_path = Some(arg_str(&args, "xml_path")?);
             cmd.field = Some(arg_str(&args, "field")?);
         }
+        "list_databases" => {
+            cmd.command = "data_databases".to_string();
+            cmd.config_path = opt_str(&args, "config_path");
+        }
+        "data_doctor" => {
+            cmd.command = "data_doctor".to_string();
+            cmd.database = opt_str(&args, "database");
+            cmd.config_path = opt_str(&args, "config_path");
+        }
+        "query_table" => {
+            cmd.command = "data_query".to_string();
+            cmd.database = Some(arg_str(&args, "database")?);
+            cmd.table = Some(arg_str(&args, "table")?);
+            cmd.fields = args.get("fields").and_then(|v| v.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            });
+            cmd.filter = opt_str(&args, "filter");
+            cmd.order_by = opt_str(&args, "order_by");
+            cmd.limit = args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize);
+            cmd.config_path = opt_str(&args, "config_path");
+        }
+        "count_rows" => {
+            cmd.command = "data_count".to_string();
+            cmd.database = Some(arg_str(&args, "database")?);
+            cmd.table = Some(arg_str(&args, "table")?);
+            cmd.filter = opt_str(&args, "filter");
+            cmd.config_path = opt_str(&args, "config_path");
+        }
+        "query_sql" => {
+            cmd.command = "data_sql".to_string();
+            cmd.database = Some(arg_str(&args, "database")?);
+            cmd.sql = Some(arg_str(&args, "sql")?);
+            cmd.config_path = opt_str(&args, "config_path");
+        }
         "slice_inspect" => {
             cmd.command = "slice".to_string();
             cmd.output_dir = Some(arg_str(&args, "output_dir")?);
@@ -271,22 +355,7 @@ fn tools_call(params: Option<&Value>) -> Result<Value, RpcError> {
 }
 
 fn base_command() -> Command {
-    Command {
-        command: String::new(),
-        script_text: None,
-        xml_path: None,
-        output_dir: None,
-        slice_dir: None,
-        layouts: None,
-        script: None,
-        field: None,
-        table: None,
-        layout: None,
-        fields: None,
-        summary: None,
-        style: None,
-        resolve_from: None,
-    }
+    Command::default()
 }
 
 /// Wrap text into the MCP `tools/call` result shape.
@@ -299,6 +368,13 @@ fn arg_str(args: &Value, key: &str) -> Result<String, RpcError> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or((-32602, format!("Missing or non-string argument: {}", key)))
+}
+
+fn opt_str(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_string())
 }
 
 fn arg_strings(args: &Value, key: &str) -> Result<Vec<String>, RpcError> {

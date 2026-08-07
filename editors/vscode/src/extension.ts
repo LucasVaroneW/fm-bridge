@@ -1,10 +1,15 @@
 // fm-bridge VS Code extension entry point.
 //
-// Wires up four features over the fm-bridge Rust binary:
+// Wires up the human-facing features over the fm-bridge Rust binary:
 //   - Read script from clipboard  → opens the decoded .fmscript
 //   - Write script to clipboard   → encodes the active .fmscript for FileMaker
 //   - Diagnostics                 → underlines format errors (on type + on save)
 //   - Autocomplete                → step names from the binary's catalog
+//   - Inspect / slice             → navigate a FMSaveAsXML export
+//   - Live data (connect/query/doctor) → rows from a hosted file over ODBC
+//
+// This is one of two doors onto the same engine; the other is `fm-bridge mcp`.
+// Neither requires the other — the extension works with no AI configured.
 //
 // All FileMaker know-how lives in the binary; this file is glue.
 
@@ -20,9 +25,16 @@ import {
   writeClipboard,
 } from "./bridge";
 import { StepCompletionProvider, resetCatalogCache } from "./completion";
+import {
+  connectCommand,
+  doctorCommand,
+  queryCommand,
+  setDataLogChannel,
+} from "./data";
 import { inspectXmlCommand, sliceCommand } from "./inspect";
 import { copyMcpConfigCommand } from "./mcpConfig";
 import { StepFixProvider } from "./quickfix";
+import { ensureStableBinaries } from "./stableBin";
 
 const LANGUAGE = "fmscript";
 
@@ -35,7 +47,17 @@ function log(message: string): void {
 export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel("fm-bridge");
   context.subscriptions.push(output);
-  log(`activated · binary: ${resolveBinaryPath() ?? "NOT FOUND"}`);
+  setDataLogChannel(output);
+  const binary = resolveBinaryPath();
+  log(`activated · binary: ${binary ?? "NOT FOUND"}`);
+
+  // Refresh the version-independent copy of the binaries on every activation,
+  // so MCP clients configured against a previous release keep working after an
+  // update instead of pointing at a folder VS Code has deleted.
+  if (binary) {
+    const stable = ensureStableBinaries(binary);
+    log(stable ? `stable copy: ${stable}` : "stable copy: unavailable");
+  }
 
   const diagnostics = vscode.languages.createDiagnosticCollection(LANGUAGE);
   context.subscriptions.push(diagnostics);
@@ -62,6 +84,10 @@ export function activate(context: vscode.ExtensionContext): void {
       reformatActive("indented"),
     ),
     vscode.commands.registerCommand("fm-bridge.showLog", () => output?.show()),
+    // Live data (ODBC). The human door: no terminal, no TOML, no AI needed.
+    vscode.commands.registerCommand("fm-bridge.dataConnect", connectCommand),
+    vscode.commands.registerCommand("fm-bridge.dataDoctor", doctorCommand),
+    vscode.commands.registerCommand("fm-bridge.dataQuery", queryCommand),
     vscode.commands.registerCommand(
       "fm-bridge.resolveLayoutIds",
       resolveLayoutIds,
@@ -70,9 +96,13 @@ export function activate(context: vscode.ExtensionContext): void {
       LANGUAGE,
       new StepCompletionProvider(),
     ),
-    vscode.languages.registerCodeActionsProvider(LANGUAGE, new StepFixProvider(), {
-      providedCodeActionKinds: StepFixProvider.kinds,
-    }),
+    vscode.languages.registerCodeActionsProvider(
+      LANGUAGE,
+      new StepFixProvider(),
+      {
+        providedCodeActionKinds: StepFixProvider.kinds,
+      },
+    ),
   );
 
   registerDiagnostics(context, diagnostics);
@@ -138,12 +168,14 @@ async function writeToClipboard(): Promise<void> {
 async function resolveLayoutIds(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    void vscode.window.showErrorMessage("fm-bridge: open a .fmscript file first.");
+    void vscode.window.showErrorMessage(
+      "fm-bridge: open a .fmscript file first.",
+    );
     return;
   }
   try {
     const files = await vscode.window.showOpenDialog({
-      filters: { "FMSaveAsXML": ["xml"] },
+      filters: { FMSaveAsXML: ["xml"] },
       title: "Choose a FMSaveAsXML export to resolve layout IDs",
     });
     if (!files || files.length === 0) {
@@ -161,7 +193,9 @@ async function resolveLayoutIds(): Promise<void> {
       editor.document.positionAt(editor.document.getText().length),
     );
     await editor.edit((eb) => eb.replace(fullRange, resp.script_text!));
-    void vscode.window.showInformationMessage("fm-bridge: layout IDs resolved.");
+    void vscode.window.showInformationMessage(
+      "fm-bridge: layout IDs resolved.",
+    );
   } catch (err) {
     reportError(err);
   }
@@ -175,7 +209,9 @@ async function resolveLayoutIds(): Promise<void> {
 async function reformatActive(style: "inline" | "indented"): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.document.languageId !== LANGUAGE) {
-    void vscode.window.showErrorMessage("fm-bridge: open a .fmscript file first.");
+    void vscode.window.showErrorMessage(
+      "fm-bridge: open a .fmscript file first.",
+    );
     return;
   }
   try {
@@ -250,7 +286,9 @@ function registerDiagnostics(
       if (resp.errors && resp.errors.length > 0) {
         collection.set(
           doc.uri,
-          resp.errors.map((e) => toDiagnostic(doc, e.message, e.line, e.severity)),
+          resp.errors.map((e) =>
+            toDiagnostic(doc, e.message, e.line, e.severity),
+          ),
         );
         log(`validated ${name}: ${resp.errors.length} warning(s)`);
         return;
@@ -265,7 +303,12 @@ function registerDiagnostics(
       const items =
         resp.errors && resp.errors.length > 0
           ? resp.errors
-          : [{ line: resp.error_line ?? 0, message: resp.error ?? "Invalid .fmscript" }];
+          : [
+              {
+                line: resp.error_line ?? 0,
+                message: resp.error ?? "Invalid .fmscript",
+              },
+            ];
       collection.set(
         doc.uri,
         items.map((e) => toDiagnostic(doc, e.message, e.line, e.severity)),
@@ -307,8 +350,12 @@ function registerDiagnostics(
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument((doc) => void validate(doc)),
     vscode.workspace.onDidSaveTextDocument((doc) => void validate(doc)),
-    vscode.workspace.onDidChangeTextDocument((e) => scheduleValidate(e.document)),
-    vscode.workspace.onDidCloseTextDocument((doc) => collection.delete(doc.uri)),
+    vscode.workspace.onDidChangeTextDocument((e) =>
+      scheduleValidate(e.document),
+    ),
+    vscode.workspace.onDidCloseTextDocument((doc) =>
+      collection.delete(doc.uri),
+    ),
   );
 
   // Validate already-open .fmscript documents on activation.
@@ -337,10 +384,15 @@ function toDiagnostic(
   // Squiggle from the first non-blank char to end of line (skip indentation).
   const start = new vscode.Position(
     lineIndex,
-    textLine.isEmptyOrWhitespace ? 0 : textLine.firstNonWhitespaceCharacterIndex,
+    textLine.isEmptyOrWhitespace
+      ? 0
+      : textLine.firstNonWhitespaceCharacterIndex,
   );
   const range = new vscode.Range(start, textLine.range.end);
-  const sev = severity === "warning" ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error;
+  const sev =
+    severity === "warning"
+      ? vscode.DiagnosticSeverity.Warning
+      : vscode.DiagnosticSeverity.Error;
   const diag = new vscode.Diagnostic(
     range,
     message ?? "Invalid .fmscript",

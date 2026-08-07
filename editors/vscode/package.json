@@ -2,7 +2,7 @@
   "name": "fm-bridge",
   "displayName": "fm-bridge — FileMaker scripts",
   "description": "Edit FileMaker scripts as plain-text .fmscript files: syntax highlighting, snippets, clipboard read/write, diagnostics and step autocomplete. Backed by the fm-bridge Rust binary.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "lucasvarone",
   "license": "GPL-3.0",
   "repository": {
@@ -54,6 +54,21 @@
       }
     ],
     "commands": [
+      {
+        "command": "fm-bridge.dataConnect",
+        "title": "Connect to a database (live data)…",
+        "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.dataQuery",
+        "title": "Run a query on live data…",
+        "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.dataDoctor",
+        "title": "Diagnose live data connection",
+        "category": "fm-bridge"
+      },
       {
         "command": "fm-bridge.readFromClipboard",
         "title": "Read script from clipboard",

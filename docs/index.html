@@ -194,7 +194,7 @@
       <li><a href="#preview">Preview</a></li>
       <li><a href="#ai-xml">AI + XML</a></li>
       <li><a href="#usage">Usage</a></li>
-      <li><a href="#mcp">MCP / AI</a></li>
+      <li><a href="#live-data">Live data</a></li>
       <li><a href="#commands">Commands</a></li>
       <li><a href="#install">Install</a></li>
     </ul>
@@ -258,6 +258,11 @@
         <div class="card-icon emerald">📝</div>
         <h3>Plain-text .fmscript</h3>
         <p>Scripts are plain text files you can version in git, diff, search, and edit with any tool.</p>
+      </div>
+      <div class="card card-blue">
+        <div class="card-icon">🗄️</div>
+        <h3>Live Data over ODBC <span class="mcp-badge">NEW</span></h3>
+        <p>Query a hosted FileMaker file for real rows — read-only. Cross what the schema says with what the data actually holds, from VS Code or from an AI.</p>
       </div>
     </div>
   </div>
@@ -434,7 +439,8 @@
         <div class="code-block">
           <span style="color:#6272a4">Ctrl+Shift+P →</span> <span style="color:#818cf8">fm-bridge: Set up MCP for an AI agent</span>
         </div>
-        <p>Choose your client and the extension writes the config. Restart the client.</p>
+        <p>Pick your client — <strong>Claude Code, Claude Desktop, Cursor, Antigravity, Codex, OpenCode</strong> or VS Code itself — and the extension writes the config for you (Codex in TOML, the rest in JSON), merging into what's already there and leaving a <code>.bak</code>. Clients it can see on this machine are marked; the rest fall back to copy-to-clipboard rather than writing somewhere your install never reads. Then restart the client.</p>
+        <p style="color:#64748b;font-size:.9rem">It points at <code>~/.fm-bridge/bin/</code>, not the versioned extension folder, so the config keeps working after an update — and passes <code>FMBRIDGE_CONFIG</code> so the agent finds your live-data connection no matter which directory it was launched from.</p>
       </div>
       <div class="card card-blue" style="margin-bottom:1.5rem">
         <h3>🛠️ Tools for AI</h3>
@@ -453,7 +459,13 @@
           <tr><td><code>audit_database</code></td><td>Find broken references</td></tr>
           <tr><td><code>who_calls</code></td><td>Who calls a script</td></tr>
           <tr><td><code>who_uses_field</code></td><td>Where a field is referenced</td></tr>
+          <tr><td><code>list_databases</code></td><td>Live databases configured, and the XML export mapped to each</td></tr>
+          <tr><td><code>query_table</code></td><td>Read rows with no SQL to write — the engine composes it</td></tr>
+          <tr><td><code>count_rows</code></td><td><code>COUNT(*)</code> with a filter: size a problem before pulling rows</td></tr>
+          <tr><td><code>query_sql</code></td><td>An arbitrary read-only <code>SELECT</code>, for joins and aggregates</td></tr>
+          <tr><td><code>data_doctor</code></td><td>Diagnose the live-data path, each check with its fix</td></tr>
         </table>
+        <p style="color:#64748b;font-size:.9rem;margin-top:.75rem">The last five need a live connection — see <a href="#live-data" style="color:#818cf8">Live data</a>.</p>
       </div>
       <div class="card card-green" style="margin-bottom:1.5rem">
         <h3>💬 How to ask the AI</h3>
@@ -542,14 +554,63 @@
 </section>
 
 <!-- Install -->
+<section id="live-data" style="padding-top:0">
+  <div class="container">
+    <h2 class="section-title">Live data, not just structure</h2>
+    <p class="section-sub">FMSaveAsXML exports tell you how the database is <em>built</em>. Some bugs only show up in the rows. fm-bridge reads both — and knows which is which.</p>
+
+    <div class="grid grid-3" style="margin-bottom:2rem">
+      <div class="card card-emerald">
+        <div class="card-icon emerald">🔎</div>
+        <h3>Schema informs the query</h3>
+        <p>Map an XML export to its live database and the engine resolves the right table occurrence, quotes identifiers FileMaker's way, and warns you that a field is an unstored calculation <em>before</em> you spend a query on it.</p>
+      </div>
+      <div class="card card-green">
+        <div class="card-icon green">🔒</div>
+        <h3>Read-only by construction</h3>
+        <p>Statements are accepted by an allowlist parse — one statement, and it must be a SELECT. Not a keyword blocklist, which fails open on <code>/*…*/</code>, string literals and <code>;</code> chaining.</p>
+      </div>
+      <div class="card card-orange">
+        <div class="card-icon orange">🧯</div>
+        <h3>Nothing left hanging</h3>
+        <p>Each query runs in a disposable process with a wall-clock kill deadline, one at a time. When it exits the OS closes the socket — an orphaned connection on your server can't happen.</p>
+      </div>
+    </div>
+
+    <h3 style="color:#e2e8f0;margin:2rem 0 .75rem">From VS Code — no terminal, no AI</h3>
+    <div class="code-block">
+      <span style="color:#6272a4"># Ctrl+Shift+P →</span><br>
+      <span style="color:#4ade80">fm-bridge: Connect to a database (live data)…</span>  <span style="color:#6272a4">wizard; writes the config, tests it</span><br>
+      <span style="color:#4ade80">fm-bridge: Run a query on live data…</span>          <span style="color:#6272a4">a SELECT, results in a tab</span><br>
+      <span style="color:#4ade80">fm-bridge: Diagnose live data connection</span>      <span style="color:#6272a4">every check, with its fix</span>
+    </div>
+
+    <h3 style="color:#e2e8f0;margin:2rem 0 .75rem">What you need to install</h3>
+    <p style="color:#94a3b8;max-width:44rem;margin-bottom:1rem">The <code>.vsix</code> already carries the engine and the ODBC sidecar. One thing it cannot carry:</p>
+    <div style="background:#0f172a;border:1px solid #1e293b;border-left:3px solid #f59e0b;border-radius:.5rem;padding:1.25rem 1.5rem;margin-bottom:1.25rem">
+      <strong style="color:#fbbf24">The Claris/FileMaker ODBC client driver.</strong>
+      <p style="color:#94a3b8;margin:.5rem 0 0">A free download from Claris, and often already installed by FileMaker Pro or Server. fm-bridge never ships it: it speaks generic ODBC to your system's driver manager (<code>odbc32.dll</code> on Windows, iODBC on macOS, unixODBC on Linux), which loads whatever driver you installed. No third-party redistribution, and nothing to license.</p>
+    </div>
+    <div style="background:#0f172a;border:1px solid #1e293b;border-left:3px solid #818cf8;border-radius:.5rem;padding:1.25rem 1.5rem;margin-bottom:1.25rem">
+      <strong style="color:#a5b4fc">Architecture has to match — the trap that costs everyone an afternoon.</strong>
+      <p style="color:#94a3b8;margin:.5rem 0 0">The driver is loaded <em>into</em> the process, so a 64-bit program cannot load a 32-bit driver, and FileMaker Pro on Windows commonly registers only the 32-bit one. The failure is <code>IM002 — data source name not found</code>, which says nothing about bitness. fm-bridge ships <strong>both</strong> sidecars and falls back automatically, so you never meet this.</p>
+    </div>
+    <div style="background:#0f172a;border:1px solid #1e293b;border-left:3px solid #4ade80;border-radius:.5rem;padding:1.25rem 1.5rem">
+      <strong style="color:#86efac">On the server, per file:</strong>
+      <p style="color:#94a3b8;margin:.5rem 0 0">Enable <em>File ▸ Sharing ▸ ODBC/JDBC</em>, and give the account the <strong>fmxdbc</strong> extended privilege (<em>File ▸ Manage ▸ Security</em>). That privilege set is the real security boundary — fm-bridge cannot grant itself anything. <strong>Use a read-only account.</strong></p>
+    </div>
+    <p style="color:#64748b;margin-top:1rem;font-size:.9rem">Missing any of these? <code>Diagnose live data connection</code> names which one and what to do — see <a href="https://github.com/LucasVaroneW/fm-bridge/blob/main/docs/DATA.md" style="color:#818cf8">DATA.md</a>.</p>
+  </div>
+</section>
+
 <section id="install" style="padding-top:0">
   <div class="container">
-    <h2 class="section-title">Install<span class="version-tag">v0.1.8</span></h2>
+    <h2 class="section-title">Install<span class="version-tag">v0.1.9</span></h2>
     <p class="section-sub">Download the .vsix and install in VS Code. No Rust needed.</p>
     <div class="code-block">
       <button class="copy-btn" onclick="copyCode(this)">📋</button>
       <span style="color:#6272a4"># 1. Download the latest .vsix</span><br>
-      <a href="https://github.com/LucasVaroneW/fm-bridge/releases" target="_blank" style="color:#818cf8">github.com/LucasVaroneW/fm-bridge/releases</a><br><br>
+      <a href="https://github.com/LucasVaroneW/fm-bridge/releases/latest" target="_blank" style="color:#818cf8">github.com/LucasVaroneW/fm-bridge/releases/latest</a><br><br>
       <span style="color:#6272a4"># 2. Install in VS Code</span><br>
       <span style="color:#818cf8">code</span> <span style="color:#4ade80">--install-extension</span> fm-bridge.vsix<br><br>
       <span style="color:#6272a4"># 3. Or: Extensions → ... → Install from VSIX</span>
@@ -563,7 +624,7 @@
     <p style="color:#94a3b8;max-width:32rem;margin:0 auto 1.5rem;font-size:1.05rem">The .vsix bundles the Rust binary inside. Your users double-click the extension — no Rust, no terminal, no package managers. Works on Windows, macOS, and Linux.</p>
     <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:2rem">
       <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center"><div style="font-size:1.5rem;font-weight:700;color:#818cf8">~150</div><div style="color:#64748b;font-size:.85rem">step types</div></div>
-      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center"><div style="font-size:1.5rem;font-weight:700;color:#4ade80">85</div><div style="color:#64748b;font-size:.85rem">tests</div></div>
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center"><div style="font-size:1.5rem;font-weight:700;color:#4ade80">118</div><div style="color:#64748b;font-size:.85rem">tests</div></div>
       <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center"><div style="font-size:1.5rem;font-weight:700;color:#c084fc">3</div><div style="color:#64748b;font-size:.85rem">platforms</div></div>
     </div>
   </div>

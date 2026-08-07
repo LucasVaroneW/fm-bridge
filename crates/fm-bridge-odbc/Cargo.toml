@@ -1,0 +1,32 @@
+[package]
+name = "fm-bridge-odbc"
+version = "0.1.9"
+edition = "2024"
+description = "ODBC sidecar for fm-bridge: runs one query in a disposable process"
+license = "GPL-3.0"
+repository = "https://github.com/LucasVaroneW/fm-bridge"
+
+# Deliberately its own crate, NOT a feature of the main binary:
+#  - the engine never links a native ODBC driver manager, so `fm-bridge` keeps
+#    building anywhere with zero system dependencies;
+#  - this can be compiled for a *different* architecture than the engine, which
+#    is what makes a 32-bit FileMaker ODBC driver usable from a 64-bit engine.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Which ODBC driver manager we link is a *distribution* decision, not a taste
+# one, so it is encoded here rather than left to a CI flag.
+#
+# Windows/Linux: the default (odbc32.dll — a Microsoft system DLL — and
+# unixODBC respectively).
+#
+# macOS: iODBC, which ships with the OS. Linking Homebrew's unixODBC instead
+# would produce a binary that runs on the build machine and fails on every user
+# who has no Homebrew — exactly the kind of breakage a bundled binary must not
+# have.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+odbc-api = "9"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+odbc-api = { version = "9", features = ["iodbc"] }

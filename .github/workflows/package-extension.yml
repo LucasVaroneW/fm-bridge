@@ -16,8 +16,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `alt_target` is the ODBC sidecar's *other* architecture, shipped as
+          # fm-bridge-odbc-x86 alongside the native one. The ODBC driver is
+          # loaded into the process, so its architecture must match exactly —
+          # and FileMaker Pro on Windows commonly registers only the 32-bit
+          # driver, which a 64-bit process cannot load. Shipping both lets the
+          # engine fall back automatically instead of asking a FileMaker
+          # developer to reason about "bitness".
           - os: macos-latest
             target: aarch64-apple-darwin
+            alt_target: x86_64-apple-darwin
             dest: darwin-arm64
             exe: fm-bridge
           - os: macos-latest
@@ -26,6 +34,7 @@ jobs:
             exe: fm-bridge
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            alt_target: i686-pc-windows-msvc
             dest: win32-x64
             exe: fm-bridge.exe
           - os: ubuntu-latest
@@ -37,19 +46,69 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target }}${{ matrix.alt_target && format(', {0}', matrix.alt_target) || '' }}
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
-      - name: Stage binary
+
+      # ── ODBC sidecar ──────────────────────────────────────────────────────
+      # Optional by design: it is the only component that links a native driver
+      # manager. If it cannot be built for a platform, that platform still ships
+      # a working engine — schema tools are unaffected, and the live-data path
+      # reports that it is unavailable instead of crashing.
+      - name: ODBC build dependencies (Linux)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: sudo apt-get update && sudo apt-get install -y unixodbc-dev
+      - name: Build ODBC sidecar
+        id: sidecar
+        continue-on-error: true
+        shell: bash
+        run: cargo build --release -p fm-bridge-odbc --target ${{ matrix.target }}
+      - name: Build ODBC sidecar (alternate architecture)
+        if: matrix.alt_target
+        continue-on-error: true
+        shell: bash
+        run: cargo build --release -p fm-bridge-odbc --target ${{ matrix.alt_target }}
+
+      - name: Stage binaries
         shell: bash
         run: |
+          set -eu
           mkdir -p staging
           cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "staging/${{ matrix.exe }}"
+
+          # Note: not `[ … ] && x=y` — under `set -e` a false test would abort.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            sidecar="fm-bridge-odbc.exe"
+          else
+            sidecar="fm-bridge-odbc"
+          fi
+          native="target/${{ matrix.target }}/release/$sidecar"
+          if [ -f "$native" ]; then
+            cp "$native" "staging/$sidecar"
+          else
+            echo "::warning::no ODBC sidecar for ${{ matrix.dest }} — live queries will be unavailable there"
+          fi
+
+          alt_target="${{ matrix.alt_target }}"
+          if [ -n "$alt_target" ]; then
+            alt="target/$alt_target/release/$sidecar"
+            if [ -f "$alt" ]; then
+              # The engine looks for this name first (see data.rs).
+              case "$sidecar" in
+                *.exe) cp "$alt" "staging/fm-bridge-odbc-x86.exe" ;;
+                *)     cp "$alt" "staging/fm-bridge-odbc-x86" ;;
+              esac
+            else
+              echo "::warning::no alternate-architecture sidecar for ${{ matrix.dest }}"
+            fi
+          fi
+          ls -l staging
       - uses: actions/upload-artifact@v4
         with:
           name: bin-${{ matrix.dest }}
-          path: staging/${{ matrix.exe }}
+          path: staging/*
 
   # Assemble every binary into editors/vscode/bin/ and package one .vsix.
   package:

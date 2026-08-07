@@ -23,76 +23,65 @@ FM (Cmd+V) ← fm-bridge write ← script.fmscript
 
 ---
 
-## 2. Instalación en una máquina nueva
+## 2. Instalación
 
-### 2.1 Instalar Rust
+### 2.1 La forma normal: el `.vsix` (recomendada)
 
-`fm-bridge` está hecho en Rust, así que necesitás el compilador.
+**No hace falta instalar Rust, ni compilar, ni clonar nada.** El binario viaja
+empaquetado dentro de la extensión.
 
-**Windows:**
+1. Descargar `fm-bridge-X.Y.Z.vsix` de
+   [Releases](https://github.com/LucasVaroneW/fm-bridge/releases/latest).
+2. En VS Code: Extensiones (`Ctrl+Shift+X`) → menú `...` → **Install from
+   VSIX...** → elegir el archivo.
+   O por terminal: `code --install-extension fm-bridge-X.Y.Z.vsix`
+3. `Ctrl+Shift+P` → **Developer: Reload Window**.
 
-1. Descargar el instalador desde https://rustup.rs
-2. Ejecutarlo. Aceptar todas las opciones por defecto (1 → Enter).
-3. Cerrar y volver a abrir cualquier terminal (cmd, PowerShell, Git Bash).
-4. Verificar: `cargo --version` debe imprimir algo como `cargo 1.8x.x`.
-5. **Importante:** Necesitas MSYS2 con el toolchain mingw64. Si ya tenes MSYS2 instalado, abri **MSYS2 MINGW64** desde el menu de inicio y ejecuta:
-   ```
-   pacman -S mingw-w64-x86_64-gcc
-   ```
-   Si no tenes MSYS2, la opcion mas simple es cambiar al toolchain MSVC de Rust:
-   ```
-   rustup default stable-x86_64-pc-windows-msvc
-   ```
-   (Requiere Visual Studio Build Tools con el workload "Desktop development with C++".)
+Listo. Con eso tenés el resaltado, los diagnósticos, el autocompletado, los
+comandos de clipboard, `inspect`/`slice` y los datos vivos por ODBC.
 
-**Mac:**
+Como no está en el Marketplace no hay auto-update: para cada versión nueva se
+repiten estos pasos.
 
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# Aceptar default, después cerrar y abrir terminal
-```
+**Para darle las herramientas a una IA:** `Ctrl+Shift+P` → **fm-bridge: Set up
+MCP for an AI agent**. Ver [MCP.md](MCP.md).
 
-### 2.2 Clonar el repo
+**Para consultar datos en vivo:** `Ctrl+Shift+P` → **fm-bridge: Connect to a
+database (live data)…**. Ver [DATA.md](DATA.md). Eso sí requiere el driver ODBC
+de Claris instalado — es lo único que no podemos empaquetar, porque es software
+de terceros.
+
+### 2.2 Desde el código (sólo para desarrollar el motor)
+
+Esto es para trabajar **en** fm-bridge, no para usarlo.
 
 ```bash
 git clone https://github.com/LucasVaroneW/fm-bridge.git
 cd fm-bridge
+cargo install --path .        # deja el binario en ~/.cargo/bin
 ```
 
-### 2.3 Compilar e instalar
-
-```bash
-cargo install --path .
-```
-
-**Windows con MSYS2 (solo si usas el toolchain `x86_64-pc-windows-gnu`):**
-
-Si ves un error de linker como `collect2.exe: error: ld returned 53 exit status`,
-es porque Rust esta encontrando el linker de UCRT64 en vez del de MINGW64.
-Arreglalo temporalmente antes de compilar:
+Necesitás Rust ([rustup.rs](https://rustup.rs)). En Windows con el toolchain
+`x86_64-pc-windows-gnu`, si el linker falla con `ld returned 53 exit status`,
+antepone MSYS2 al PATH:
 
 ```powershell
 $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
 cargo install --path .
 ```
 
-O hacelo permanente agregando `C:\msys64\mingw64\bin` al PATH del sistema.
+Como alternativa, `rustup default stable-x86_64-pc-windows-msvc` (requiere
+Visual Studio Build Tools con "Desktop development with C++").
 
-Esto compila en modo release y deja el binario `fm-bridge` en:
-
-- Windows: `C:\Users\<vos>\.cargo\bin\fm-bridge.exe`
-- Mac: `~/.cargo/bin/fm-bridge`
-
-Esa carpeta ya está en tu PATH por el instalador de Rust, así que desde
-**cualquier directorio** podés escribir `fm-bridge` y funciona.
-
-Verificar:
+El sidecar ODBC se compila aparte, porque es el único componente que linkea un
+driver manager nativo:
 
 ```bash
-fm-bridge --help    # debería listar los comandos
+cargo build --release -p fm-bridge-odbc
 ```
 
-Si dice "command not found", reabrí la terminal.
+Ver [DATA.md](DATA.md) para el detalle, incluida la versión de 32 bits en
+Windows.
 
 ---
 

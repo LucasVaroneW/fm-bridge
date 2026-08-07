@@ -7,12 +7,17 @@ plano. Un solo motor Rust con dos puertas: **humana** (VS Code) y **IA** (MCP).
 
 ```
                 ┌─ fm-bridge json ──▶ Extensión VS Code   (lectura/escritura,
-                │                       diagnostics, autocomplete)
+                │                       diagnostics, autocomplete, datos vivos)
 fm-bridge.exe ──┤
-  (motor Rust)  └─ fm-bridge mcp  ──▶ Cliente MCP           (tools para IA:
-                                      (Claude, OpenCode…)    read, validate,
-                                                            inspect, audit…)
+  (motor Rust)  ├─ fm-bridge mcp  ──▶ Cliente MCP           (tools para IA:
+                │                     (Claude, OpenCode…)    read, validate,
+                │                                            inspect, audit…)
+                └─ fm-bridge-odbc ──▶ Base FileMaker viva  (datos reales por
+                   (satélite ODBC)                           ODBC, sólo lectura)
 ```
+
+Las dos puertas son independientes: la extensión funciona sin ninguna IA, y el
+MCP funciona sin VS Code. Ver [docs/DATA.md](docs/DATA.md) para datos vivos.
 
 El binario (`src/`) es la única fuente de verdad. La extensión y el MCP son
 clientes finos que le hablan por stdin/stdout (JSON) — nunca duplican lógica.
@@ -35,7 +40,16 @@ src/
 ├── audit.rs          auditoría de integridad referencial (Perform Script,
 │                     Go to Layout rotos, TOs huérfanas, campos fantasma)
 ├── xref.rs           referencias cruzadas (who-calls, who-uses-field)
+├── data.rs           datos en vivo: lanza el sidecar ODBC, watchdog, errores
+├── data_config.rs    .fm-bridge.toml (mapea export XML ↔ base viva)
+├── data_sql.rs       validación read-only (lista blanca) y armado de SELECT
 └── mcp.rs            servidor MCP (JSON-RPC por stdin/stdout)
+
+crates/
+└── fm-bridge-odbc/   sidecar ODBC: un proceso desechable por consulta.
+                      Crate aparte a propósito — es lo único que linkea un
+                      driver manager nativo, y puede compilarse a 32 bits
+                      para servir a un motor de 64.
 
 steps.toml            catálogo de ~150 pasos FM: nombre EN/ES, id numérico,
                       shape (cómo se serializa en XML), block behavior
@@ -104,6 +118,7 @@ Campos nuevos deben ser opcionales con `#[serde(skip_serializing_if = ...)]`.
 | `encode-text <in> <out>` | `.fmscript` → XML |
 | `decode-xml <in>` | XML → `.fmscript` |
 | `passthrough` | Clipboard → clipboard (sin modificar) |
+| `data list\|doctor\|login\|query\|count\|sql` | Datos en vivo por ODBC ([DATA.md](docs/DATA.md)) |
 
 ## [Release](docs/RELEASE.md)
 

@@ -192,6 +192,7 @@
     <ul class="nav-links">
       <li><a href="#features">Features</a></li>
       <li><a href="#preview">Preview</a></li>
+      <li><a href="#ai-xml">AI + XML</a></li>
       <li><a href="#usage">Usage</a></li>
       <li><a href="#mcp">MCP / AI</a></li>
       <li><a href="#commands">Commands</a></li>
@@ -205,7 +206,14 @@
   <div class="container" style="position:relative;z-index:1">
     <h1>Edit FileMaker scripts<br>outside FileMaker</h1>
     <p>Copy from the Script Workspace, edit as plain text in VS Code with syntax highlighting and autocomplete, paste back. No lock-in, no cloud — just a Rust binary and a VS Code extension.</p>
-    <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
+    <p style="margin-top:2rem;display:flex;align-items:center;justify-content:center;gap:.5rem;flex-wrap:wrap">
+      <span style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);padding:.35rem .75rem;border-radius:2rem;font-size:.85rem;color:#a5b4fc">📋 Edit scripts</span>
+      <span style="color:#475569">·</span>
+      <span style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.2);padding:.35rem .75rem;border-radius:2rem;font-size:.85rem;color:#4ade80">🔍 Find broken references</span>
+      <span style="color:#475569">·</span>
+      <span style="background:rgba(249,115,22,.1);border:1px solid rgba(249,115,22,.2);padding:.35rem .75rem;border-radius:2rem;font-size:.85rem;color:#fb923c">🤖 AI audits your database</span>
+    </p>
+    <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:2.5rem">
       <a href="#install" class="btn btn-primary">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Download .vsix
@@ -304,6 +312,40 @@
       <span class="c-warn">∼</span> warning &nbsp;
       <span class="c-err">∼</span> error
     </p>
+  </div>
+</section>
+
+<!-- AI + XML -->
+<section id="ai-xml" style="padding-top:0">
+  <div class="container">
+    <h2 class="section-title">Your database, analyzed by AI</h2>
+    <p class="section-sub">Export your FileMaker database as XML once. The engine reads it. You or an AI agent can then ask questions that used to take hours of manual checking.</p>
+    <div class="grid grid-3">
+      <div class="card card-orange">
+        <div class="card-icon orange">🔎</div>
+        <h3>Find bugs automatically</h3>
+        <p><code class="highlight">fm-bridge audit</code> crosses every script against the schema. Finds Perform Script calls to deleted scripts, Go to Layout to missing layouts, orphaned table occurrences, ghost fields. A full scan in seconds.</p>
+      </div>
+      <div class="card card-blue">
+        <div class="card-icon">📊</div>
+        <h3>Understand impact before changing</h3>
+        <p><code class="highlight">who-calls</code> lists everything that triggers a script — other scripts, layout triggers, buttons. <code class="highlight">who-uses-field</code> finds every reference to a field across the entire database.</p>
+      </div>
+      <div class="card card-purple">
+        <div class="card-icon purple">🤖</div>
+        <h3>Ask an AI to do it</h3>
+        <p>With MCP set up, tell your AI agent: <em style="color:#cbd5e1">"Audit this database and list every broken reference"</em>. It reads the XML, runs the tools, and gives you the list — no manual digging through 500 scripts.</p>
+      </div>
+    </div>
+    <div class="code-block" style="margin-top:2rem;font-family:ui-sans-serif,system-ui,sans-serif;font-size:.92rem">
+      <button class="copy-btn" onclick="copyCode(this)">📋</button>
+      <span style="color:#6272a4">$</span> <span style="color:#818cf8">fm-bridge audit</span> By_00_Desk.xml<br>
+      <span style="color:#4ade80">14 issue(s) in By_00_Desk.fmp12:</span><br>
+      <span style="color:#94a3b8">&nbsp;&nbsp;   2  Perform Script to missing script</span><br>
+      <span style="color:#94a3b8">&nbsp;&nbsp;   3  Go to Layout to missing layout</span><br>
+      <span style="color:#94a3b8">&nbsp;&nbsp;   5  Field on layout with no backing table</span><br>
+      <span style="color:#94a3b8">&nbsp;&nbsp;   4  Relationship using deleted table occurrence</span>
+    </div>
   </div>
 </section>
 

@@ -45,9 +45,33 @@ pub struct ServerConfig {
     /// Claris registers ("FileMaker ODBC"); override for a renamed install.
     #[serde(default)]
     pub driver: Option<String>,
+    /// Per-server overrides of `[limits]`.
+    ///
+    /// Servers are not equal: an old FileMaker Server on a busy LAN can take
+    /// half a minute just to accept a connection, while a modern one answers in
+    /// under a second. One global timeout therefore has to be either too slow to
+    /// protect the fast server or too tight for the slow one. These let a single
+    /// workspace hold both without compromise.
+    #[serde(default)]
+    pub connect_timeout_s: Option<u32>,
+    #[serde(default)]
+    pub kill_timeout_s: Option<u64>,
     /// Rejected on load — present only so we can produce a good error.
     #[serde(default)]
     password: Option<String>,
+}
+
+impl ServerConfig {
+    /// This server's effective limits: its own overrides on top of `[limits]`.
+    pub fn limits(&self, base: &Limits) -> Limits {
+        Limits {
+            connect_timeout_s: self.connect_timeout_s.unwrap_or(base.connect_timeout_s),
+            kill_timeout_s: self.kill_timeout_s.unwrap_or(base.kill_timeout_s),
+            max_rows: base.max_rows,
+            max_cell_chars: base.max_cell_chars,
+            max_total_chars: base.max_total_chars,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,7 +89,7 @@ pub struct DatabaseConfig {
     pub xml: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Limits {
     pub max_rows: usize,
     pub connect_timeout_s: u32,
@@ -106,6 +130,25 @@ impl DataConfig {
     /// directory) to the filesystem root — the usual "project file" search, so
     /// tools work from any subdirectory of the workspace.
     pub fn discover(start: Option<&str>) -> Result<DataConfig, String> {
+        // An explicit pointer wins over any search. This is what makes the MCP
+        // path reliable: the AI client launches the server from its own
+        // directory, which is never the user's project, so the config is told
+        // rather than guessed.
+        if start.is_none() {
+            if let Some(env) = std::env::var_os("FMBRIDGE_CONFIG") {
+                let p = PathBuf::from(env);
+                if !p.as_os_str().is_empty() {
+                    let file = if p.is_dir() { p.join(CONFIG_FILE) } else { p };
+                    if !file.is_file() {
+                        return Err(format!(
+                            "FMBRIDGE_CONFIG points at {}, which does not exist.",
+                            file.display()
+                        ));
+                    }
+                    return DataConfig::load(&file);
+                }
+            }
+        }
         let begin = match start {
             Some(s) => PathBuf::from(s),
             None => std::env::current_dir()
@@ -178,6 +221,19 @@ impl DataConfig {
                     path.display(),
                     d.name,
                     d.server
+                ));
+            }
+        }
+        for s in &self.server {
+            let l = s.limits(&self.limits);
+            if l.kill_timeout_s <= l.connect_timeout_s as u64 {
+                return Err(format!(
+                    "{}: server '{}' ends up with kill_timeout_s ({}) <= connect_timeout_s ({}); \
+                     the connection would be killed before it could be established.",
+                    path.display(),
+                    s.name,
+                    l.kill_timeout_s,
+                    l.connect_timeout_s
                 ));
             }
         }
@@ -400,6 +456,43 @@ server = "ghost"
     }
 
     #[test]
+    fn a_server_can_override_the_global_timeouts() {
+        let d = tmpdir("perserver");
+        let p = write(
+            &d,
+            r#"
+[[server]]
+name = "fast"
+host = "h1"
+user = "u"
+
+[[server]]
+name = "old"
+host = "h2"
+user = "u"
+connect_timeout_s = 60
+kill_timeout_s = 180
+
+[limits]
+max_rows = 500
+connect_timeout_s = 15
+kill_timeout_s = 45
+max_cell_chars = 500
+"#,
+        );
+        let cfg = DataConfig::load(&p).unwrap();
+        let fast = cfg.server("fast").unwrap().limits(&cfg.limits);
+        assert_eq!(fast.connect_timeout_s, 15);
+        assert_eq!(fast.kill_timeout_s, 45);
+
+        let old = cfg.server("old").unwrap().limits(&cfg.limits);
+        assert_eq!(old.connect_timeout_s, 60);
+        assert_eq!(old.kill_timeout_s, 180);
+        // Non-timeout limits keep coming from the global block.
+        assert_eq!(old.max_rows, 500);
+    }
+
+    #[test]
     fn kill_timeout_must_exceed_connect_timeout() {
         let d = tmpdir("to");
         let p = write(
@@ -441,6 +534,8 @@ max_cell_chars = 100
             host: "10.0.0.5".into(),
             user: "reader".into(),
             driver: None,
+            connect_timeout_s: None,
+            kill_timeout_s: None,
             password: None,
         };
         let cs = connection_string(&srv, "Stock", "pw");

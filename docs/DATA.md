@@ -93,10 +93,17 @@ actual, así que funciona desde cualquier subcarpeta.
 
 ```toml
 [[server]]
-name = "produccion"          # etiqueta libre
+name = "produccion"          # etiqueta libre; identifica LA MÁQUINA
 host = "10.0.0.5"
 user = "solo_lectura"
 # driver = "FileMaker ODBC"  # opcional, si lo renombraste
+
+[[server]]
+name = "viejo"
+host = "10.0.0.9"
+user = "solo_lectura"
+connect_timeout_s = 60       # este server tarda en aceptar conexiones
+kill_timeout_s    = 180      # …y en responder
 
 [[database]]
 name   = "Stock"             # nombre lógico que usan las tools
@@ -123,6 +130,15 @@ El campo **`xml` es la pieza que fusiona las dos mitades**: le dice al motor qu�
 export describe qué base viva. Con eso la IA puede mirar el esquema antes de
 gastar una consulta.
 
+La etiqueta de `[[server]]` identifica **la máquina**, no el archivo: varias
+bases del mismo host comparten una sola entrada y una sola contraseña.
+
+**Los timeouts se pueden pisar por servidor.** Un FileMaker Server viejo en una
+red cargada puede tardar medio minuto sólo en aceptar la conexión, mientras que
+uno moderno responde en menos de un segundo; un único timeout global tendría que
+ser o demasiado lento para proteger al rápido o demasiado corto para el lento.
+Lo que no se declara en el servidor cae a `[limits]`.
+
 Este archivo está pensado para commitearse. **Las contraseñas no van acá** — si
 ponés una clave `password`, la carga falla a propósito.
 
@@ -136,6 +152,28 @@ precedencia:
 2. `fm-bridge data login <servidor>`, que la guarda en el directorio de
    configuración del usuario (`%APPDATA%\fm-bridge\credentials.toml` en
    Windows), fuera de cualquier proyecto.
+
+## Que el MCP encuentre la configuración
+
+El cliente de IA lanza el servidor MCP **desde su propio directorio**, que nunca
+es tu proyecto. Por eso el comando **fm-bridge: Set up MCP for an AI agent**
+escribe la variable `FMBRIDGE_CONFIG` apuntando al `.fm-bridge.toml` del
+workspace abierto:
+
+```json
+{ "mcpServers": { "fm-bridge": {
+    "command": "…/.fm-bridge/bin/fm-bridge",
+    "args": ["mcp"],
+    "env": { "FMBRIDGE_CONFIG": "/ruta/al/proyecto/.fm-bridge.toml" }
+} } }
+```
+
+Sin eso, la IA puede seguir usando las tools pasando `config_path` en cada
+llamada, pero tiene que saber la ruta. La variable lo resuelve de una vez.
+
+Fijate también que el comando apunta a `~/.fm-bridge/bin/`, **no** a la carpeta
+de la extensión: el nombre de esa carpeta lleva la versión, así que una config
+escrita contra ella deja de funcionar en la próxima actualización.
 
 La contraseña se pasa siempre **por stdin**, nunca como argumento: un argumento
 queda a la vista en la lista de procesos del sistema.

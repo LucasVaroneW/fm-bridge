@@ -34,6 +34,7 @@ import {
 import { inspectXmlCommand, sliceCommand } from "./inspect";
 import { copyMcpConfigCommand } from "./mcpConfig";
 import { StepFixProvider } from "./quickfix";
+import { ensureStableBinaries } from "./stableBin";
 
 const LANGUAGE = "fmscript";
 
@@ -47,7 +48,16 @@ export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel("fm-bridge");
   context.subscriptions.push(output);
   setDataLogChannel(output);
-  log(`activated · binary: ${resolveBinaryPath() ?? "NOT FOUND"}`);
+  const binary = resolveBinaryPath();
+  log(`activated · binary: ${binary ?? "NOT FOUND"}`);
+
+  // Refresh the version-independent copy of the binaries on every activation,
+  // so MCP clients configured against a previous release keep working after an
+  // update instead of pointing at a folder VS Code has deleted.
+  if (binary) {
+    const stable = ensureStableBinaries(binary);
+    log(stable ? `stable copy: ${stable}` : "stable copy: unavailable");
+  }
 
   const diagnostics = vscode.languages.createDiagnosticCollection(LANGUAGE);
   context.subscriptions.push(diagnostics);

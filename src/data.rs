@@ -86,14 +86,15 @@ pub fn execute_sql(cfg: &DataConfig, database: &str, sql: &str) -> Result<Value,
     let srv = cfg.server(&db.server)?;
     let password = resolve_password(&srv.name)?;
     let cs = connection_string(srv, db.odbc_name(), &password);
+    let limits = srv.limits(&cfg.limits);
 
     let request = json!({
         "connection_string": cs,
         "sql": sql,
-        "connect_timeout_s": cfg.limits.connect_timeout_s,
-        "max_rows": cfg.limits.max_rows,
-        "max_cell_chars": cfg.limits.max_cell_chars,
-        "max_total_chars": cfg.limits.max_total_chars,
+        "connect_timeout_s": limits.connect_timeout_s,
+        "max_rows": limits.max_rows,
+        "max_cell_chars": limits.max_cell_chars,
+        "max_total_chars": limits.max_total_chars,
     });
     let payload = serde_json::to_string(&request).map_err(|e| e.to_string())?;
 
@@ -108,7 +109,7 @@ pub fn execute_sql(cfg: &DataConfig, database: &str, sql: &str) -> Result<Value,
 
     let mut last: Option<(String, Option<String>)> = None;
     for (idx, sidecar) in candidates.iter().enumerate() {
-        let result = call_sidecar(sidecar, &payload, cfg.limits.kill_timeout_s)?;
+        let result = call_sidecar(sidecar, &payload, limits.kill_timeout_s)?;
         if result.ok {
             let mut value = result.value;
             if let Some(obj) = value.as_object_mut() {
@@ -368,11 +369,14 @@ pub fn list_databases(cfg: &DataConfig) -> Value {
         .database
         .iter()
         .map(|d| {
+            let effective = cfg.server(&d.server).ok().map(|s| s.limits(&cfg.limits));
             json!({
                 "name": d.name,
                 "server": d.server,
                 "odbc_name": d.odbc_name(),
                 "xml": cfg.xml_for(d).map(|p| p.display().to_string()),
+                "connect_timeout_s": effective.as_ref().map(|l| l.connect_timeout_s),
+                "kill_timeout_s": effective.as_ref().map(|l| l.kill_timeout_s),
             })
         })
         .collect();
@@ -383,6 +387,7 @@ pub fn list_databases(cfg: &DataConfig) -> Value {
             "max_rows": cfg.limits.max_rows,
             "connect_timeout_s": cfg.limits.connect_timeout_s,
             "kill_timeout_s": cfg.limits.kill_timeout_s,
+            "max_total_chars": cfg.limits.max_total_chars,
         }
     })
 }

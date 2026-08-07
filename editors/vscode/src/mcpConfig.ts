@@ -13,18 +13,45 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import { BinaryNotFoundError, resolveBinaryPath } from "./bridge";
+import { ensureStableBinaries } from "./stableBin";
 
 interface ClientTarget {
   /** Label shown in the picker. */
   label: string;
   /** Top-level key the server lives under in this client's config. */
-  rootKey: "mcp" | "mcpServers";
+  rootKey: "mcp" | "mcpServers" | "servers";
   /** The per-server value (shape differs per client). */
-  serverValue: (bin: string) => unknown;
+  serverValue: (bin: string, env: Record<string, string>) => unknown;
   /** Resolve the config file path for this OS; undefined if unknown. */
   configPath: () => string | undefined;
   /** Seeded into a brand-new file (e.g. OpenCode's $schema). */
   newFileExtras?: Record<string, unknown>;
+}
+
+/**
+ * Environment handed to the MCP server.
+ *
+ * `FMBRIDGE_CONFIG` is what makes live data work over MCP at all: the AI client
+ * starts the server from its own directory — never the user's project — so
+ * without this the server searches the wrong tree and reports that no
+ * connection is configured.
+ */
+function serverEnv(): Record<string, string> {
+  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!folder) {
+    return {};
+  }
+  const config = path.join(folder, ".fm-bridge.toml");
+  return fs.existsSync(config) ? { FMBRIDGE_CONFIG: config } : {};
+}
+
+/** Drop the key entirely when empty, so configs stay clean. */
+function withEnv(
+  base: Record<string, unknown>,
+  key: string,
+  env: Record<string, string>,
+): Record<string, unknown> {
+  return Object.keys(env).length > 0 ? { ...base, [key]: env } : base;
 }
 
 /** OpenCode: prefer an existing opencode.json[c], else default to .jsonc. */
@@ -42,7 +69,8 @@ function opencodePath(): string {
 /** Claude Desktop's config path is OS-specific. */
 function claudeDesktopPath(): string {
   if (process.platform === "win32") {
-    const appData = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
+    const appData =
+      process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
     return path.join(appData, "Claude", "claude_desktop_config.json");
   }
   if (process.platform === "darwin") {
@@ -54,35 +82,65 @@ function claudeDesktopPath(): string {
       "claude_desktop_config.json",
     );
   }
-  return path.join(os.homedir(), ".config", "Claude", "claude_desktop_config.json");
+  return path.join(
+    os.homedir(),
+    ".config",
+    "Claude",
+    "claude_desktop_config.json",
+  );
 }
 
 const CLIENTS: ClientTarget[] = [
   {
-    label: "OpenCode",
-    rootKey: "mcp",
-    serverValue: (bin) => ({ type: "local", command: [bin, "mcp"], enabled: true }),
-    configPath: opencodePath,
-    newFileExtras: { $schema: "https://opencode.ai/config.json" },
+    label: "Claude Code",
+    rootKey: "mcpServers",
+    serverValue: (bin, env) =>
+      withEnv({ type: "stdio", command: bin, args: ["mcp"] }, "env", env),
+    configPath: () => path.join(os.homedir(), ".claude.json"),
   },
   {
     label: "Claude Desktop",
     rootKey: "mcpServers",
-    serverValue: (bin) => ({ command: bin, args: ["mcp"] }),
+    serverValue: (bin, env) =>
+      withEnv({ command: bin, args: ["mcp"] }, "env", env),
     configPath: claudeDesktopPath,
   },
   {
     label: "Cursor",
     rootKey: "mcpServers",
-    serverValue: (bin) => ({ command: bin, args: ["mcp"] }),
+    serverValue: (bin, env) =>
+      withEnv({ command: bin, args: ["mcp"] }, "env", env),
     configPath: () => path.join(os.homedir(), ".cursor", "mcp.json"),
+  },
+  {
+    label: "OpenCode",
+    rootKey: "mcp",
+    serverValue: (bin, env) =>
+      // OpenCode names the field `environment`, not `env`.
+      withEnv(
+        { type: "local", command: [bin, "mcp"], enabled: true },
+        "environment",
+        env,
+      ),
+    configPath: opencodePath,
+    newFileExtras: { $schema: "https://opencode.ai/config.json" },
+  },
+  {
+    label: "VS Code (this workspace)",
+    rootKey: "servers",
+    serverValue: (bin, env) =>
+      withEnv({ type: "stdio", command: bin, args: ["mcp"] }, "env", env),
+    configPath: () => {
+      const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      return folder ? path.join(folder, ".vscode", "mcp.json") : undefined;
+    },
   },
 ];
 
 /** The standalone snippet (for the copy-to-clipboard path). */
 function snippetFor(client: ClientTarget, bin: string): string {
   return JSON.stringify(
-    { [client.rootKey]: { "fm-bridge": client.serverValue(bin) } },
+    { [client.rootKey]: { "fm-bridge": client.serverValue(bin, serverEnv()) } },
     null,
     2,
   );
@@ -156,10 +214,15 @@ interface ApplyResult {
 }
 
 /** Write/merge the fm-bridge server into the client's config file. */
-async function applyToConfig(client: ClientTarget, bin: string): Promise<ApplyResult> {
+async function applyToConfig(
+  client: ClientTarget,
+  bin: string,
+): Promise<ApplyResult> {
   const file = client.configPath();
   if (!file) {
-    throw new Error(`Don't know where ${client.label} stores its config on this OS.`);
+    throw new Error(
+      `Don't know where ${client.label} stores its config on this OS.`,
+    );
   }
   await fs.promises.mkdir(path.dirname(file), { recursive: true });
 
@@ -172,7 +235,11 @@ async function applyToConfig(client: ClientTarget, bin: string): Promise<ApplyRe
     const raw = await fs.promises.readFile(file, "utf8");
     if (raw.trim().length > 0) {
       const parsed = parseJsonc(raw); // throws on garbage → caller handles
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+      ) {
         throw new Error(`${path.basename(file)} is not a JSON object.`);
       }
       root = parsed as Record<string, unknown>;
@@ -186,13 +253,19 @@ async function applyToConfig(client: ClientTarget, bin: string): Promise<ApplyRe
 
   const existing = root[client.rootKey];
   const servers =
-    typeof existing === "object" && existing !== null && !Array.isArray(existing)
+    typeof existing === "object" &&
+    existing !== null &&
+    !Array.isArray(existing)
       ? (existing as Record<string, unknown>)
       : {};
-  servers["fm-bridge"] = client.serverValue(bin);
+  servers["fm-bridge"] = client.serverValue(bin, serverEnv());
   root[client.rootKey] = servers;
 
-  await fs.promises.writeFile(file, `${JSON.stringify(root, null, 2)}\n`, "utf8");
+  await fs.promises.writeFile(
+    file,
+    `${JSON.stringify(root, null, 2)}\n`,
+    "utf8",
+  );
   return { file, created, backedUp };
 }
 
@@ -202,11 +275,14 @@ async function applyToConfig(client: ClientTarget, bin: string): Promise<ApplyRe
  * restart step so a human — or an AI reading them — knows precisely what happened.
  */
 export async function copyMcpConfigCommand(): Promise<void> {
-  const bin = resolveBinaryPath();
-  if (!bin) {
+  const resolved = resolveBinaryPath();
+  if (!resolved) {
     void vscode.window.showErrorMessage(new BinaryNotFoundError().message);
     return;
   }
+  // Point clients at the version-independent copy, so this config survives the
+  // next extension update instead of dangling at a deleted folder.
+  const bin = ensureStableBinaries(resolved) ?? resolved;
 
   const pick = await vscode.window.showQuickPick(
     CLIENTS.map((c) => ({

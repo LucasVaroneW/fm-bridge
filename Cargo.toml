@@ -1,3 +1,10 @@
+[workspace]
+members = ["crates/fm-bridge-odbc"]
+# The engine builds alone by default: the ODBC sidecar links a native driver
+# manager, so it is opt-in (`cargo build -p fm-bridge-odbc`) and never affects
+# a plain `cargo build`/`cargo test` or the CI that packages the extension.
+default-members = ["."]
+
 [package]
 name = "fm-bridge"
 version = "0.1.8"

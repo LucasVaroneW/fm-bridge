@@ -35,7 +35,16 @@ src/
 ├── audit.rs          auditoría de integridad referencial (Perform Script,
 │                     Go to Layout rotos, TOs huérfanas, campos fantasma)
 ├── xref.rs           referencias cruzadas (who-calls, who-uses-field)
+├── data.rs           datos en vivo: lanza el sidecar ODBC, watchdog, errores
+├── data_config.rs    .fm-bridge.toml (mapea export XML ↔ base viva)
+├── data_sql.rs       validación read-only (lista blanca) y armado de SELECT
 └── mcp.rs            servidor MCP (JSON-RPC por stdin/stdout)
+
+crates/
+└── fm-bridge-odbc/   sidecar ODBC: un proceso desechable por consulta.
+                      Crate aparte a propósito — es lo único que linkea un
+                      driver manager nativo, y puede compilarse a 32 bits
+                      para servir a un motor de 64.
 
 steps.toml            catálogo de ~150 pasos FM: nombre EN/ES, id numérico,
                       shape (cómo se serializa en XML), block behavior
@@ -104,6 +113,7 @@ Campos nuevos deben ser opcionales con `#[serde(skip_serializing_if = ...)]`.
 | `encode-text <in> <out>` | `.fmscript` → XML |
 | `decode-xml <in>` | XML → `.fmscript` |
 | `passthrough` | Clipboard → clipboard (sin modificar) |
+| `data list\|doctor\|login\|query\|count\|sql` | Datos en vivo por ODBC ([DATA.md](docs/DATA.md)) |
 
 ## [Release](docs/RELEASE.md)
 

@@ -25,6 +25,24 @@ jobs:
       - name: Test
         run: cargo test --verbose
 
+  # El sidecar ODBC no entra en el build por defecto (linkea un driver manager
+  # nativo), así que sin este job no lo compilaría nadie hasta el día del
+  # release. Se testea en Windows y macOS, que son las dos plataformas donde
+  # de verdad se usa — y con el gestor ODBC propio de cada una.
+  sidecar:
+    name: odbc sidecar
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build & test
+        run: cargo test -p fm-bridge-odbc --verbose
+
   # Lint: fmt + clippy. Ambos obligatorios para mergear.
   lint:
     name: lint
@@ -36,6 +54,6 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: rustfmt
-        run: cargo fmt --check
+        run: cargo fmt --all --check
       - name: clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --workspace --all-targets

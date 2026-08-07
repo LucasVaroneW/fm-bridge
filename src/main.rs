@@ -4,6 +4,9 @@
 
 mod audit;
 mod clipboard;
+mod data;
+mod data_config;
+mod data_sql;
 mod fmsavexml;
 mod import_records;
 mod mcp;
@@ -24,7 +27,7 @@ use std::io::Read;
 // Stable API for the VS Code extension.
 // New fields must be optional with skip_serializing_if.
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 struct Command {
     command: String,
     #[serde(default)]
@@ -60,6 +63,25 @@ struct Command {
     /// resolve_from: path to a FMSaveAsXML export to resolve layout IDs from.
     #[serde(default)]
     resolve_from: Option<String>,
+    // ── live-data params (ODBC sidecar) ──
+    /// Logical database name from `.fm-bridge.toml`.
+    #[serde(default)]
+    database: Option<String>,
+    /// Raw SELECT for `data_sql` (validated as read-only before it is sent).
+    #[serde(default)]
+    sql: Option<String>,
+    /// WHERE body for the structured read.
+    #[serde(default)]
+    filter: Option<String>,
+    /// ORDER BY body for the structured read.
+    #[serde(default)]
+    order_by: Option<String>,
+    /// Row cap for one call; clamped to `limits.max_rows`.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Where to start looking for `.fm-bridge.toml` (default: cwd).
+    #[serde(default)]
+    config_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -467,6 +489,81 @@ fn handle_command(cmd: &Command) -> Response {
                 Err(e) => Response::error(e),
             }
         }
+        // ── live data (ODBC sidecar) ──
+        // Reads are deliberately unrestricted: a SELECT has nothing to undo, so
+        // gating it would only get in the way of an investigation. The limits
+        // that do apply (timeouts, row caps, one query at a time) protect the
+        // server and the caller's context, not the data.
+        "data_databases" => match data_config::DataConfig::discover(cmd.config_path.as_deref()) {
+            Ok(cfg) => Response::ok_data(data::list_databases(&cfg)),
+            Err(e) => Response::error(e),
+        },
+        "data_doctor" => match data_config::DataConfig::discover(cmd.config_path.as_deref()) {
+            Ok(cfg) => Response::ok_data(data::doctor(&cfg, cmd.database.as_deref())),
+            Err(e) => Response::error(e),
+        },
+        "data_query" => {
+            let cfg = match data_config::DataConfig::discover(cmd.config_path.as_deref()) {
+                Ok(c) => c,
+                Err(e) => return Response::error(e),
+            };
+            let database = match &cmd.database {
+                Some(d) => d,
+                None => return Response::error("No database provided".to_string()),
+            };
+            let table = match &cmd.table {
+                Some(t) => t,
+                None => return Response::error("No table provided".to_string()),
+            };
+            match data::query_table(
+                &cfg,
+                database,
+                table,
+                cmd.fields.as_deref(),
+                cmd.filter.as_deref(),
+                cmd.order_by.as_deref(),
+                cmd.limit,
+            ) {
+                Ok(v) => Response::ok_data(v),
+                Err(e) => Response::error(e),
+            }
+        }
+        "data_count" => {
+            let cfg = match data_config::DataConfig::discover(cmd.config_path.as_deref()) {
+                Ok(c) => c,
+                Err(e) => return Response::error(e),
+            };
+            let database = match &cmd.database {
+                Some(d) => d,
+                None => return Response::error("No database provided".to_string()),
+            };
+            let table = match &cmd.table {
+                Some(t) => t,
+                None => return Response::error("No table provided".to_string()),
+            };
+            match data::count_rows(&cfg, database, table, cmd.filter.as_deref()) {
+                Ok(v) => Response::ok_data(v),
+                Err(e) => Response::error(e),
+            }
+        }
+        "data_sql" => {
+            let cfg = match data_config::DataConfig::discover(cmd.config_path.as_deref()) {
+                Ok(c) => c,
+                Err(e) => return Response::error(e),
+            };
+            let database = match &cmd.database {
+                Some(d) => d,
+                None => return Response::error("No database provided".to_string()),
+            };
+            let sql = match &cmd.sql {
+                Some(s) => s,
+                None => return Response::error("No sql provided".to_string()),
+            };
+            match data::query_sql(&cfg, database, sql) {
+                Ok(v) => Response::ok_data(v),
+                Err(e) => Response::error(e),
+            }
+        }
         // Build a focused slice from an existing inspect output. Returns the
         // closure counts + the slice_summary.md path for the AI to read next.
         "slice" => {
@@ -663,12 +760,215 @@ fn run_cli_mode() -> Result<(), String> {
         "get-relationships" => run_get_relationships_cli(&args[1..]),
         "get-script" => run_get_script_cli(&args[1..]),
         "get-layout" => run_get_layout_cli(&args[1..]),
+        "data" => run_data_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script",
+            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
             args[0]
         )),
     }
+}
+
+/// `fm-bridge data …` — the live-data path. Everything here is read-only.
+fn run_data_cli(args: &[String]) -> Result<(), String> {
+    const USAGE: &str = "Usage:\n  \
+        fm-bridge data list\n  \
+        fm-bridge data doctor [database]\n  \
+        fm-bridge data login <server>\n  \
+        fm-bridge data query <database> <table> [filter]\n  \
+        fm-bridge data count <database> <table> [filter]\n  \
+        fm-bridge data sql <database> \"<SELECT …>\"";
+    let sub = match args.first() {
+        Some(s) => s.as_str(),
+        None => return Err(USAGE.to_string()),
+    };
+
+    // `login` writes the credentials file; it never touches a project config.
+    if sub == "login" {
+        let server = args
+            .get(1)
+            .ok_or_else(|| "Usage: fm-bridge data login <server>".to_string())?;
+        return run_data_login(server);
+    }
+
+    let mut cmd = Command::default();
+    match sub {
+        "list" => cmd.command = "data_databases".to_string(),
+        "doctor" => {
+            cmd.command = "data_doctor".to_string();
+            cmd.database = args.get(1).cloned();
+        }
+        "query" | "count" => {
+            cmd.command = if sub == "query" {
+                "data_query".to_string()
+            } else {
+                "data_count".to_string()
+            };
+            cmd.database = Some(args.get(1).cloned().ok_or_else(|| USAGE.to_string())?);
+            cmd.table = Some(args.get(2).cloned().ok_or_else(|| USAGE.to_string())?);
+            cmd.filter = args.get(3).cloned();
+        }
+        "sql" => {
+            cmd.command = "data_sql".to_string();
+            cmd.database = Some(args.get(1).cloned().ok_or_else(|| USAGE.to_string())?);
+            cmd.sql = Some(args.get(2).cloned().ok_or_else(|| USAGE.to_string())?);
+        }
+        other => return Err(format!("Unknown data subcommand: {}\n\n{}", other, USAGE)),
+    }
+
+    let resp = handle_command(&cmd);
+    if resp.status == "error" {
+        return Err(resp.error.unwrap_or_else(|| "unknown error".to_string()));
+    }
+    let data = resp.data.unwrap_or(serde_json::Value::Null);
+    // Rows print as a table; anything else prints as JSON.
+    if data.get("rows").is_some() {
+        print_rows(&data);
+    } else {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&data).unwrap_or_else(|_| "{}".to_string())
+        );
+    }
+    Ok(())
+}
+
+/// Store a password in the per-user credentials file, so it never lands in a
+/// project file that gets committed.
+fn run_data_login(server: &str) -> Result<(), String> {
+    let path = data_config::credentials_path()
+        .ok_or_else(|| "Cannot determine the user config directory.".to_string())?;
+
+    eprint!("Password for server '{}': ", server);
+    use std::io::Write as _;
+    std::io::stderr().flush().ok();
+    let mut password = String::new();
+    std::io::stdin()
+        .read_line(&mut password)
+        .map_err(|e| format!("cannot read password: {}", e))?;
+    let password = password.trim_end_matches(['\r', '\n']).to_string();
+    if password.is_empty() {
+        return Err("Empty password; nothing stored.".to_string());
+    }
+
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("cannot create {}: {}", dir.display(), e))?;
+    }
+    // Merge into whatever is already there rather than clobbering other servers.
+    let mut doc: toml::Table = if path.is_file() {
+        let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        toml::from_str(&text).map_err(|e| format!("cannot parse {}: {}", path.display(), e))?
+    } else {
+        toml::Table::new()
+    };
+    let mut entry = toml::Table::new();
+    entry.insert("password".to_string(), toml::Value::String(password));
+    doc.insert(server.to_string(), toml::Value::Table(entry));
+    std::fs::write(
+        &path,
+        toml::to_string_pretty(&doc).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("cannot write {}: {}", path.display(), e))?;
+
+    println!("Stored the password for '{}' in {}", server, path.display());
+    println!(
+        "Note: this file is plain text, readable by your user account. \
+         Prefer a FileMaker account with read-only privileges."
+    );
+    Ok(())
+}
+
+/// Widest a column is allowed to get on screen. Without this, one 500-char
+/// cell pads *every* row in that column to 500 characters, so a wide FileMaker
+/// table prints tens of kilobytes of spaces.
+const MAX_DISPLAY_WIDTH: usize = 40;
+
+/// Print a result set as an aligned table.
+fn print_rows(data: &serde_json::Value) {
+    let empty = vec![];
+    let columns: Vec<String> = data
+        .get("columns")
+        .and_then(|c| c.as_array())
+        .unwrap_or(&empty)
+        .iter()
+        .map(|c| c.as_str().unwrap_or("?").to_string())
+        .collect();
+    let rows: Vec<Vec<String>> = data
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .unwrap_or(&empty)
+        .iter()
+        .map(|row| {
+            row.as_array()
+                .unwrap_or(&empty)
+                .iter()
+                .map(|cell| match cell.as_str() {
+                    Some(s) => s.to_string(),
+                    None => "<null>".to_string(),
+                })
+                .collect()
+        })
+        .collect();
+
+    // Elide anything longer than the display cap before measuring, so a single
+    // long value cannot widen the whole column.
+    let elide = |s: &str| -> String {
+        if s.chars().count() > MAX_DISPLAY_WIDTH {
+            s.chars().take(MAX_DISPLAY_WIDTH - 1).collect::<String>() + "…"
+        } else {
+            s.to_string()
+        }
+    };
+    let columns: Vec<String> = columns.iter().map(|c| elide(c)).collect();
+    let rows: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| r.iter().map(|c| elide(c)).collect())
+        .collect();
+
+    let mut widths: Vec<usize> = columns.iter().map(|c| c.chars().count()).collect();
+    for row in &rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i < widths.len() {
+                widths[i] = widths[i].max(cell.chars().count());
+            }
+        }
+    }
+    let line = |cells: &[String]| -> String {
+        cells
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("{:width$}", c, width = widths.get(i).copied().unwrap_or(0)))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    };
+    println!("{}", line(&columns));
+    println!(
+        "{}",
+        "-".repeat(widths.iter().sum::<usize>() + 3 * widths.len())
+    );
+    for row in &rows {
+        println!("{}", line(row));
+    }
+    let count = data.get("row_count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let ms = data.get("elapsed_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+    let truncated = data
+        .get("truncated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    println!(
+        "{} row(s) in {} ms{}",
+        count,
+        ms,
+        if truncated {
+            // Deliberately not naming which limit: it may be the row cap or the
+            // total-size budget, and claiming the wrong one sends people to the
+            // wrong setting.
+            "  [TRUNCATED — a size limit was reached; this is NOT the full result]"
+        } else {
+            ""
+        }
+    );
 }
 
 /// Parse an `FMSaveAsXML` database export and write a navigable inspection
@@ -1208,19 +1508,7 @@ mod tests {
     fn cmd(command: &str) -> Command {
         Command {
             command: command.to_string(),
-            script_text: None,
-            xml_path: None,
-            output_dir: None,
-            slice_dir: None,
-            layouts: None,
-            script: None,
-            field: None,
-            table: None,
-            layout: None,
-            fields: None,
-            summary: None,
-            style: None,
-            resolve_from: None,
+            ..Default::default()
         }
     }
 

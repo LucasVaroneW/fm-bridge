@@ -14,30 +14,24 @@
   a { color: inherit; text-decoration: none; }
   .container { max-width: 64rem; margin: 0 auto; padding: 0 1.5rem; }
 
-  /* Nav */
   nav {
     position: sticky; top: 0; z-index: 100;
     background: rgba(11,17,33,.85); backdrop-filter: blur(12px);
     border-bottom: 1px solid #1e293b; padding: .75rem 0;
   }
   nav .container { display: flex; align-items: center; justify-content: space-between; }
-  .nav-logo { font-weight: 700; font-size: 1.1rem; color: #e2e8f0; }
+  .nav-logo { font-weight: 700; font-size: 1.1rem; }
   .nav-logo span { color: #818cf8; }
   .nav-links { display: flex; gap: 1.5rem; list-style: none; }
   .nav-links a { color: #94a3b8; font-size: .9rem; transition: color .15s; }
   .nav-links a:hover { color: #e2e8f0; }
   #menu-toggle { display: none; background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer; }
 
-  /* Hero */
-  .hero {
-    position: relative; overflow: hidden;
-    padding: 6rem 0 5rem; text-align: center;
-  }
+  .hero { position: relative; overflow: hidden; padding: 6rem 0 5rem; text-align: center; }
   .hero-bg {
-    position: absolute; inset: 0;
+    position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,.25), transparent 60%),
                 radial-gradient(ellipse at 80% 100%, rgba(168,85,247,.2), transparent 50%);
-    pointer-events: none;
   }
   .hero h1 {
     font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 800;
@@ -46,47 +40,26 @@
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     background-clip: text; margin-bottom: 1rem;
   }
-  .hero p {
-    font-size: 1.15rem; color: #94a3b8; max-width: 36rem; margin: 0 auto 2.5rem;
-  }
-  .btn {
-    display: inline-flex; align-items: center; gap: .5rem;
-    padding: .85rem 2rem; border-radius: .6rem; font-weight: 600;
-    font-size: 1rem; transition: all .2s; border: 1px solid transparent; cursor: pointer;
-  }
-  .btn-primary {
-    background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff;
-    box-shadow: 0 0 20px rgba(99,102,241,.3);
-  }
+  .hero p { font-size: 1.15rem; color: #94a3b8; max-width: 36rem; margin: 0 auto 2.5rem; }
+
+  .btn { display: inline-flex; align-items: center; gap: .5rem; padding: .85rem 2rem; border-radius: .6rem; font-weight: 600; font-size: 1rem; transition: all .2s; border: 1px solid transparent; cursor: pointer; }
+  .btn-primary { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; box-shadow: 0 0 20px rgba(99,102,241,.3); }
   .btn-primary:hover { box-shadow: 0 0 30px rgba(99,102,241,.5); transform: translateY(-1px); }
   .btn-outline { border-color: #334155; color: #cbd5e1; }
   .btn-outline:hover { border-color: #6366f1; color: #fff; }
-  .btn-sm { font-size: .85rem; padding: .55rem 1.25rem; }
 
-  /* Sections */
   section { padding: 5rem 0; }
-  .section-title {
-    text-align: center; font-size: 1.75rem; font-weight: 700;
-    margin-bottom: .75rem; letter-spacing: -.01em;
-  }
-  .section-sub {
-    text-align: center; color: #64748b; margin-bottom: 3.5rem; font-size: 1.05rem;
-  }
+  .section-title { text-align: center; font-size: 1.75rem; font-weight: 700; margin-bottom: .75rem; letter-spacing: -.01em; }
+  .section-sub { text-align: center; color: #64748b; margin-bottom: 3.5rem; font-size: 1.05rem; }
 
-  /* Feature cards */
   .grid { display: grid; gap: 1.5rem; }
-  .grid-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
   .grid-3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
   .card {
-    background: #0f172a; border: 1px solid #1e293b;
-    border-radius: .75rem; padding: 1.75rem; transition: all .25s;
-    position: relative; overflow: hidden;
-  }
-  .card::before {
-    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    opacity: 0; transition: opacity .25s;
+    background: #0f172a; border: 1px solid #1e293b; border-radius: .75rem;
+    padding: 1.75rem; transition: all .25s; position: relative; overflow: hidden;
   }
   .card:hover { border-color: #334155; transform: translateY(-2px); }
+  .card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; opacity: 0; transition: opacity .25s; }
   .card:hover::before { opacity: 1; }
   .card-blue::before  { background: linear-gradient(90deg, #6366f1, #8b5cf6); }
   .card-green::before { background: linear-gradient(90deg, #22c55e, #10b981); }
@@ -95,12 +68,7 @@
   .card-yellow::before { background: linear-gradient(90deg, #eab308, #f97316); }
   .card-emerald::before { background: linear-gradient(90deg, #10b981, #14b8a6); }
 
-  .card-icon {
-    width: 2.5rem; height: 2.5rem; border-radius: .5rem;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1.25rem; margin-bottom: 1rem;
-    background: rgba(99,102,241,.1); color: #818cf8;
-  }
+  .card-icon { width: 2.5rem; height: 2.5rem; border-radius: .5rem; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; margin-bottom: 1rem; background: rgba(99,102,241,.1); color: #818cf8; }
   .card-icon.green { background: rgba(34,197,94,.1); color: #4ade80; }
   .card-icon.purple { background: rgba(168,85,247,.1); color: #c084fc; }
   .card-icon.orange { background: rgba(249,115,22,.1); color: #fb923c; }
@@ -109,28 +77,19 @@
   .card h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: .5rem; }
   .card p { color: #94a3b8; font-size: .92rem; line-height: 1.6; }
 
-  /* Flow */
-  .flow {
-    display: flex; align-items: center; justify-content: center;
-    flex-wrap: wrap; gap: 1rem; padding: 2rem 0;
-  }
-  .flow-box {
-    background: #0f172a; border: 1px solid #1e293b; border-radius: .75rem;
-    padding: 1.25rem 1.75rem; text-align: center; font-weight: 600;
-    font-size: .95rem; min-width: 120px;
-  }
+  .flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 1rem; padding: 2rem 0; }
+  .flow-box { background: #0f172a; border: 1px solid #1e293b; border-radius: .75rem; padding: 1.25rem 1.75rem; text-align: center; font-weight: 600; font-size: .95rem; min-width: 120px; }
   .flow-box.fm { border-color: #4ade80; color: #4ade80; }
   .flow-box.engine { border-color: #818cf8; color: #818cf8; }
   .flow-box.vscode { border-color: #c084fc; color: #c084fc; }
   .flow-box.ai { border-color: #fb923c; color: #fb923c; }
   .flow-arrow { color: #475569; font-size: 1.5rem; }
 
-  /* Code blocks */
   .code-block {
     background: #020617; border: 1px solid #1e293b; border-radius: .6rem;
     padding: 1.25rem 1.5rem; font-family: ui-monospace, monospace;
-    font-size: .9rem; overflow-x: auto; color: #cbd5e1;
-    position: relative; margin: 1rem 0; line-height: 1.7;
+    font-size: .9rem; overflow-x: auto; color: #cbd5e1; line-height: 1.7;
+    position: relative; margin: 1rem 0;
   }
   .code-block .copy-btn {
     position: absolute; top: .75rem; right: .75rem;
@@ -139,14 +98,45 @@
     font-size: .8rem; font-family: inherit; transition: all .15s;
   }
   .code-block .copy-btn:hover { background: #334155; color: #cbd5e1; }
-  .code-block .cmd { color: #818cf8; }
-  .code-block .opt { color: #4ade80; }
-  .code-block .cmt { color: #475569; }
-  .code-block .str { color: #fbbf24; }
-  .code-block .var { color: #f97316; }
 
-  /* Usage tabs */
-  .tabs { display: flex; gap: .25rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  /* VS Code mock */
+  .vscode-mock {
+    background: #1a1b26; border: 1px solid #2f3340; border-radius: .75rem;
+    overflow: hidden; max-width: 100%; margin: 0 auto;
+    box-shadow: 0 25px 50px rgba(0,0,0,.4);
+  }
+  .vscode-mock .titlebar {
+    background: #1a1b26; padding: .5rem 1rem; display: flex;
+    align-items: center; gap: .5rem; border-bottom: 1px solid #2f3340;
+    font-size: .8rem; color: #787c99;
+  }
+  .vscode-mock .line-numbers {
+    background: #1a1b26; color: #44475a; padding: .75rem .5rem .75rem 1rem;
+    text-align: right; user-select: none; font-family: ui-monospace, monospace;
+    font-size: .8rem; line-height: 1.75; min-width: 3ch;
+  }
+  .vscode-mock .editor-body {
+    display: flex;
+  }
+  .vscode-mock .code {
+    font-family: ui-monospace, monospace; font-size: .8rem; line-height: 1.75;
+    padding: .75rem 1rem .75rem 0; white-space: pre; flex: 1; overflow-x: auto;
+  }
+  .vscode-mock .c-comment { color: #6272a4; font-style: italic; }
+  .vscode-mock .c-step { color: #ffb86c; }
+  .vscode-mock .c-keyword { color: #ff79c6; }
+  .vscode-mock .c-bracket { color: #f8f8f2; }
+  .vscode-mock .c-var { color: #8be9fd; }
+  .vscode-mock .c-str { color: #f1fa8c; }
+  .vscode-mock .c-num { color: #bd93f9; }
+  .vscode-mock .c-const { color: #bd93f9; }
+  .vscode-mock .c-id { color: #ffb86c; }
+  .vscode-mock .c-attr { color: #50fa7b; }
+  .vscode-mock .c-calc { color: #f8f8f2; }
+  .vscode-mock .c-warn { border-bottom: 2px wavy #eab308; }
+  .vscode-mock .c-err { border-bottom: 2px wavy #ff5555; }
+
+  .tabs { display: flex; gap: .25rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .tab {
     padding: .5rem 1.25rem; border-radius: .4rem; cursor: pointer;
     font-size: .9rem; font-weight: 500; transition: all .15s;
@@ -155,33 +145,6 @@
   .tab:hover { color: #e2e8f0; }
   .tab.active { background: rgba(99,102,241,.15); color: #a5b4fc; border-color: rgba(99,102,241,.3); }
 
-  /* Download section */
-  .download-section {
-    text-align: center; padding: 4rem 0;
-    background: linear-gradient(180deg, transparent, rgba(99,102,241,.05), transparent);
-  }
-  .version-tag {
-    display: inline-block; background: rgba(99,102,241,.15);
-    color: #a5b4fc; padding: .2rem .7rem; border-radius: 1rem;
-    font-size: .8rem; margin-left: .5rem; font-family: monospace;
-  }
-
-  /* Footer */
-  footer {
-    border-top: 1px solid #1e293b; padding: 2rem 0;
-    text-align: center; color: #475569; font-size: .9rem;
-  }
-  footer a { color: #818cf8; }
-  footer a:hover { color: #a5b4fc; }
-
-  .highlight { color: #818cf8; font-weight: 600; }
-
-  /* Tables */
-  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .9rem; }
-  th { text-align: left; color: #818cf8; padding: .6rem .75rem; border-bottom: 1px solid #1e293b; font-weight: 600; font-size: .85rem; }
-  td { padding: .55rem .75rem; border-bottom: 1px solid #0f172a; color: #cbd5e1; }
-  tr:hover td { background: rgba(99,102,241,.05); }
-
   .accordion { border: 1px solid #1e293b; border-radius: .5rem; overflow: hidden; margin: 1rem 0; }
   .accordion-header {
     background: #0f172a; padding: 1rem 1.5rem; cursor: pointer;
@@ -189,15 +152,24 @@
     font-weight: 600; user-select: none;
   }
   .accordion-header:hover { background: #1e293b; }
-  .accordion-body { padding: 0 1.5rem 1.25rem; color: #94a3b8; font-size: .92rem; line-height: 1.7; display: none; }
-  .accordion.open .accordion-body { display: block; }
-  .accordion-header::after { content: '+'; font-size: 1.25rem; color: #64748b; }
+  .accordion-header::after { content: '+'; font-size: 1.25rem; color: #64748b; flex-shrink: 0; }
+  .accordion .accordion-body { padding: 0 1.5rem; max-height: 0; overflow: hidden; transition: max-height .3s, padding .3s; font-size: .92rem; color: #94a3b8; line-height: 1.7; }
+  .accordion.open .accordion-body { max-height: 20rem; padding: 0 1.5rem 1.25rem; }
   .accordion.open .accordion-header::after { content: '−'; }
 
-  .mcp-badge {
-    display: inline-block; padding: .15rem .6rem; border-radius: .3rem;
-    font-size: .8rem; font-weight: 600; background: rgba(249,115,22,.15); color: #fb923c;
-  }
+  .download-section { text-align: center; padding: 4rem 0; background: linear-gradient(180deg, transparent, rgba(99,102,241,.05), transparent); }
+  .version-tag { display: inline-block; background: rgba(99,102,241,.15); color: #a5b4fc; padding: .2rem .7rem; border-radius: 1rem; font-size: .8rem; margin-left: .5rem; font-family: monospace; }
+  .mcp-badge { display: inline-block; padding: .15rem .6rem; border-radius: .3rem; font-size: .8rem; font-weight: 600; background: rgba(249,115,22,.15); color: #fb923c; }
+
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .9rem; }
+  th { text-align: left; color: #818cf8; padding: .6rem .75rem; border-bottom: 1px solid #1e293b; font-weight: 600; font-size: .85rem; }
+  td { padding: .55rem .75rem; border-bottom: 1px solid #0f172a; color: #cbd5e1; }
+  tr:hover td { background: rgba(99,102,241,.05); }
+  .highlight { color: #818cf8; font-weight: 600; }
+
+  footer { border-top: 1px solid #1e293b; padding: 2rem 0; text-align: center; color: #475569; font-size: .9rem; }
+  footer a { color: #818cf8; }
+  footer a:hover { color: #a5b4fc; }
 
   @media (max-width: 768px) {
     .hero { padding: 4rem 0 3rem; }
@@ -219,6 +191,7 @@
     <button id="menu-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
     <ul class="nav-links">
       <li><a href="#features">Features</a></li>
+      <li><a href="#preview">Preview</a></li>
       <li><a href="#usage">Usage</a></li>
       <li><a href="#mcp">MCP / AI</a></li>
       <li><a href="#commands">Commands</a></li>
@@ -227,7 +200,7 @@
   </div>
 </nav>
 
-<section class="hero" id="top">
+<section class="hero">
   <div class="hero-bg"></div>
   <div class="container" style="position:relative;z-index:1">
     <h1>Edit FileMaker scripts<br>outside FileMaker</h1>
@@ -251,34 +224,86 @@
       <div class="card card-blue">
         <div class="card-icon">💻</div>
         <h3>VS Code Extension</h3>
-        <p>Syntax highlighting, step autocomplete, diagnostics while you type. Read scripts from the FileMaker clipboard and write them back — all from the editor.</p>
+        <p>Syntax highlighting, step autocomplete, diagnostics while you type. Read scripts from the FileMaker clipboard and write them back.</p>
       </div>
       <div class="card card-purple">
         <div class="card-icon purple">🧠</div>
         <h3>MCP Server for AI</h3>
-        <p>Any MCP client (Claude, OpenCode, Cursor) can read, validate, inspect, audit, and cross-reference your scripts and schema. The AI reads the same .fmscript files you do.</p>
+        <p>Any MCP client (Claude, OpenCode, Cursor) can read, validate, inspect, audit, and cross-reference your scripts and schema.</p>
       </div>
       <div class="card card-green">
         <div class="card-icon green">🔍</div>
         <h3>Database Inspector</h3>
-        <p>Parse FMSaveAsXML exports into navigable directories: tables, fields with calculations, layouts with triggers, relationships with joins, custom functions, scripts in folders.</p>
+        <p>Parse FMSaveAsXML exports into navigable directories: tables, fields with calculations, layouts, relationships, custom functions.</p>
       </div>
       <div class="card card-orange">
         <div class="card-icon orange">⚠️</div>
         <h3>Reference Audit</h3>
-        <p>Find broken references automatically: dangling Perform Script and Go to Layout targets, relationships pointing at deleted table occurrences, ghost fields on layouts.</p>
+        <p>Find broken references: dangling Perform Script / Go to Layout, deleted table occurrences, ghost fields on layouts.</p>
       </div>
       <div class="card card-yellow">
         <div class="card-icon yellow">🔗</div>
         <h3>Cross-Reference</h3>
-        <p>who-calls and who-uses-field: trace every caller of a script and every place a field is used — layouts, relationship keys, Set Field steps, calculation mentions.</p>
+        <p>who-calls / who-uses-field: trace every caller of a script and every place a field is referenced.</p>
       </div>
       <div class="card card-emerald">
         <div class="card-icon emerald">📝</div>
         <h3>Plain-text .fmscript</h3>
-        <p>Scripts are plain text files you can version in git, diff, search, and edit with any tool. The format is human-readable and AI-friendly — the same artifact for both.</p>
+        <p>Scripts are plain text files you can version in git, diff, search, and edit with any tool.</p>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- VS Code Preview -->
+<section id="preview" style="padding-top:0">
+  <div class="container">
+    <h2 class="section-title">See it in action</h2>
+    <p class="section-sub">This is what a .fmscript file looks like in VS Code with fm-bridge.</p>
+    <div class="vscode-mock">
+      <div class="titlebar">
+        <span style="width:10px;height:10px;border-radius:50%;background:#ff5555"></span>
+        <span style="width:10px;height:10px;border-radius:50%;background:#f1fa8c"></span>
+        <span style="width:10px;height:10px;border-radius:50%;background:#50fa7b"></span>
+        <span style="margin-left:1rem">Gen_Abrir.fmscript — series-fabricacion</span>
+      </div>
+      <div class="editor-body">
+        <div class="line-numbers">1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12<br>13<br>14<br>15<br>16<br>17<br>18<br>19<br>20<br>21<br>22<br>23<br>24</div>
+        <div class="code">
+<span class="c-comment"># Abre la aplicación. Inicializa sesión y navega al módulo correcto.</span>
+<span class="c-comment">#</span>
+<span class="c-keyword">Set Error Capture</span> <span class="c-bracket">[</span><span class="c-const">True</span><span class="c-bracket">]</span>
+<span class="c-keyword">Allow User Abort</span> <span class="c-bracket">[</span><span class="c-const">False</span><span class="c-bracket">]</span>
+
+<span class="c-step">Set Variable</span> <span class="c-bracket">[</span><span class="c-var">$PG</span> = <span class="c-calc">Get ( ScriptParameter )</span><span class="c-bracket">]</span>
+<span class="c-step">Set Variable</span> <span class="c-bracket">[</span><span class="c-var">$Tini</span> = <span class="c-calc">Get ( CurrentHostTimestamp )</span><span class="c-bracket">]</span>
+
+<span class="c-keyword">If</span> <span class="c-bracket">[</span><span class="c-calc">not GetAsBoolean ( GetValue ( </span><span class="c-var">$PG</span> <span class="c-calc">; 1 ) )</span><span class="c-bracket">]</span>
+  <span class="c-step">Go to Layout</span> <span class="c-bracket">[</span><span class="c-str">"Start_End"</span> <span class="c-id">#5</span><span class="c-bracket">]</span>
+
+  <span class="c-step">Show Custom Dialog</span> <span class="c-bracket">[</span><span class="c-attr">Title:</span> <span class="c-str">"Inicializando"</span>; <span class="c-attr">Message:</span> <span class="c-str">"Cargando..."</span>; <span class="c-attr">Input:</span> <span class="c-var">$usuario</span>; <span class="c-attr">Label:</span> <span class="c-str">"Usuario"</span>; <span class="c-attr">Buttons:</span> <span class="c-str">"OK"</span><span class="c-bracket">]</span>
+
+  <span class="c-step">Perform Script</span> <span class="c-bracket">[</span><span class="c-str">"Gen_Inicializaciones"</span> <span class="c-id">#1092</span>; <span class="c-calc">GetValue( </span><span class="c-var">$PG</span> <span class="c-calc">; 1 )</span><span class="c-bracket">]</span>
+<span class="c-keyword">End If</span>
+
+<span class="c-step c-warn">Go to Layout</span> <span class="c-bracket c-warn">[</span><span class="c-str">"Prf_Gen_iPad"</span><span class="c-bracket c-warn">]</span>
+
+<span class="c-step">Refresh Window</span> <span class="c-bracket">[</span><span class="c-const">FlushJoins</span>; <span class="c-const">FlushSQLData</span><span class="c-bracket">]</span>
+
+<span class="c-step c-err">NoSuchStep</span> <span class="c-bracket c-err">[</span><span class="c-calc">foo</span><span class="c-bracket c-err">]</span>
+        </div>
+      </div>
+    </div>
+    <p style="text-align:center;margin-top:1rem;color:#64748b;font-size:.85rem">
+      <span style="color:#6272a4">■</span> comments &nbsp;
+      <span style="color:#ff79c6">■</span> control flow &nbsp;
+      <span style="color:#ffb86c">■</span> step names &nbsp;
+      <span style="color:#8be9fd">■</span> variables &nbsp;
+      <span style="color:#f1fa8c">■</span> strings &nbsp;
+      <span style="color:#50fa7b">■</span> labels &nbsp;
+      <span class="c-warn">∼</span> warning &nbsp;
+      <span class="c-err">∼</span> error
+    </p>
   </div>
 </section>
 
@@ -288,7 +313,7 @@
     <h2 class="section-title">How it works</h2>
     <p class="section-sub">Copy in FileMaker, edit in VS Code, paste back. The AI path works the same way over MCP.</p>
     <div class="flow">
-      <div class="flow-box fm">FileMaker<br><small style="font-weight:400;opacity:.7">Cmd+C</small></div>
+      <div class="flow-box fm">FileMaker<br><small style="font-weight:400;opacity:.7">Ctrl+C</small></div>
       <span class="flow-arrow">→</span>
       <div class="flow-box engine">fm-bridge<br><small style="font-weight:400;opacity:.7">Rust engine</small></div>
       <span class="flow-arrow">→</span>
@@ -296,7 +321,7 @@
     </div>
     <div style="display:flex;justify-content:center;margin-top:.5rem;flex-wrap:wrap;gap:.5rem">
       <span style="color:#64748b">AI path: same engine, different door →</span>
-      <div class="flow-box ai" style="margin-left:0">MCP<br><small style="font-weight:400;opacity:.7">Claude / OpenCode</small></div>
+      <div class="flow-box ai">MCP<br><small style="font-weight:400;opacity:.7">Claude / OpenCode</small></div>
     </div>
   </div>
 </section>
@@ -306,130 +331,112 @@
   <div class="container">
     <h2 class="section-title">How to use fm-bridge</h2>
     <p class="section-sub">For humans with VS Code, and for AI agents over MCP.</p>
-
-    <div class="tabs">
-      <button class="tab active" onclick="switchTab('human')">👤 VS Code user</button>
-      <button class="tab" onclick="switchTab('ai')">🤖 AI / MCP</button>
+    <div class="tabs" id="usage-tabs">
+      <button class="tab active" data-tab="human">👤 VS Code user</button>
+      <button class="tab" data-tab="ai">🤖 AI / MCP</button>
     </div>
-
     <div id="tab-human">
       <div class="card card-blue" style="margin-bottom:1.5rem">
         <h3>📥 Read from FileMaker</h3>
         <p style="margin-bottom:.75rem">Copy script steps in FileMaker (Ctrl+C), then in VS Code:</p>
         <div class="code-block">
           <button class="copy-btn" onclick="copyCode(this)">📋</button>
-          <span class="cmt">Ctrl+Shift+P →</span> <span class="cmd">fm-bridge: Read script from clipboard</span>
+          <span style="color:#6272a4">Ctrl+Shift+P →</span> <span style="color:#818cf8">fm-bridge: Read script from clipboard</span>
         </div>
-        <p>Opens a new <code class="highlight">.fmscript</code> file with the decoded script.</p>
       </div>
-
       <div class="card card-purple" style="margin-bottom:1.5rem">
         <h3>✏️ Edit in VS Code</h3>
-        <p>Edit the <code class="highlight">.fmscript</code> file. You get:</p>
-        <ul style="color:#94a3b8;padding-left:1.5rem;margin-top:.5rem;line-height:1.8;font-size:.92rem">
-          <li><span class="highlight">Syntax highlighting</span> — steps, variables, strings, comments</li>
-          <li><span class="highlight">Autocomplete</span> — start typing a step name and it suggests the full template</li>
-          <li><span class="highlight">Diagnostics</span> — red errors (unknown steps) and yellow warnings (missing layout IDs)</li>
-          <li><span class="highlight">Format</span> — switch between inline (matches FM line numbers) and indented (readable)</li>
+        <ul style="color:#94a3b8;padding-left:1.5rem;margin:.5rem 0;line-height:1.8;font-size:.92rem">
+          <li><span class="highlight">Syntax highlighting</span> — steps, variables, strings, comments, numbers</li>
+          <li><span class="highlight">Autocomplete</span> — start typing a step name, get snippet templates</li>
+          <li><span class="highlight">Diagnostics</span> — red errors (unknown steps) and yellow warnings (missing IDs)</li>
+          <li><span class="highlight">Format</span> — inline (matches FM line numbers) or indented (readable)</li>
         </ul>
       </div>
-
       <div class="card card-green" style="margin-bottom:1.5rem">
         <h3>📤 Write to FileMaker</h3>
-        <p>Save your <code class="highlight">.fmscript</code>, then:</p>
         <div class="code-block">
           <button class="copy-btn" onclick="copyCode(this)">📋</button>
-          <span class="cmt">Ctrl+Shift+P →</span> <span class="cmd">fm-bridge: Write script to clipboard</span>
+          <span style="color:#6272a4">Ctrl+Shift+P →</span> <span style="color:#818cf8">fm-bridge: Write script to clipboard</span>
         </div>
         <p>Paste in FileMaker's Script Workspace (Ctrl+V).</p>
       </div>
-
       <div class="card card-orange" style="margin-bottom:1.5rem">
         <h3>🔗 Resolve layout IDs</h3>
-        <p>When you write <code class="highlight">Go to Layout ["SomeName"]</code> without an ID, FM may show "Desconocido". Resolve them:</p>
+        <p>When you write <code class="highlight">Go to Layout ["SomeName"]</code> without an ID:</p>
         <div class="code-block">
           <button class="copy-btn" onclick="copyCode(this)">📋</button>
-          <span class="cmt">Ctrl+Shift+P →</span> <span class="cmd">fm-bridge: Resolve layout IDs from FMSaveAsXML</span><br>
-          <span class="cmt">→ Pick your database export XML → All IDs auto-filled</span>
+          <span style="color:#6272a4">Ctrl+Shift+P →</span> <span style="color:#818cf8">fm-bridge: Resolve layout IDs from FMSaveAsXML</span><br>
+          <span style="color:#6272a4">→ Pick your database export XML → All IDs auto-filled</span>
         </div>
-        <p>Or solve it <span class="highlight">before writing</span>: configure <code>resolve_from</code> in the write command.</p>
       </div>
-
       <div class="card card-yellow">
-        <h3>📋 Snippets & shortcuts</h3>
-        <p>Type a snippet prefix and press Tab:</p>
+        <h3>📋 Snippets</h3>
         <table>
           <tr><th>Type</th><th>Expands to</th></tr>
-          <tr><td><code>if</code></td><td><code>If [condition]<br>&nbsp;&nbsp;<br>End If</code></td></tr>
-          <tr><td><code>loop</code></td><td><code>Loop<br>&nbsp;&nbsp;<br>End Loop</code></td></tr>
+          <tr><td><code>if</code></td><td><code>If [condition] → … End If</code></td></tr>
+          <tr><td><code>loop</code></td><td><code>Loop → … End Loop</code></td></tr>
           <tr><td><code>setf</code></td><td><code>Set Field [Table::Field; value]</code></td></tr>
           <tr><td><code>setv</code></td><td><code>Set Variable [$var = value]</code></td></tr>
-          <tr><td><code>dialog</code></td><td><code>Show Custom Dialog [Title: "T"; Message: "M"; Buttons: "OK"]</code></td></tr>
+          <tr><td><code>dialog</code></td><td><code>Show Custom Dialog [Title: ; Message: ; Buttons: ]</code></td></tr>
           <tr><td><code>gotol</code></td><td><code>Go to Layout ["Name" #id]</code></td></tr>
           <tr><td><code>nw</code></td><td><code>New Window [Style: Document; Layout: "Name"]</code></td></tr>
           <tr><td><code>ps</code></td><td><code>Perform Script ["Name" #id; param]</code></td></tr>
         </table>
       </div>
     </div>
-
     <div id="tab-ai" style="display:none">
       <div class="card card-purple" style="margin-bottom:1.5rem">
         <h3>🔌 Setup MCP <span class="mcp-badge">AI</span></h3>
         <p>In VS Code, open the Command Palette:</p>
         <div class="code-block">
-          <span class="cmt">Ctrl+Shift+P →</span> <span class="cmd">fm-bridge: Set up MCP for an AI agent</span>
+          <span style="color:#6272a4">Ctrl+Shift+P →</span> <span style="color:#818cf8">fm-bridge: Set up MCP for an AI agent</span>
         </div>
-        <p>Choose your client (Claude Desktop, OpenCode, Cursor) and the extension writes the config. Then restart the client.</p>
+        <p>Choose your client and the extension writes the config. Restart the client.</p>
       </div>
-
       <div class="card card-blue" style="margin-bottom:1.5rem">
         <h3>🛠️ Tools for AI</h3>
-        <p style="margin-bottom:.75rem">The MCP server exposes these tools:</p>
         <table>
           <tr><th>Tool</th><th>What it does</th></tr>
-          <tr><td><code>read_clipboard_script</code></td><td>Read FM clipboard → .fmscript text</td></tr>
-          <tr><td><code>validate_script</code></td><td>Check .fmscript for errors and warnings</td></tr>
-          <tr><td><code>script_to_json</code></td><td>Parse .fmscript into structured JSON tree</td></tr>
-          <tr><td><code>list_steps</code></td><td>Catalog of ~150 supported step types</td></tr>
-          <tr><td><code>describe_database</code></td><td>Overview: tables, scripts, layouts, counts</td></tr>
-          <tr><td><code>get_table</code> / <code>get_field</code></td><td>Field definitions from a table</td></tr>
-          <tr><td><code>get_script</code> / <code>get_layout</code></td><td>One script/layout inline, no disk writes</td></tr>
-          <tr><td><code>get_relationships</code></td><td>Relationship graph with join predicates</td></tr>
-          <tr><td><code>inspect_database</code></td><td>Full FMSaveAsXML → navigable directory</td></tr>
-          <tr><td><code>slice_inspect</code></td><td>Focused subset around specific layouts</td></tr>
-          <tr><td><code>audit_database</code></td><td>Find broken references automatically</td></tr>
-          <tr><td><code>who_calls</code></td><td>Who calls a given script</td></tr>
+          <tr><td><code>read_clipboard_script</code></td><td>Read FM clipboard → .fmscript</td></tr>
+          <tr><td><code>validate_script</code></td><td>Check .fmscript for errors/warnings</td></tr>
+          <tr><td><code>script_to_json</code></td><td>Parse into structured JSON tree</td></tr>
+          <tr><td><code>list_steps</code></td><td>Catalog of ~150 supported steps</td></tr>
+          <tr><td><code>describe_database</code></td><td>Overview of the database</td></tr>
+          <tr><td><code>get_table / get_field</code></td><td>Field definitions</td></tr>
+          <tr><td><code>get_script / get_layout</code></td><td>One script/layout inline</td></tr>
+          <tr><td><code>get_relationships</code></td><td>Relationship graph</td></tr>
+          <tr><td><code>inspect_database</code></td><td>Full FMSaveAsXML → directory</td></tr>
+          <tr><td><code>slice_inspect</code></td><td>Focused subset by layout</td></tr>
+          <tr><td><code>audit_database</code></td><td>Find broken references</td></tr>
+          <tr><td><code>who_calls</code></td><td>Who calls a script</td></tr>
           <tr><td><code>who_uses_field</code></td><td>Where a field is referenced</td></tr>
         </table>
       </div>
-
       <div class="card card-green" style="margin-bottom:1.5rem">
         <h3>💬 How to ask the AI</h3>
-        <p>Once MCP is set up, ask naturally:</p>
-        <div class="code-block">
-          <span class="cmt">"Read the script I just copied from FileMaker and fix the</span><br>
-          <span class="cmt">Set Field to use the correct table occurrence."</span><br><br>
-          <span class="cmt">"Audit By_00_Desk.xml and list every broken Go to Layout."</span><br><br>
-          <span class="cmt">"Who calls the Gen_Abrir script? I want to know the blast</span><br>
-          <span class="cmt">radius before changing it."</span><br><br>
-          <span class="cmt">"Inspect By_12_Productos.xml, slice the layout Imp_Productos,</span><br>
-          <span class="cmt">and check if any Perform Script references are dangling."</span>
+        <div class="code-block" style="font-family:ui-sans-serif,system-ui,sans-serif;font-size:.9rem">
+          <span style="color:#94a3b8">"Read the script I just copied from FileMaker and</span><br>
+          <span style="color:#94a3b8">fix the Set Field to use the correct table occurrence."</span><br><br>
+          <span style="color:#94a3b8">"Audit By_00_Desk.xml and list every broken Go to Layout."</span><br><br>
+          <span style="color:#94a3b8">"Who calls Gen_Abrir? I want to know the blast radius.</span><br>
+          <span style="color:#94a3b8">before changing it."</span><br><br>
+          <span style="color:#94a3b8">"Inspect By_12_Productos.xml, slice Imp_Productos,</span><br>
+          <span style="color:#94a3b8">check if any Perform Script references are dangling."</span>
         </div>
       </div>
-
       <div class="card card-orange">
         <h3>📁 Manual MCP config</h3>
-        <p>If you're not using the extension wizard, add this to your client:</p>
-        <div class="accordion open">
+        <div class="accordion">
           <div class="accordion-header" onclick="this.parentElement.classList.toggle('open')">Claude Desktop</div>
           <div class="accordion-body">
             <div class="code-block" style="margin:0">
-              <span class="cmt">// claude_desktop_config.json</span><br>
+              <span style="color:#6272a4">// claude_desktop_config.json</span><br>
               {<br>
-              &nbsp;&nbsp;<span class="str">"mcpServers"</span>: {<br>
-              &nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"fm-bridge"</span>: {<br>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"command"</span>: <span class="str">"~/.cargo/bin/fm-bridge"</span>,<br>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"args"</span>: [<span class="str">"mcp"</span>]<br>
+              &nbsp;&nbsp;<span style="color:#f1fa8c">"mcpServers"</span>: {<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#f1fa8c">"fm-bridge"</span>: {<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#f1fa8c">"command"</span>: <span style="color:#f1fa8c">"~/.cargo/bin/fm-bridge"</span>,<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#f1fa8c">"args"</span>: [<span style="color:#f1fa8c">"mcp"</span>]<br>
               &nbsp;&nbsp;&nbsp;&nbsp;}<br>
               &nbsp;&nbsp;}<br>
               }
@@ -440,13 +447,13 @@
           <div class="accordion-header" onclick="this.parentElement.classList.toggle('open')">OpenCode</div>
           <div class="accordion-body">
             <div class="code-block" style="margin:0">
-              <span class="cmt">// opencode.json</span><br>
+              <span style="color:#6272a4">// opencode.json</span><br>
               {<br>
-              &nbsp;&nbsp;<span class="str">"mcp"</span>: {<br>
-              &nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"fm-bridge"</span>: {<br>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"type"</span>: <span class="str">"local"</span>,<br>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"command"</span>: [<span class="str">"~/.cargo/bin/fm-bridge"</span>, <span class="str">"mcp"</span>],<br>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"enabled"</span>: true<br>
+              &nbsp;&nbsp;<span style="color:#f1fa8c">"mcp"</span>: {<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#f1fa8c">"fm-bridge"</span>: {<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#f1fa8c">"type"</span>: <span style="color:#f1fa8c">"local"</span>,<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#f1fa8c">"command"</span>: [<span style="color:#f1fa8c">"~/.cargo/bin/fm-bridge"</span>, <span style="color:#f1fa8c">"mcp"</span>],<br>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#f1fa8c">"enabled"</span>: true<br>
               &nbsp;&nbsp;&nbsp;&nbsp;}<br>
               &nbsp;&nbsp;}<br>
               }
@@ -472,7 +479,6 @@
       <tr><td><code>mcp</code></td><td>MCP server (JSON-RPC over stdio)</td></tr>
       <tr><td><code>steps</code></td><td>Step catalog as JSON</td></tr>
       <tr><td><code>debug</code></td><td>Dump debug_raw.xml and debug_built.xml</td></tr>
-      <tr><td><code>dump-ids</code></td><td>List step id→name from clipboard</td></tr>
       <tr><td><code>inspect &lt;xml&gt; [dir]</code></td><td>Parse FMSaveAsXML → navigable directory</td></tr>
       <tr><td><code>slice &lt;out&gt; &lt;slice&gt; &lt;layouts…&gt;</code></td><td>Focused slice by layout</td></tr>
       <tr><td><code>audit &lt;xml&gt;</code></td><td>Find broken references</td></tr>
@@ -485,7 +491,7 @@
       <tr><td><code>get-field &lt;xml&gt; &lt;table&gt; &lt;field&gt;</code></td><td>One field's full definition (inline)</td></tr>
       <tr><td><code>get-relationships &lt;xml&gt; [to]</code></td><td>Relationships (inline)</td></tr>
       <tr><td><code>encode-text &lt;in&gt; &lt;out&gt;</code></td><td>.fmscript → XML</td></tr>
-      <tr><td><code>decode-xml &lt;in&gt; [out]</code></td><td>XML → .fmscript</td></tr>
+      <tr><td><code>decode-xml &lt;in&gt;</code></td><td>XML → .fmscript</td></tr>
       <tr><td><code>passthrough</code></td><td>Clipboard → clipboard (unchanged)</td></tr>
       <tr><td><code>reformat &lt;f&gt; &lt;inline|indented&gt;</code></td><td>Re-render in a different style</td></tr>
     </table>
@@ -500,74 +506,57 @@
     <p class="section-sub">Download the .vsix and install in VS Code. No Rust needed.</p>
     <div class="code-block">
       <button class="copy-btn" onclick="copyCode(this)">📋</button>
-      <span class="cmt"># 1. Download the latest .vsix</span><br>
-      <a href="https://github.com/LucasVaroneW/fm-bridge/releases" target="_blank" class="cmd">github.com/LucasVaroneW/fm-bridge/releases</a><br><br>
-      <span class="cmt"># 2. Install in VS Code</span><br>
-      <span class="cmd">code</span> <span class="opt">--install-extension</span> fm-bridge.vsix<br><br>
-      <span class="cmt"># 3. Or: Extensions → ... → Install from VSIX</span>
+      <span style="color:#6272a4"># 1. Download the latest .vsix</span><br>
+      <a href="https://github.com/LucasVaroneW/fm-bridge/releases" target="_blank" style="color:#818cf8">github.com/LucasVaroneW/fm-bridge/releases</a><br><br>
+      <span style="color:#6272a4"># 2. Install in VS Code</span><br>
+      <span style="color:#818cf8">code</span> <span style="color:#4ade80">--install-extension</span> fm-bridge.vsix<br><br>
+      <span style="color:#6272a4"># 3. Or: Extensions → ... → Install from VSIX</span>
     </div>
-    <p style="text-align:center;color:#64748b;font-size:.9rem;margin-top:.75rem">
-      Or build from source: <code style="background:#1e293b;padding:.15rem .4rem;border-radius:.25rem">git clone</code> →
-      <code style="background:#1e293b;padding:.15rem .4rem;border-radius:.25rem">cargo install --path .</code>
-    </p>
   </div>
 </section>
 
-<!-- Stats -->
 <section class="download-section">
   <div class="container">
     <h2 class="section-title" style="background:linear-gradient(135deg,#818cf8,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Zero-install for end users</h2>
-    <p style="color:#94a3b8;max-width:32rem;margin:0 auto 1.5rem;font-size:1.05rem">
-      The .vsix bundles the Rust binary inside. Your users double-click the extension — no Rust, no terminal, no package managers. Works on Windows, macOS, and Linux.
-    </p>
+    <p style="color:#94a3b8;max-width:32rem;margin:0 auto 1.5rem;font-size:1.05rem">The .vsix bundles the Rust binary inside. Your users double-click the extension — no Rust, no terminal, no package managers. Works on Windows, macOS, and Linux.</p>
     <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:2rem">
-      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center">
-        <div style="font-size:1.5rem;font-weight:700;color:#818cf8">~150</div>
-        <div style="color:#64748b;font-size:.85rem">step types cataloged</div>
-      </div>
-      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center">
-        <div style="font-size:1.5rem;font-weight:700;color:#4ade80">85</div>
-        <div style="color:#64748b;font-size:.85rem">unit tests</div>
-      </div>
-      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center">
-        <div style="font-size:1.5rem;font-weight:700;color:#c084fc">3</div>
-        <div style="color:#64748b;font-size:.85rem">platforms supported</div>
-      </div>
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center"><div style="font-size:1.5rem;font-weight:700;color:#818cf8">~150</div><div style="color:#64748b;font-size:.85rem">step types</div></div>
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center"><div style="font-size:1.5rem;font-weight:700;color:#4ade80">85</div><div style="color:#64748b;font-size:.85rem">tests</div></div>
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem 1.75rem;text-align:center"><div style="font-size:1.5rem;font-weight:700;color:#c084fc">3</div><div style="color:#64748b;font-size:.85rem">platforms</div></div>
     </div>
   </div>
 </section>
 
 <footer>
   <div class="container">
-    <p style="margin-bottom:.5rem">
-      fm-bridge · <a href="https://github.com/LucasVaroneW/fm-bridge">GitHub</a> ·
-      GPL-3.0 licensed
-    </p>
-    <p style="font-size:.85rem">
-      by <a href="https://datapilottax.es">Lucas Varone</a> — also created
-      <a href="https://datapilottax.es" style="border-bottom:1px solid #334155">DataPilot Tax</a>,
-      the FacturaE & VeriFactu API for Spanish developers
-    </p>
+    <p style="margin-bottom:.5rem">fm-bridge · <a href="https://github.com/LucasVaroneW/fm-bridge">GitHub</a> · GPL-3.0</p>
+    <p style="font-size:.85rem">by <a href="https://datapilottax.es">Lucas Varone</a> — also created <a href="https://datapilottax.es" style="border-bottom:1px solid #334155">DataPilot Tax</a></p>
   </div>
 </footer>
 
 <script>
-function switchTab(tab) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelector(`button[onclick="switchTab('${tab}')"]`).classList.add('active');
-  document.getElementById('tab-human').style.display = tab === 'human' ? 'block' : 'none';
-  document.getElementById('tab-ai').style.display = tab === 'ai' ? 'block' : 'none';
-}
-function copyCode(btn) {
-  const block = btn.parentElement;
-  const text = block.innerText.replace('📋','').trim();
-  navigator.clipboard.writeText(text);
-  btn.textContent = '✓'; setTimeout(() => btn.textContent = '📋', 1500);
-}
-document.querySelectorAll('.nav-links a').forEach(a => {
-  a.addEventListener('click', () => document.querySelector('.nav-links').classList.remove('open'));
-});
-</script>
+(function(){
+  // Tabs
+  document.querySelector('#usage-tabs').addEventListener('click', function(e){
+    var btn = e.target.closest('.tab'); if (!btn) return;
+    this.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active') });
+    btn.classList.add('active');
+    document.getElementById('tab-human').style.display = btn.dataset.tab === 'human' ? 'block' : 'none';
+    document.getElementById('tab-ai').style.display = btn.dataset.tab === 'ai' ? 'block' : 'none';
+  });
 
+  // Close mobile nav on link click
+  document.querySelectorAll('.nav-links a').forEach(function(a){
+    a.addEventListener('click', function(){ document.querySelector('.nav-links').classList.remove('open') });
+  });
+})();
+
+function copyCode(btn){
+  var text = btn.parentElement.innerText.replace(/[📋✓]/g,'').trim();
+  navigator.clipboard.writeText(text).then(function(){
+    btn.textContent = '✓'; setTimeout(function(){ btn.textContent = '📋' }, 1500);
+  });
+}
+</script>
 </body>
 </html>

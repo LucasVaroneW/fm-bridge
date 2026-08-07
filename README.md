@@ -7,12 +7,17 @@ plano. Un solo motor Rust con dos puertas: **humana** (VS Code) y **IA** (MCP).
 
 ```
                 ┌─ fm-bridge json ──▶ Extensión VS Code   (lectura/escritura,
-                │                       diagnostics, autocomplete)
+                │                       diagnostics, autocomplete, datos vivos)
 fm-bridge.exe ──┤
-  (motor Rust)  └─ fm-bridge mcp  ──▶ Cliente MCP           (tools para IA:
-                                      (Claude, OpenCode…)    read, validate,
-                                                            inspect, audit…)
+  (motor Rust)  ├─ fm-bridge mcp  ──▶ Cliente MCP           (tools para IA:
+                │                     (Claude, OpenCode…)    read, validate,
+                │                                            inspect, audit…)
+                └─ fm-bridge-odbc ──▶ Base FileMaker viva  (datos reales por
+                   (satélite ODBC)                           ODBC, sólo lectura)
 ```
+
+Las dos puertas son independientes: la extensión funciona sin ninguna IA, y el
+MCP funciona sin VS Code. Ver [docs/DATA.md](docs/DATA.md) para datos vivos.
 
 El binario (`src/`) es la única fuente de verdad. La extensión y el MCP son
 clientes finos que le hablan por stdin/stdout (JSON) — nunca duplican lógica.

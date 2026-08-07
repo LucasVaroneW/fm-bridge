@@ -57,7 +57,36 @@ En el servidor, por cada archivo `.fmp12`:
 Ese conjunto de privilegios es la frontera de seguridad real: fm-bridge no
 puede concederse nada. **Usá una cuenta de solo lectura.**
 
+## Uso desde VS Code (sin terminal, sin IA)
+
+Esta es la vía normal. Tres comandos en la paleta (`Ctrl+Shift+P`):
+
+### `fm-bridge: Connect to a database (live data)…`
+
+Un asistente que pregunta servidor, archivo, cuenta y contraseña, te deja elegir
+el export XML de esa misma base, y al terminar **prueba la conexión solo**.
+Escribe el `.fm-bridge.toml` y guarda la clave donde corresponde. No hay que
+tocar ningún archivo a mano.
+
+Si ya hay un `.fm-bridge.toml`, agrega la base nueva sin pisar lo que había.
+
+### `fm-bridge: Run a query on live data…`
+
+Elegís la base, escribís un `SELECT` y los resultados se abren en una pestaña
+como tabla alineada, con el tiempo que tardó y el aviso si quedó truncado.
+Sólo lectura: una escritura se rechaza antes de salir.
+
+### `fm-bridge: Diagnose live data connection`
+
+El `doctor`. Si algo falla, muestra el primer problema con el arreglo concreto —
+no un `IM002`. El detalle completo queda en Output ▸ **fm-bridge**.
+
+> Nada de esto necesita una IA. El MCP y estos comandos son **dos puertas al
+> mismo motor**: podés usar una, la otra, o las dos.
+
 ## `.fm-bridge.toml`
+
+Lo escribe el asistente; esta sección es para entenderlo o editarlo a mano.
 
 Va en la raíz del proyecto de VS Code. Se busca hacia arriba desde el directorio
 actual, así que funciona desde cualquier subcarpeta.
@@ -99,7 +128,8 @@ ponés una clave `password`, la carga falla a propósito.
 
 ## Contraseñas
 
-Por orden de precedencia:
+El asistente de VS Code ya se encarga. Si lo hacés a mano, por orden de
+precedencia:
 
 1. Variable de entorno `FMBRIDGE_PASSWORD_<SERVIDOR>` (mayúsculas, lo que no sea
    alfanumérico pasa a `_`). Ej.: `FMBRIDGE_PASSWORD_PRODUCCION`.
@@ -107,11 +137,16 @@ Por orden de precedencia:
    configuración del usuario (`%APPDATA%\fm-bridge\credentials.toml` en
    Windows), fuera de cualquier proyecto.
 
+La contraseña se pasa siempre **por stdin**, nunca como argumento: un argumento
+queda a la vista en la lista de procesos del sistema.
+
 > El archivo de credenciales es texto plano, legible por tu usuario. Es una
 > mejora frente a tener la clave en el repo, no una bóveda: usá una cuenta de
 > solo lectura. (Guardarla en el llavero del sistema es el siguiente paso.)
 
 ## CLI
+
+Lo mismo desde la terminal, para automatizar o depurar:
 
 ```bash
 fm-bridge data list                     # bases configuradas

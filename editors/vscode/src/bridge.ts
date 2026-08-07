@@ -33,6 +33,8 @@ export interface BridgeResponse {
   error_line?: number;
   /** All validation errors found by the linter, when present. */
   errors?: BridgeError[];
+  /** Structured payload for commands that return more than text. */
+  data?: unknown;
 }
 
 /** One entry of the step catalog (see `StepInfo` in src/steps.rs). */
@@ -156,7 +158,7 @@ export function resetBinaryCache(): void {
   cachedAutodetect = undefined;
 }
 
-function spawnBinary(args: string[], stdin?: string): Promise<string> {
+export function spawnBinary(args: string[], stdin?: string): Promise<string> {
   const bin = resolveBinaryPath();
   if (!bin) {
     return Promise.reject(new BinaryNotFoundError());
@@ -193,7 +195,9 @@ function spawnBinary(args: string[], stdin?: string): Promise<string> {
 }
 
 /** Run a JSON-mode command and parse the response. */
-async function runJson(command: Record<string, unknown>): Promise<BridgeResponse> {
+export async function runJson(
+  command: Record<string, unknown>,
+): Promise<BridgeResponse> {
   const out = await spawnBinary(["json"], JSON.stringify(command));
   try {
     return JSON.parse(out) as BridgeResponse;
@@ -208,7 +212,9 @@ export async function readClipboard(): Promise<BridgeResponse> {
 }
 
 /** Encode the given text and write it to the FileMaker clipboard. */
-export async function writeClipboard(scriptText: string): Promise<BridgeResponse> {
+export async function writeClipboard(
+  scriptText: string,
+): Promise<BridgeResponse> {
   return runJson({ command: "write", script_text: scriptText });
 }
 
@@ -234,7 +240,11 @@ export async function resolveIds(
   scriptText: string,
   xmlPath: string,
 ): Promise<BridgeResponse> {
-  return runJson({ command: "resolve_ids", script_text: scriptText, xml_path: xmlPath });
+  return runJson({
+    command: "resolve_ids",
+    script_text: scriptText,
+    xml_path: xmlPath,
+  });
 }
 
 /** Fetch the binary's version (also used as a reachability probe). */
@@ -248,7 +258,9 @@ export async function steps(): Promise<StepInfo[]> {
   try {
     return JSON.parse(out) as StepInfo[];
   } catch {
-    throw new Error(`Unexpected step catalog from fm-bridge: ${out.slice(0, 200)}`);
+    throw new Error(
+      `Unexpected step catalog from fm-bridge: ${out.slice(0, 200)}`,
+    );
   }
 }
 

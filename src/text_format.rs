@@ -2818,7 +2818,14 @@ struct ParsedDialog {
 fn parse_dialog_content(content: Option<&str>) -> ParsedDialog {
     let content = match content {
         Some(c) => c,
-        None => return ParsedDialog { title: None, message: None, buttons: Vec::new(), input_fields: Vec::new() },
+        None => {
+            return ParsedDialog {
+                title: None,
+                message: None,
+                buttons: Vec::new(),
+                input_fields: Vec::new(),
+            };
+        }
     };
 
     let mut title = None;
@@ -2867,7 +2874,12 @@ fn parse_dialog_content(content: Option<&str>) -> ParsedDialog {
     // Filter out empty field names (third dummy input)
     input_fields.retain(|f| !f.field_name.is_empty());
 
-    ParsedDialog { title, message, buttons, input_fields }
+    ParsedDialog {
+        title,
+        message,
+        buttons,
+        input_fields,
+    }
 }
 
 /// Try to match a key (case-insensitive, trims colon). Returns the value after the colon.

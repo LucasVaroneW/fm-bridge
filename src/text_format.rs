@@ -253,7 +253,7 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
             // The name is a FM calc expression (literal "X" or any expr like $var),
             // so show it verbatim. Mode keyword (Current/First/...) shown when no name.
             if let Some(name) = &step.var_name {
-                line.push_str(&format!(" [{}]", name));
+                line.push_str(&format!(" [{}]", name.trim()));
             } else if let Some(mode) = &step.window_mode {
                 line.push_str(&format!(" [{}]", mode));
             }

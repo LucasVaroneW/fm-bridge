@@ -69,9 +69,9 @@ pub struct ScriptStep {
     // For Perform Script (PerformScript shape): target script + parent mode.
     pub script_target_name: Option<String>,
     pub script_target_id: Option<String>,
-    /// External file the target script lives in, for cross-file Perform Script
-    /// (`<DataSourceReference>` in FMSaveAsXML). `None` = same file. Decode-only
-    /// (inspect): never set on the clipboard read/write path.
+    /// External file the target script lives in, for cross-file Perform Script.
+    /// `None` = same file. FMSaveAsXML uses `<DataSourceReference>`; the clipboard
+    /// (XMSS) form uses `<FileReference name="...">`. Both feed this field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub script_target_file: Option<String>,
     pub current_script_mode: Option<String>,
@@ -505,10 +505,21 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             }
                         }
                     }
-                    // External file of a cross-file Perform Script target. Emitted by
-                    // the FMSaveAsXML→XMSS transform from <DataSourceReference>; never
-                    // present in clipboard XMSS, so it's inert on the read/write path.
+                    // External file of a cross-file Perform Script target, emitted by
+                    // the FMSaveAsXML→XMSS transform from <DataSourceReference>.
                     b"DataSource" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"name" {
+                                parser.script_target_file =
+                                    String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    // Same thing, real clipboard shape: <FileReference id name>
+                    // <UniversalPathList>file:Name</UniversalPathList></FileReference>.
+                    // The path list itself isn't preserved — FM resolves the link by
+                    // name/id on paste, same as DataSource above.
+                    b"FileReference" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"name" {
                                 parser.script_target_file =
@@ -1440,6 +1451,17 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                 xml.push_str(&format!(
                     "<CurrentScript value=\"{}\"></CurrentScript>",
                     xml_escape(mode)
+                ));
+            }
+            // Cross-file target: FM re-resolves the external file by name/path on
+            // paste, so a synthetic id="1" (this step's own FileReference, not a
+            // document-wide catalog) round-trips fine even though we don't preserve
+            // the original numeric id or the exact UniversalPathList path.
+            if let Some(file) = &step.script_target_file {
+                xml.push_str(&format!(
+                    "<FileReference id=\"1\" name=\"{}\"><UniversalPathList>file:{}</UniversalPathList></FileReference>",
+                    xml_escape(file),
+                    xml_escape(file)
                 ));
             }
             if let Some(calc) = &step.calculation {

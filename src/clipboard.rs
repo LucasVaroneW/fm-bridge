@@ -7,7 +7,22 @@
 pub fn read_fm_clipboard() -> Result<Vec<u8>, String> {
     use clipboard_win::raw::{get_clipboard_data, register_format, size};
 
-    const FM_FORMATS: &[&str] = &["Mac-XMSS", "XMSS", "XMFN", "XMSC", "XMFD", "XMTB", "XMLO"];
+    // FileMaker on Windows registers its clipboard formats with the `Mac-`
+    // prefix (that is what a real copy from Manage Database publishes); the
+    // bare names are kept as a fallback for older versions. Every type needs
+    // both spellings — listing only `Mac-XMSS` made a copied table look like
+    // an empty clipboard.
+    const FM_FORMATS: &[&str] = &[
+        "Mac-XMSS", // script steps
+        "Mac-XMSC", // scripts
+        "Mac-XMTB", // tables
+        "Mac-XMFD", // fields
+        "Mac-XMFN", // custom functions
+        "Mac-XMVL", // value lists
+        "Mac-XMLO", // layout objects (fp7)
+        "Mac-XML2", // layout objects (fmp12)
+        "XMSS", "XMSC", "XMTB", "XMFD", "XMFN", "XMVL", "XMLO", "XML2",
+    ];
 
     let _clip = clipboard_win::Clipboard::new_attempts(30)
         .map_err(|e| format!("Cannot open clipboard: {:?}", e))?;

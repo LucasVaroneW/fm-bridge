@@ -494,6 +494,14 @@
         </div>
       </div>
       <div class="card card-purple" style="margin-bottom:1.5rem">
+        <h3>📦 Save a table (or any object)</h3>
+        <p>FileMaker copies <strong>tables, fields, custom functions and value lists</strong> through the same clipboard as scripts. The engine decodes script steps to <code>.fmscript</code>; everything else it captures verbatim, tells you exactly what it was, and never reports it as an empty clipboard.</p>
+        <div class="code-block">
+          <span style="color:#6272a4">Ctrl+Shift+P →</span> <span style="color:#818cf8">fm-bridge: Save FileMaker object from clipboard</span><br>
+          <span style="color:#6272a4">→</span> <span style="color:#4ade80">3 tables with 589 fields: Pedidos, PedidosItems, PedidosItemsFechasJT</span>
+        </div>
+      </div>
+      <div class="card">
         <h3>✏️ Edit in VS Code</h3>
         <ul style="color:#94a3b8;padding-left:1.5rem;margin:.5rem 0;line-height:1.8;font-size:.92rem">
           <li><span class="highlight">Syntax highlighting</span> — steps, variables, strings, comments, numbers</li>
@@ -634,6 +642,8 @@
       <tr><td><code>json</code></td><td>JSON protocol over stdin/stdout</td></tr>
       <tr><td><code>mcp</code></td><td>MCP server (JSON-RPC over stdio)</td></tr>
       <tr><td><code>steps</code></td><td>Step catalog as JSON</td></tr>
+      <tr><td><code>dump-clipboard [file]</code></td><td>Save any FM object from the clipboard (table, fields…)</td></tr>
+      <tr><td><code>census &lt;xml&gt;</code></td><td>Inventory an export: every element path and attribute</td></tr>
       <tr><td><code>debug</code></td><td>Dump debug_raw.xml and debug_built.xml</td></tr>
       <tr><td><code>inspect &lt;xml&gt; [dir]</code></td><td>Parse FMSaveAsXML → navigable directory</td></tr>
       <tr><td><code>slice &lt;out&gt; &lt;slice&gt; &lt;layouts…&gt;</code></td><td>Focused slice by layout</td></tr>

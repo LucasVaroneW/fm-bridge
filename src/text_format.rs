@@ -1869,7 +1869,8 @@ fn build_step_from_name(
             }
         }
         Some(StepShape::PerformScript) => {
-            let (script_name, script_id, calc) = parse_perform_script_content(content);
+            let (script_name, script_id, script_file, calc) =
+                parse_perform_script_content(content);
             ScriptStep {
                 name: name.to_string(),
                 enable: enabled,
@@ -1893,7 +1894,7 @@ fn build_step_from_name(
                 field_numeric_id: None,
                 script_target_name: script_name,
                 script_target_id: script_id,
-                script_target_file: None,
+                script_target_file: script_file,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2977,27 +2978,29 @@ fn parse_goto_record_content(
 }
 
 /// Parse Perform Script content. Recognized forms:
-///   `"ScriptName"`           → script only, no param
-///   `"ScriptName"; param`    → script + param
-///   `param`                  → param only (legacy, when no script target was set)
+///   `"ScriptName"`                    → script only, no param
+///   `"ScriptName" from "File"`        → cross-file target
+///   `"ScriptName"; param`             → script + param
+///   `"ScriptName" from "File"; param` → cross-file + param
+///   `param`                           → param only (legacy, when no script target was set)
 /// The script name is detected by a leading `"` and closes at the matching `"`.
 fn parse_perform_script_content(
     content: Option<&str>,
-) -> (Option<String>, Option<String>, Option<String>) {
+) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
     let content = match content {
         Some(c) => c.trim(),
-        None => return (None, None, None),
+        None => return (None, None, None, None),
     };
 
     if !content.starts_with('"') {
         // No script target — entire content is the parameter calc.
-        return (None, None, Some(content.to_string()));
+        return (None, None, None, Some(content.to_string()));
     }
 
     let after_open = &content[1..];
     let close_pos = match after_open.find('"') {
         Some(p) => p,
-        None => return (None, None, Some(content.to_string())),
+        None => return (None, None, None, Some(content.to_string())),
     };
     let script_name = after_open[..close_pos].to_string();
     let rest = after_open[close_pos + 1..].trim_start();
@@ -3020,6 +3023,22 @@ fn parse_perform_script_content(
         (None, rest)
     };
 
+    // Optional `from "File"` — the external file the target script lives in.
+    let (script_file, rest) = if let Some(after_from) = rest
+        .strip_prefix("from ")
+        .and_then(|r| r.trim_start().strip_prefix('"'))
+    {
+        match after_from.find('"') {
+            Some(p) => (
+                Some(after_from[..p].to_string()),
+                after_from[p + 1..].trim_start(),
+            ),
+            None => (None, rest),
+        }
+    } else {
+        (None, rest)
+    };
+
     let calc = if let Some(stripped) = rest.strip_prefix(';') {
         let s = stripped.trim();
         if s.is_empty() {
@@ -3033,7 +3052,7 @@ fn parse_perform_script_content(
         Some(rest.to_string())
     };
 
-    (Some(script_name), script_id, calc)
+    (Some(script_name), script_id, script_file, calc)
 }
 
 /// Parse Set Field content: `Table::Field #id; calc` or any subset.

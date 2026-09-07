@@ -142,6 +142,91 @@ usuario que lo prueba.
    **mapa de nombres explícito y reversible**, emitido como archivo, porque el DDL
    y el volcado de datos tienen que coincidir exactamente.
 
+## El formato `.fmtable` — hecho
+
+Primera pieza construida de la fase 4: el codec **portapapeles ↔ texto** en
+`src/fmtable.rs`, con validador.
+
+```
+table PedidosItems
+  lang    Spanish
+
+field PedIte_Ref
+  type       number
+  comment    Ref. Núm.
+  auto       serial next=1068893 increment=1 generate=OnCreation
+  validate   not-empty unique
+  message    Verifique que la referencia no esté duplicada.
+  index      all
+  lang       Spanish_Traditional
+
+field PedIte_cRef
+  type       text
+  calc       stored
+  formula
+    | "PedIte - " & PedIte_Ref
+  index      minimal
+```
+
+Decisiones que vale la pena entender:
+
+- **Una clave por línea.** Fácil de leer, fácil de diffear en un PR, y sobre todo
+  fácil de señalar: el linter puede apuntar al número de línea exacto, que es lo
+  que la extensión necesita para subrayar.
+- **Bloques con `|`.** Un cálculo de FileMaker puede tener líneas en blanco,
+  indentación y cualquier cosa. Prefijar cada línea quita toda ambigüedad sobre
+  dónde termina el bloque.
+- **Idioma de índice por defecto en la tabla.** FileMaker guarda un
+  `indexLanguage` en cada campo, indexado o no. Repetirlo 385 veces ahogaría el
+  archivo, así que el valor mayoritario sube a la tabla y solo el que difiere lo
+  dice. `lang -` es "sin idioma", distinto de "el de la tabla".
+- **La auto-entrada es un enum, no un puñado de banderas.** El XML tiene cuatro
+  booleanos independientes que pueden describir estados que FileMaker no permite;
+  el modelo solo representa lo que FileMaker aplica de verdad.
+- **`binary`, no `container`.** El XML del portapapeles llama `Binary` al
+  contenedor. Se aceptan las dos grafías al leer; sale `binary`.
+
+Medido contra un archivo real de dos tablas y 385 campos: **279 KB de XML → 47 KB
+de texto**, 5,9× menos. Ese factor es el producto (ver `VISION.md`).
+
+### Fidelidad: lo que NO round-trippea, y por qué
+
+**Un round-trip byte a byte no es alcanzable acá, y fingir que sí sería la
+pérdida silenciosa que este proyecto existe para evitar.** FileMaker deja
+**payloads muertos** en su XML: un campo con `constant="False"` sigue llevando su
+`<ConstantData>`, y uno con `calculation="False"` puede arrastrar una
+`<Calculation>` entera de una opción que se apagó hace años.
+
+`.fmtable` guarda **lo que FileMaker aplica**, y todo lo demás se cuenta y se
+nombra en el libro de cuentas. En el archivo real de prueba: **96 elementos no
+convertidos**, todos listados con su campo y su motivo. Salen por stderr en el
+CLI y como aviso con detalle en la extensión.
+
+Lo que sí está garantizado, y hay un test que lo comprueba campo por campo sobre
+los 385 reales: **XML → texto → XML → modelo** devuelve exactamente el mismo
+modelo. O sea, el significado se conserva; los bytes no.
+
+### Deuda conocida
+
+- **Los ids de campo no se preservan.** `encode_xmtb` numera 1..N. Al pegar,
+  FileMaker reasigna igual, así que no afecta el pegado — pero **sí bloquea la
+  detección de renames por id** de la fase 4c. Hay que llevarlos en el texto
+  antes de construir el `diff`.
+- **`Calculation table=`** vuelve como el nombre de la tabla cuando el texto no
+  trae `context`. Correcto en el caso normal (la TO se llama como la tabla), mal
+  cuando no.
+- **Sin listas de valores.** `Validation valuelist` se lee pero no se modela; una
+  validación por lista se pierde. Es el mismo gap que en `inspect`.
+- **Sin campos de sumario.** `calc summary` se parsea pero no lleva la definición
+  del sumario.
+- **Sin `maxLength`, ni validación por cálculo, ni furigana.**
+- **Pegar sigue siendo sólo alta.** FileMaker crea `CLIENTES 2` si la tabla ya
+  existe; falta el pre-flight que avise antes de tocar el portapapeles.
+- **Sin probar en macOS.** El tipo de portapapeles ahora se deriva del contenido
+  en las dos plataformas (antes el sniffer de macOS era un stub que siempre decía
+  "paso de script", así que pegar una tabla habría fallado ahí también), pero no
+  hay un Mac donde comprobarlo.
+
 ## B — Copiar varias tablas juntas
 
 **No es comodidad, es corrección.** Si se pega `FACTURAS` sin `LINEAS`, cualquier

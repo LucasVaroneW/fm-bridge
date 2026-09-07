@@ -38,6 +38,17 @@
           ".fmscript"
         ],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "fmtable",
+        "aliases": [
+          "FileMaker Table",
+          "fmtable"
+        ],
+        "extensions": [
+          ".fmtable"
+        ],
+        "configuration": "./language-configuration-fmtable.json"
       }
     ],
     "grammars": [
@@ -45,6 +56,11 @@
         "language": "fmscript",
         "scopeName": "source.fmscript",
         "path": "./syntaxes/fmscript.tmLanguage.json"
+      },
+      {
+        "language": "fmtable",
+        "scopeName": "source.fmtable",
+        "path": "./syntaxes/fmtable.tmLanguage.json"
       }
     ],
     "snippets": [

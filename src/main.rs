@@ -1623,12 +1623,12 @@ fn run_encode_table_cli(args: &[String]) -> Result<(), String> {
             clipboard::write_fm_clipboard(xml.as_bytes())?;
             if fields_only {
                 println!(
-                    "{} campo(s) en el portapapeles — pegá en Gestionar → Base de datos →                      pestaña Campos de la tabla destino.",
+                    "{} campo(s) en el portapapeles — pegá en Gestionar → Base de datos → pestaña Campos de la tabla destino.",
                     fields
                 );
             } else {
                 println!(
-                    "{} tabla(s), {} campo(s) en el portapapeles — pegá en Gestionar →                      Base de datos → pestaña Tablas.",
+                    "{} tabla(s), {} campo(s) en el portapapeles — pegá en Gestionar → Base de datos → pestaña Tablas.",
                     tables.len(),
                     fields
                 );

@@ -227,8 +227,18 @@ modelo. O sea, el significado se conserva; los bytes no.
 - **Sin campos de sumario.** `calc summary` se parsea pero no lleva la definición
   del sumario.
 - **Sin `maxLength`, ni validación por cálculo, ni furigana.**
-- **Pegar sigue siendo sólo alta.** FileMaker crea `CLIENTES 2` si la tabla ya
-  existe; falta el pre-flight que avise antes de tocar el portapapeles.
+- **Pegar una tabla sigue siendo sólo alta.** FileMaker crea `CLIENTES 2` si la
+  tabla ya existe, en silencio; falta el pre-flight que avise antes de tocar el
+  portapapeles. Para la segunda vuelta y las siguientes está
+  `encode-table --fields …`, que publica **campos sueltos** (`XMFD`) para pegar
+  en la pestaña Campos de una tabla que ya existe.
+- **Un cálculo que referencia campos de la propia tabla no sobrevive al primer
+  pegado.** FileMaker guarda `<Field Missing>` en su lugar: al pegar, la tabla y
+  su table occurrence se están creando en ese mismo momento y no hay contra qué
+  resolver la referencia. Se arregla a mano en Gestionar → Base de datos, o
+  pegando los campos calculados en una segunda pasada, cuando la tabla ya
+  existe. (Y ojo: eso destapa el #64, donde `inspect` inventa un campo fantasma
+  al leer un cálculo con `<Field Missing>`.)
 - **Sin probar en macOS.** El tipo de portapapeles ahora se deriva del contenido
   en las dos plataformas (antes el sniffer de macOS era un stub que siempre decía
   "paso de script", así que pegar una tabla habría fallado ahí también), pero no

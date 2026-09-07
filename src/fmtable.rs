@@ -74,6 +74,9 @@ pub struct Field {
     /// table=`). Carried so encoding can put it back.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub calc_context: String,
+    /// `AutoEnter allowEditing` — FileMaker sets this to False on system
+    /// stamps, which is what makes them read-only in the UI. Defaults to true.
+    pub allow_editing: bool,
 }
 
 /// Auto-entry. FileMaker allows exactly one of these to be active at a time,
@@ -95,6 +98,16 @@ pub enum AutoEnter {
         formula: String,
         /// `alwaysEvaluate` — re-evaluate even when the field has a value.
         always: bool,
+    },
+    /// Creation/modification stamps. FileMaker puts these in the `value`
+    /// attribute of `<AutoEnter>`, with no payload element anywhere — which is
+    /// why the first version of this decoder lost them without noticing.
+    /// One of CreationDate, CreationTime, CreationTimeStamp,
+    /// CreationAccountName, CreationUserName, ModificationDate,
+    /// ModificationTime, ModificationTimeStamp, ModificationAccountName,
+    /// ModificationUserName.
+    Stamp {
+        value: String,
     },
     Lookup {
         /// Table occurrence the lookup starts from.
@@ -161,6 +174,7 @@ pub fn decode_xmtb(xml: &str) -> Result<(Vec<Table>, Ledger), String> {
     // closes — the payload elements arrive after the attributes.
     let mut ae_flags = (false, false, false, false); // constant, calc, lookup, serial-present
     let mut ae_always = false;
+    let mut ae_value = String::new();
     let mut ae_constant = String::new();
     let mut ae_calc = String::new();
     let mut ae_serial: Option<(String, String, String)> = None;
@@ -196,10 +210,12 @@ pub fn decode_xmtb(xml: &str) -> Result<(Vec<Table>, Ledger), String> {
                             field_type: attr("fieldType"),
                             index: "none".to_string(),
                             repetitions: 1,
+                            allow_editing: true,
                             ..Default::default()
                         });
                         ae_flags = (false, false, false, false);
                         ae_always = false;
+                        ae_value.clear();
                         ae_constant.clear();
                         ae_calc.clear();
                         ae_serial = None;
@@ -207,6 +223,10 @@ pub fn decode_xmtb(xml: &str) -> Result<(Vec<Table>, Ledger), String> {
                         validation = Validation::default();
                     }
                     ("Field", "AutoEnter") => {
+                        ae_value = attr("value");
+                        if let Some(f) = field.as_mut() {
+                            f.allow_editing = attr("allowEditing") != "False";
+                        }
                         ae_flags = (
                             attr("constant") == "True",
                             attr("calculation") == "True",
@@ -300,7 +320,12 @@ pub fn decode_xmtb(xml: &str) -> Result<(Vec<Table>, Ledger), String> {
                             // applies, and account for the payloads that belong
                             // to switched-off options.
                             let (is_const, is_calc, is_lookup, has_serial) = ae_flags;
-                            f.auto = if has_serial {
+                            let is_stamp = !ae_value.is_empty() && ae_value != "ConstantData";
+                            f.auto = if is_stamp {
+                                Some(AutoEnter::Stamp {
+                                    value: ae_value.clone(),
+                                })
+                            } else if has_serial {
                                 ae_serial.take().map(|(next, increment, generate)| {
                                     AutoEnter::Serial {
                                         next,
@@ -485,6 +510,9 @@ pub fn format_tables(tables: &[Table]) -> String {
                 Some(AutoEnter::Constant { value }) => {
                     kv(&mut out, "auto", &format!("constant {}", value))
                 }
+                Some(AutoEnter::Stamp { value }) => {
+                    kv(&mut out, "auto", &format!("stamp {}", value))
+                }
                 Some(AutoEnter::Calculation { formula, always }) => {
                     kv(
                         &mut out,
@@ -538,6 +566,9 @@ pub fn format_tables(tables: &[Table]) -> String {
                 if !v.message.is_empty() {
                     kv(&mut out, "message", &v.message);
                 }
+            }
+            if !f.allow_editing {
+                kv(&mut out, "editable", "false");
             }
             if f.global {
                 kv(&mut out, "global", "true");
@@ -734,6 +765,7 @@ pub fn parse_text(text: &str) -> Result<Vec<Table>, Vec<ParseError>> {
                     index: "none".to_string(),
                     index_language: table_lang.clone(),
                     repetitions: 1,
+                    allow_editing: true,
                     ..Default::default()
                 });
             }
@@ -814,6 +846,7 @@ pub fn parse_text(text: &str) -> Result<Vec<Table>, Vec<ParseError>> {
                         }
                     }
                     "context" => f.calc_context = value.to_string(),
+                    "editable" => f.allow_editing = value != "false",
                     "global" => f.global = value != "false",
                     "repetitions" => match value.parse::<u32>() {
                         Ok(n) if n >= 1 => f.repetitions = n,
@@ -859,7 +892,7 @@ pub fn parse_text(text: &str) -> Result<Vec<Table>, Vec<ParseError>> {
                         &mut errors,
                         no,
                         format!(
-                            "Clave desconocida `{}`. Válidas: type, calc, comment, formula, context, auto, auto-formula, validate, message, index, lang, global, repetitions.",
+                            "Clave desconocida `{}`. Válidas: type, calc, comment, formula, context, auto, auto-formula, validate, message, index, lang, global, editable, repetitions.",
                             other
                         ),
                     ),
@@ -947,6 +980,21 @@ fn normalize_type(v: &str) -> Option<String> {
 /// `serial next=… increment=… generate=…` | `constant <v>` | `lookup from
 /// TO::field …` | `calc [always]` (the formula arrives as a block, so this
 /// returns `Ok(None)`).
+/// The creation/modification stamps FileMaker offers. Spelled exactly as the
+/// XML spells them — `CreationTimeStamp` really does capitalise that S.
+const STAMPS: &[&str] = &[
+    "CreationDate",
+    "CreationTime",
+    "CreationTimeStamp",
+    "CreationAccountName",
+    "CreationUserName",
+    "ModificationDate",
+    "ModificationTime",
+    "ModificationTimeStamp",
+    "ModificationAccountName",
+    "ModificationUserName",
+];
+
 fn parse_auto(value: &str) -> Result<Option<AutoEnter>, String> {
     let mut words = value.split_whitespace();
     match words.next() {
@@ -972,6 +1020,19 @@ fn parse_auto(value: &str) -> Result<Option<AutoEnter>, String> {
             value: value["constant".len()..].trim().to_string(),
         })),
         Some("calc") => Ok(None),
+        Some("stamp") => {
+            let v = value["stamp".len()..].trim();
+            if !STAMPS.contains(&v) {
+                return Err(format!(
+                    "`auto stamp {}` no existe. Válidos: {}.",
+                    v,
+                    STAMPS.join(", ")
+                ));
+            }
+            Ok(Some(AutoEnter::Stamp {
+                value: v.to_string(),
+            }))
+        }
         Some("lookup") => {
             let rest: Vec<&str> = words.collect();
             if rest.first() != Some(&"from") {
@@ -998,10 +1059,10 @@ fn parse_auto(value: &str) -> Result<Option<AutoEnter>, String> {
             }))
         }
         Some(other) => Err(format!(
-            "`auto {}` no es válido. Usá serial, constant, calc o lookup.",
+            "`auto {}` no es válido. Usá serial, constant, stamp, calc o lookup.",
             other
         )),
-        None => Err("`auto` necesita un tipo: serial, constant, calc o lookup.".to_string()),
+        None => Err("`auto` necesita un tipo: serial, constant, stamp, calc o lookup.".to_string()),
     }
 }
 
@@ -1055,9 +1116,18 @@ pub fn encode_xmtb(tables: &[Table]) -> String {
                 _ => (false, false, false),
             };
             let always = matches!(&f.auto, Some(AutoEnter::Calculation { always: true, .. }));
+            let ae_value = match &f.auto {
+                Some(AutoEnter::Stamp { value }) => value.as_str(),
+                _ => "ConstantData",
+            };
             out.push_str(&format!(
-                "<AutoEnter allowEditing=\"True\" constant=\"{}\" furigana=\"False\" lookup=\"{}\" calculation=\"{}\" alwaysEvaluate=\"{}\">",
-                bool_str(constant), bool_str(lookup), bool_str(calculation), bool_str(always)
+                "<AutoEnter allowEditing=\"{}\" value=\"{}\" constant=\"{}\" furigana=\"False\" lookup=\"{}\" calculation=\"{}\" alwaysEvaluate=\"{}\">",
+                bool_str(f.allow_editing),
+                xml_escape(ae_value),
+                bool_str(constant),
+                bool_str(lookup),
+                bool_str(calculation),
+                bool_str(always)
             ));
             match &f.auto {
                 Some(AutoEnter::Serial {
@@ -1079,6 +1149,8 @@ pub fn encode_xmtb(tables: &[Table]) -> String {
                     xml_escape(&ctx),
                     formula
                 )),
+                // The stamp lives in the attribute above; there is no payload.
+                Some(AutoEnter::Stamp { .. }) => {}
                 Some(AutoEnter::Lookup {
                     from_table,
                     from_field,
@@ -1238,6 +1310,59 @@ mod tests {
 
         let back = parse_text(&text).unwrap();
         assert_eq!(back[0].fields[0].formula, tables[0].fields[0].formula);
+    }
+
+    #[test]
+    fn a_creation_stamp_is_not_lost() {
+        // Regression. FileMaker puts these in the `value` attribute with no
+        // payload element, so the first decoder saw an AutoEnter with every
+        // flag False and concluded "no auto-entry" — losing the stamp with no
+        // trace in the ledger either. Exactly the failure principle 5 forbids.
+        let xml = r#"<fmxmlsnippet type="FMObjectList"><BaseTable comment="" name="T"><Field id="1" dataType="TimeStamp" fieldType="Normal" name="FeHoCreacion"><Comment></Comment><AutoEnter allowEditing="False" value="CreationTimeStamp" constant="False" furigana="False" lookup="False" calculation="False"><ConstantData></ConstantData></AutoEnter><Storage index="None" global="False" maxRepetition="1"></Storage></Field></BaseTable></fmxmlsnippet>"#;
+        let (tables, _) = decode_xmtb(xml).unwrap();
+        let f = &tables[0].fields[0];
+        assert_eq!(
+            f.auto,
+            Some(AutoEnter::Stamp {
+                value: "CreationTimeStamp".to_string()
+            })
+        );
+        assert!(!f.allow_editing, "un sello de sistema no es editable");
+
+        let text = format_tables(&tables);
+        assert!(
+            text.contains("auto       stamp CreationTimeStamp"),
+            "{}",
+            text
+        );
+        assert!(text.contains("editable   false"), "{}", text);
+
+        let back = parse_text(&text).unwrap();
+        assert_eq!(back[0].fields[0], *f);
+
+        // And it must survive back into XML as an attribute, not a payload.
+        let again = encode_xmtb(&back);
+        assert!(again.contains(r#"value="CreationTimeStamp""#), "{}", again);
+        let (round, _) = decode_xmtb(&again).unwrap();
+        assert_eq!(round[0].fields[0], *f);
+    }
+
+    #[test]
+    fn an_invented_stamp_is_rejected_with_the_real_list() {
+        let e = lint(
+            "table T
+
+field a
+  type timestamp
+  auto stamp CreationTimestamp
+",
+        );
+        assert_eq!(e.len(), 1);
+        assert!(
+            e[0].message.contains("CreationTimeStamp"),
+            "{}",
+            e[0].message
+        );
     }
 
     #[test]

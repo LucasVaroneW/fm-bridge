@@ -59,7 +59,9 @@ struct Command {
     table: Option<String>,
     #[serde(default)]
     layout: Option<String>,
-    /// get_table: return only these fields' full definitions (size control).
+    /// Two uses, both "only these fields": for `get_table`, which definitions
+    /// to return; for `write` with `kind: "table"`, which fields to publish as
+    /// a loose-fields snippet instead of the whole table.
     #[serde(default)]
     fields: Option<Vec<String>>,
     /// get_table: one compact line per field instead of full definitions.
@@ -309,7 +311,13 @@ fn handle_command(cmd: &Command) -> Response {
             if is_table_text(cmd.kind.as_deref(), &script_text) {
                 return match fmtable::parse_text(&script_text) {
                     Ok(tables) => {
-                        let xml = fmtable::encode_xmtb(&tables);
+                        let xml = match &cmd.fields {
+                            Some(names) => match fmtable::encode_fields(&tables, Some(names)) {
+                                Ok(x) => x,
+                                Err(e) => return Response::error(e),
+                            },
+                            None => fmtable::encode_xmtb(&tables),
+                        };
                         match clipboard::write_fm_clipboard(xml.as_bytes()) {
                             Ok(()) => Response::ok(),
                             Err(e) => Response::error(e),
@@ -1554,25 +1562,77 @@ fn run_decode_table_cli(args: &[String]) -> Result<(), String> {
 /// output file it writes the snippet to the clipboard, ready to paste.
 fn run_encode_table_cli(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
-        return Err("Usage: fm-bridge encode-table <in.fmtable> [out.xml]".to_string());
+        return Err(
+            "Usage: fm-bridge encode-table <in.fmtable> [out.xml] [--fields a,b,c | --fields-only]"
+                .to_string(),
+        );
     }
     let text = read_file_to_string(&args[0])?;
     let tables = fmtable::parse_text(&text).map_err(format_errors)?;
-    let xml = fmtable::encode_xmtb(&tables);
-    let fields: usize = tables.iter().map(|t| t.fields.len()).sum();
+
+    // `--fields` publishes loose fields instead of a whole table — the only way
+    // to add fields to a table that already exists. Pasting a <BaseTable> into
+    // a file that has one gives you `Table 2`, silently.
+    let mut only: Option<Vec<String>> = None;
+    let mut fields_only = false;
+    let mut positional: Vec<&String> = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--fields" => {
+                i += 1;
+                let list = args
+                    .get(i)
+                    .ok_or("--fields necesita una lista de nombres")?;
+                only = Some(list.split(',').map(|s| s.trim().to_string()).collect());
+                fields_only = true;
+            }
+            "--fields-only" => fields_only = true,
+            other if other.starts_with("--") => {
+                return Err(format!("Opción desconocida: {}", other));
+            }
+            _ => positional.push(&args[i]),
+        }
+        i += 1;
+    }
+
+    let xml = if fields_only {
+        fmtable::encode_fields(&tables, only.as_deref())?
+    } else {
+        fmtable::encode_xmtb(&tables)
+    };
+    let fields: usize = match &only {
+        Some(names) => names.len(),
+        None => tables.iter().map(|t| t.fields.len()).sum(),
+    };
+    let args: Vec<String> = std::iter::once(args[0].clone())
+        .chain(positional.into_iter().cloned())
+        .collect();
+    let args = &args[..];
     match args.get(1) {
         Some(path) => {
             std::fs::write(path, &xml)
                 .map_err(|e| format!("No se puede escribir {}: {}", path, e))?;
-            println!("{} tabla(s), {} campo(s) → {}", tables.len(), fields, path);
+            if fields_only {
+                println!("{} campo(s) → {}", fields, path);
+            } else {
+                println!("{} tabla(s), {} campo(s) → {}", tables.len(), fields, path);
+            }
         }
         None => {
             clipboard::write_fm_clipboard(xml.as_bytes())?;
-            println!(
-                "{} tabla(s), {} campo(s) en el portapapeles — pegá en Gestionar → Base de datos.",
-                tables.len(),
-                fields
-            );
+            if fields_only {
+                println!(
+                    "{} campo(s) en el portapapeles — pegá en Gestionar → Base de datos →                      pestaña Campos de la tabla destino.",
+                    fields
+                );
+            } else {
+                println!(
+                    "{} tabla(s), {} campo(s) en el portapapeles — pegá en Gestionar →                      Base de datos → pestaña Tablas.",
+                    tables.len(),
+                    fields
+                );
+            }
         }
     }
     Ok(())

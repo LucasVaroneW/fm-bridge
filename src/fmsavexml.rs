@@ -353,29 +353,37 @@ fn attr_text(attr: &quick_xml::events::attributes::Attribute) -> String {
         .unwrap_or_else(|_| attr_text(&attr))
 }
 
-pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
+/// Read an export off disk and hand back UTF-8, whatever FileMaker wrote.
+///
+/// FMSaveAsXML exports are **UTF-16 LE with a BOM** in practice, so this is not
+/// an edge case: it is the normal path. Anything reading an export must go
+/// through here — a reader that assumes UTF-8 sees a file made of NUL bytes and
+/// finds no markup at all.
+pub fn read_export_to_string(xml_path: &str) -> Result<String, String> {
     let raw = std::fs::read(xml_path).map_err(|e| format!("Cannot read {}: {}", xml_path, e))?;
 
-    let owned: String;
-    let xml_str: &str = if raw.starts_with(b"\xFF\xFE") {
+    if raw.starts_with(b"\xFF\xFE") {
         let u16s: Vec<u16> = raw[2..]
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
-        owned = String::from_utf16(&u16s).map_err(|e| format!("UTF-16 LE error: {}", e))?;
-        &owned
+        String::from_utf16(&u16s).map_err(|e| format!("UTF-16 LE error: {}", e))
     } else if raw.starts_with(b"\xFE\xFF") {
         let u16s: Vec<u16> = raw[2..]
             .chunks_exact(2)
             .map(|c| u16::from_be_bytes([c[0], c[1]]))
             .collect();
-        owned = String::from_utf16(&u16s).map_err(|e| format!("UTF-16 BE error: {}", e))?;
-        &owned
+        String::from_utf16(&u16s).map_err(|e| format!("UTF-16 BE error: {}", e))
     } else if raw.starts_with(b"\xEF\xBB\xBF") {
-        std::str::from_utf8(&raw[3..]).map_err(|e| format!("UTF-8 error: {}", e))?
+        String::from_utf8(raw[3..].to_vec()).map_err(|e| format!("UTF-8 error: {}", e))
     } else {
-        std::str::from_utf8(&raw).map_err(|e| format!("UTF-8 error: {}", e))?
-    };
+        String::from_utf8(raw).map_err(|e| format!("UTF-8 error: {}", e))
+    }
+}
+
+pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
+    let owned = read_export_to_string(xml_path)?;
+    let xml_str: &str = &owned;
 
     let mut reader = Reader::from_str(xml_str);
     reader.config_mut().expand_empty_elements = true;

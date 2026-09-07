@@ -28,6 +28,7 @@ import {
   resolveBinaryPath,
   resolveIds,
   writeClipboard,
+  writeTableFields,
 } from "./bridge";
 import { StepCompletionProvider, resetCatalogCache } from "./completion";
 import {
@@ -80,6 +81,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       "fm-bridge.readFromClipboard",
       readFromClipboard,
+    ),
+    vscode.commands.registerCommand(
+      "fm-bridge.writeTableFields",
+      writeTableFieldsCommand,
     ),
     vscode.commands.registerCommand(
       "fm-bridge.dumpClipboard",
@@ -193,6 +198,68 @@ async function readFromClipboard(): Promise<void> {
  * diff it, or send it in when something is missing. Capturing verbatim is
  * principle 4 (opaque by default) applied to the clipboard door.
  */
+/**
+ * Publish only some fields of the open `.fmtable`, for a table that already
+ * exists in FileMaker.
+ *
+ * Pasting a whole table into a file that already has it does not merge: it
+ * creates `PedidosCambios 2`, silently. Once a table is live, every later
+ * change has to go in through the Fields tab as loose fields — so this command
+ * exists precisely for the second and every later round.
+ */
+async function writeTableFieldsCommand(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== TABLE_LANGUAGE) {
+    void vscode.window.showErrorMessage(
+      "fm-bridge: abrí un archivo .fmtable primero.",
+    );
+    return;
+  }
+  try {
+    const text = editor.document.getText();
+    // Field names come straight from the document, in file order, so the list
+    // reads the way the author wrote it.
+    const names: string[] = [];
+    for (const line of text.split(/\r?\n/)) {
+      const m = /^field\s+(\S+)/.exec(line);
+      if (m) {
+        names.push(m[1]);
+      }
+    }
+    if (names.length === 0) {
+      void vscode.window.showErrorMessage(
+        "fm-bridge: este .fmtable no declara ningún campo.",
+      );
+      return;
+    }
+
+    const picked = await vscode.window.showQuickPick(names, {
+      canPickMany: true,
+      title: "¿Qué campos copiar al portapapeles?",
+      placeHolder:
+        "Se pegan en Gestionar → Base de datos → pestaña Campos de la tabla destino",
+    });
+    if (!picked || picked.length === 0) {
+      return;
+    }
+
+    const resp = await writeTableFields(text, picked);
+    if (resp.status !== "ok") {
+      const message =
+        resp.errors && resp.errors.length > 0
+          ? resp.errors.map((e) => `línea ${e.line}: ${e.message}`).join("\n")
+          : (resp.error ?? "no se pudo escribir el portapapeles");
+      void vscode.window.showErrorMessage(`fm-bridge: ${message}`);
+      return;
+    }
+    void vscode.window.showInformationMessage(
+      `fm-bridge: ${picked.length} campo(s) copiados — pegalos en la pestaña Campos de la tabla.`,
+    );
+  } catch (err) {
+    reportError(err);
+  }
+}
+
 async function dumpClipboardCommand(): Promise<void> {
   try {
     const target = await vscode.window.showSaveDialog({

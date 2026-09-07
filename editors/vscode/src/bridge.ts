@@ -246,6 +246,23 @@ export async function dumpClipboard(
   return runJson({ command: "dump_clipboard", xml_path: xmlPath });
 }
 
+/**
+ * Publish only some fields of a `.fmtable` to the clipboard, as a loose-fields
+ * snippet. This is how you add fields to a table that already exists in
+ * FileMaker: pasting a whole table gives you `Table 2` instead.
+ */
+export async function writeTableFields(
+  scriptText: string,
+  fields: string[],
+): Promise<BridgeResponse> {
+  return runJson({
+    command: "write",
+    script_text: scriptText,
+    kind: "table",
+    fields,
+  });
+}
+
 /** Encode the given text and write it to the FileMaker clipboard. */
 export async function writeClipboard(
   scriptText: string,

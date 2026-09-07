@@ -1076,16 +1076,69 @@ pub fn lint(text: &str) -> Vec<ParseError> {
 
 // ─── Encode: model → XMTB XML ───
 
-/// Build the `<fmxmlsnippet>` FileMaker accepts on the clipboard.
+/// Build the `<fmxmlsnippet>` FileMaker accepts on the clipboard: whole tables,
+/// for the Tables tab of Manage Database.
 pub fn encode_xmtb(tables: &[Table]) -> String {
+    encode(tables, None)
+}
+
+/// Build a **fields-only** snippet, for pasting into the Fields tab of a table
+/// that already exists.
+///
+/// This is the difference between adding six fields and ending up with a second
+/// table called `PedidosCambios 2`: FileMaker pastes a `<BaseTable>` as a new
+/// table, always. Once a table is live, every later change goes in as loose
+/// fields.
+///
+/// `only` filters by field name; `None` takes them all. Names that match
+/// nothing are returned as an error rather than silently producing a smaller
+/// snippet than asked for.
+pub fn encode_fields(tables: &[Table], only: Option<&[String]>) -> Result<String, String> {
+    if let Some(names) = only {
+        let known: Vec<&str> = tables
+            .iter()
+            .flat_map(|t| t.fields.iter().map(|f| f.name.as_str()))
+            .collect();
+        let missing: Vec<&String> = names
+            .iter()
+            .filter(|n| !known.contains(&n.as_str()))
+            .collect();
+        if !missing.is_empty() {
+            return Err(format!(
+                "Estos campos no están en el archivo: {}.",
+                missing
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
+    Ok(encode(tables, Some(only)))
+}
+
+/// `wrap` is `None` for whole tables; `Some(filter)` for loose fields.
+fn encode(tables: &[Table], wrap: Option<Option<&[String]>>) -> String {
+    let loose = wrap.is_some();
+    let filter = wrap.flatten();
     let mut out = String::from("<fmxmlsnippet type=\"FMObjectList\">");
     for t in tables {
-        out.push_str(&format!(
-            "<BaseTable comment=\"{}\" name=\"{}\">",
-            xml_escape(&t.comment),
-            xml_escape(&t.name)
-        ));
-        for (i, f) in t.fields.iter().enumerate() {
+        if !loose {
+            out.push_str(&format!(
+                "<BaseTable comment=\"{}\" name=\"{}\">",
+                xml_escape(&t.comment),
+                xml_escape(&t.name)
+            ));
+        }
+        let chosen: Vec<&Field> = t
+            .fields
+            .iter()
+            .filter(|f| match filter {
+                Some(names) => names.contains(&f.name),
+                None => true,
+            })
+            .collect();
+        for (i, f) in chosen.into_iter().enumerate() {
             let ctx = if f.calc_context.is_empty() {
                 t.name.clone()
             } else {
@@ -1212,7 +1265,9 @@ pub fn encode_xmtb(tables: &[Table]) -> String {
             ));
             out.push_str("</Field>");
         }
-        out.push_str("</BaseTable>");
+        if !loose {
+            out.push_str("</BaseTable>");
+        }
     }
     out.push_str("</fmxmlsnippet>");
     out
@@ -1386,6 +1441,54 @@ field a
         );
         let back = parse_text(&text).unwrap();
         assert_eq!(back[0].fields[0].auto, tables[0].fields[0].auto);
+    }
+
+    #[test]
+    fn loose_fields_paste_into_an_existing_table() {
+        // The case that matters once a table is live: FileMaker pastes a
+        // <BaseTable> as a NEW table (`PedidosCambios 2`), always. Adding
+        // fields to an existing table needs a fields-only snippet.
+        let text = "table T
+
+field a
+  type text
+
+field b
+  type number
+
+field c
+  type date
+";
+        let tables = parse_text(text).unwrap();
+
+        let only = vec!["b".to_string(), "c".to_string()];
+        let xml = encode_fields(&tables, Some(&only)).unwrap();
+        assert!(!xml.contains("<BaseTable"), "no debe llevar tabla: {}", xml);
+        assert!(xml.contains(r#"name="b""#) && xml.contains(r#"name="c""#));
+        assert!(!xml.contains(r#"name="a""#), "solo los pedidos");
+
+        // And the sniffer must call it Fields, so the clipboard type is XMFD.
+        match crate::snippet::detect(&xml) {
+            crate::snippet::SnippetKind::Fields { names } => assert_eq!(names, vec!["b", "c"]),
+            other => panic!("esperaba Fields, salió {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_field_name_that_does_not_exist_is_an_error_not_a_smaller_snippet() {
+        // Silently emitting 2 of the 3 fields you asked for is exactly the
+        // quiet loss principle 5 forbids.
+        let tables = parse_text(
+            "table T
+
+field a
+  type text
+",
+        )
+        .unwrap();
+        let only = vec!["a".to_string(), "noExiste".to_string()];
+        let err = encode_fields(&tables, Some(&only)).unwrap_err();
+        assert!(err.contains("noExiste"), "{}", err);
     }
 
     #[test]

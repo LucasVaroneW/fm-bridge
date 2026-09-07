@@ -183,6 +183,13 @@ Decisiones que vale la pena entender:
 - **La auto-entrada es un enum, no un puñado de banderas.** El XML tiene cuatro
   booleanos independientes que pueden describir estados que FileMaker no permite;
   el modelo solo representa lo que FileMaker aplica de verdad.
+- **Los sellos de sistema viven en un atributo, no en un payload.**
+  `CreationTimeStamp`, `ModificationAccountName` y compañía van en
+  `<AutoEnter value="…">` sin ningún elemento hijo. La primera versión del
+  decodificador veía un `<AutoEnter>` con todas las banderas en `False` y
+  concluía "sin auto-entrada": **perdía el sello y ni siquiera lo anotaba**. Se
+  escriben como `auto stamp <Nombre>`, con la grafía exacta del XML
+  (`CreationTimeStamp` lleva esa S mayúscula de verdad).
 - **`binary`, no `container`.** El XML del portapapeles llama `Binary` al
   contenedor. Se aceptan las dos grafías al leer; sale `binary`.
 

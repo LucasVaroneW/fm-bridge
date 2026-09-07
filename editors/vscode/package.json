@@ -75,6 +75,11 @@
         "category": "fm-bridge"
       },
       {
+        "command": "fm-bridge.dumpClipboard",
+        "title": "Save FileMaker object from clipboard (table, fields…)",
+        "category": "fm-bridge"
+      },
+      {
         "command": "fm-bridge.writeToClipboard",
         "title": "Write script to clipboard",
         "category": "fm-bridge"

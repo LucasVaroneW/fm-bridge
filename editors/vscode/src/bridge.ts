@@ -211,6 +211,32 @@ export async function readClipboard(): Promise<BridgeResponse> {
   return runJson({ command: "read" });
 }
 
+/**
+ * What kind of FileMaker object the clipboard held, as reported by the engine.
+ * Anything the codec cannot decode yet still gets named — a table, some loose
+ * fields, a value list — instead of being reported as an empty clipboard.
+ */
+export interface ClipboardDump {
+  /** Where the raw XML was written. */
+  path: string;
+  /** Human label, e.g. "3 tabla(s) con 589 campo(s): Pedidos, …". */
+  label: string;
+  /** Structured detail: { kind: "base_tables", names: [...], fields: 589 }. */
+  object?: { kind: string; names?: string[]; fields?: number; steps?: number };
+}
+
+/**
+ * Save whatever FileMaker object is on the clipboard to `xmlPath`, verbatim.
+ * The engine decodes script steps to `.fmscript`; everything else (tables,
+ * fields, custom functions…) can at least be captured, which is what lets a
+ * user keep it, diff it, or send it in.
+ */
+export async function dumpClipboard(
+  xmlPath: string,
+): Promise<BridgeResponse> {
+  return runJson({ command: "dump_clipboard", xml_path: xmlPath });
+}
+
 /** Encode the given text and write it to the FileMaker clipboard. */
 export async function writeClipboard(
   scriptText: string,

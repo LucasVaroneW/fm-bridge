@@ -15,6 +15,7 @@ mod normalization;
 #[cfg(windows)]
 mod ole_clipboard;
 mod slice;
+mod snippet;
 mod step_dsl;
 mod steps;
 mod text_format;
@@ -191,13 +192,28 @@ impl Response {
 fn handle_command(cmd: &Command) -> Response {
     match cmd.command.as_str() {
         "version" => Response::version(env!("CARGO_PKG_VERSION").to_string()),
-        "read" => match clipboard::read_fm_clipboard() {
-            Ok(data) => match xmss::decode_xmss(&data) {
-                Ok(script) => Response::ok_text(text_format::format_script(&script)),
-                Err(e) => Response::error(e),
-            },
+        "read" => match read_clipboard_script_text() {
+            Ok(text) => Response::ok_text(text),
             Err(e) => Response::error(e),
         },
+        // Save whatever FileMaker object is on the clipboard, verbatim, and say
+        // what it was. The engine only decodes script steps today; everything
+        // else (tables, fields, value lists…) still has to be capturable, or a
+        // user cannot even report what we are missing. Opaque by default (#2).
+        "dump_clipboard" => {
+            let path = match &cmd.xml_path {
+                Some(p) => p.clone(),
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            match dump_clipboard_to(&path) {
+                Ok(kind) => Response::ok_data(serde_json::json!({
+                    "path": path,
+                    "label": kind.label(),
+                    "object": kind,
+                })),
+                Err(e) => Response::error(e),
+            }
+        }
         // Validate-only: parse the text and report a positioned error, but do
         // NOT touch the clipboard. The editor calls this on every change (with a
         // debounce) to drive diagnostics, so it must be side-effect free.
@@ -712,6 +728,7 @@ fn run_cli_mode() -> Result<(), String> {
     }
     match args[0].as_str() {
         "read" => run_read_cli(args.get(1).map(|s| s.as_str())),
+        "dump-clipboard" => run_dump_clipboard_cli(&args[1..]),
         "write" => {
             if args.len() < 2 {
                 return Err("Usage: fm-bridge write <file.fmscript>".to_string());
@@ -765,7 +782,7 @@ fn run_cli_mode() -> Result<(), String> {
         "data" => run_data_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, census, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
+            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, census, dump-clipboard, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
             args[0]
         )),
     }
@@ -1391,10 +1408,50 @@ fn read_file_to_string(path: &str) -> Result<String, String> {
     Ok(crate::xmss::decode_windows1252(&bytes))
 }
 
-fn run_read_cli(output_path: Option<&str>) -> Result<(), String> {
+/// Read the clipboard and render it as `.fmscript` text — or explain, in terms
+/// the user can act on, why this particular FileMaker object cannot be.
+///
+/// Before this went through the sniffer, copying a table produced "No script
+/// steps found in XML": true, unhelpful, and indistinguishable from an empty
+/// clipboard. Naming what is actually there is the whole difference.
+fn read_clipboard_script_text() -> Result<String, String> {
     let data = clipboard::read_fm_clipboard()?;
+    let xml = xmss::strip_header(&data)?;
+    let kind = snippet::detect(&xml);
+    if !kind.is_decodable_script() {
+        return Err(format!(
+            "El portapapeles tiene {}, no pasos de script. Guardalo con `fm-bridge dump-clipboard <archivo.xml>`.",
+            kind.label()
+        ));
+    }
     let script = xmss::decode_xmss(&data)?;
-    let text = text_format::format_script(&script);
+    Ok(text_format::format_script(&script))
+}
+
+/// Write whatever FileMaker object is on the clipboard to `path`, verbatim,
+/// and return what it turned out to be.
+fn dump_clipboard_to(path: &str) -> Result<snippet::SnippetKind, String> {
+    let data = clipboard::read_fm_clipboard()?;
+    let xml = xmss::strip_header(&data)?;
+    let kind = snippet::detect(&xml);
+    std::fs::write(path, xml.as_bytes())
+        .map_err(|e| format!("No se puede escribir {}: {}", path, e))?;
+    Ok(kind)
+}
+
+/// `dump-clipboard`: capture a FileMaker object the engine cannot decode yet.
+fn run_dump_clipboard_cli(args: &[String]) -> Result<(), String> {
+    let path = args
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "clipboard.xml".to_string());
+    let kind = dump_clipboard_to(&path)?;
+    println!("{} → {}", kind.label(), path);
+    Ok(())
+}
+
+fn run_read_cli(output_path: Option<&str>) -> Result<(), String> {
+    let text = read_clipboard_script_text()?;
     if let Some(path) = output_path {
         std::fs::write(path, &text).map_err(|e| format!("Cannot write file {}: {}", path, e))?;
         println!("Script written to {}", path);

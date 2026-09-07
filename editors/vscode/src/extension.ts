@@ -2,6 +2,7 @@
 //
 // Wires up the human-facing features over the fm-bridge Rust binary:
 //   - Read script from clipboard  → opens the decoded .fmscript
+//   - Save object from clipboard  → captures a table/fields/etc. as raw XML
 //   - Write script to clipboard   → encodes the active .fmscript for FileMaker
 //   - Diagnostics                 → underlines format errors (on type + on save)
 //   - Autocomplete                → step names from the binary's catalog
@@ -16,6 +17,8 @@
 import * as vscode from "vscode";
 import {
   BinaryNotFoundError,
+  type ClipboardDump,
+  dumpClipboard,
   parseScript,
   readClipboard,
   reformat,
@@ -66,6 +69,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       "fm-bridge.readFromClipboard",
       readFromClipboard,
+    ),
+    vscode.commands.registerCommand(
+      "fm-bridge.dumpClipboard",
+      dumpClipboardCommand,
     ),
     vscode.commands.registerCommand(
       "fm-bridge.writeToClipboard",
@@ -138,6 +145,48 @@ async function readFromClipboard(): Promise<void> {
       content: resp.script_text,
     });
     await vscode.window.showTextDocument(doc);
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+/**
+ * Save whatever FileMaker object is on the clipboard as raw XML.
+ *
+ * `readFromClipboard` only handles script steps, because that is all the codec
+ * decodes. But FileMaker copies tables, fields, custom functions and value
+ * lists through the very same clipboard, and until there is a text format for
+ * those, the useful thing a user can do is **keep the object**: version it,
+ * diff it, or send it in when something is missing. Capturing verbatim is
+ * principle 4 (opaque by default) applied to the clipboard door.
+ */
+async function dumpClipboardCommand(): Promise<void> {
+  try {
+    const target = await vscode.window.showSaveDialog({
+      title: "Guardar objeto de FileMaker del portapapeles",
+      filters: { XML: ["xml"] },
+      saveLabel: "Guardar",
+    });
+    if (!target) {
+      return;
+    }
+
+    const resp = await dumpClipboard(target.fsPath);
+    if (resp.status !== "ok") {
+      void vscode.window.showErrorMessage(
+        `fm-bridge: ${resp.error ?? "no se pudo leer el portapapeles"}`,
+      );
+      return;
+    }
+
+    // Say what was captured, not just that something was. A user who copied
+    // the wrong thing in FileMaker finds out here, not three steps later.
+    const dump = resp.data as ClipboardDump | undefined;
+    const doc = await vscode.workspace.openTextDocument(target);
+    await vscode.window.showTextDocument(doc);
+    void vscode.window.showInformationMessage(
+      `fm-bridge: guardado ${dump?.label ?? "el objeto del portapapeles"}.`,
+    );
   } catch (err) {
     reportError(err);
   }

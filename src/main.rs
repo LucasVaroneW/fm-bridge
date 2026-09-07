@@ -4,6 +4,7 @@
 
 mod audit;
 mod clipboard;
+mod coverage;
 mod data;
 mod data_config;
 mod data_sql;
@@ -768,6 +769,7 @@ fn run_cli_mode() -> Result<(), String> {
         "inspect" => run_inspect_cli(&args[1..]),
         "slice" => run_slice_cli(&args[1..]),
         "audit" => run_audit_cli(&args[1..]),
+        "census" => run_census_cli(&args[1..]),
         "who-calls" => run_who_calls_cli(&args[1..]),
         "who-uses-field" => run_who_uses_field_cli(&args[1..]),
         "reformat" => run_reformat_cli(&args[1..]),
@@ -780,7 +782,7 @@ fn run_cli_mode() -> Result<(), String> {
         "data" => run_data_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, dump-clipboard, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
+            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, census, dump-clipboard, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
             args[0]
         )),
     }
@@ -1058,6 +1060,98 @@ fn run_slice_cli(args: &[String]) -> Result<(), String> {
         stats.custom_functions,
         stats.external_sources,
     );
+    Ok(())
+}
+
+/// `census`: inventory of everything inside a FMSaveAsXML export — element
+/// paths, attributes, depth. It is the measuring tape for principle 5 (nunca
+/// perder nada en silencio): you cannot claim nothing was dropped until you
+/// know what was there. Deliberately knows nothing about FileMaker semantics.
+fn run_census_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err(
+            "Usage: fm-bridge census <FMSaveAsXML.xml> [--json] [--top N] [--min N]".to_string(),
+        );
+    }
+    let mut json = false;
+    let mut top: Option<usize> = None;
+    let mut min_count: u64 = 0;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => json = true,
+            "--top" => {
+                i += 1;
+                top = Some(
+                    args.get(i)
+                        .and_then(|v| v.parse().ok())
+                        .ok_or("--top needs a number")?,
+                );
+            }
+            "--min" => {
+                i += 1;
+                min_count = args
+                    .get(i)
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("--min needs a number")?;
+            }
+            other => return Err(format!("Unknown flag for census: {}", other)),
+        }
+        i += 1;
+    }
+
+    let c = coverage::census(&args[0])?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&c).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+
+    println!(
+        "{}: {} elementos, {} atributos, {} rutas distintas, profundidad máxima {}",
+        c.file_name, c.total_elements, c.total_attributes, c.distinct_paths, c.max_depth
+    );
+    println!();
+
+    let shown: Vec<&coverage::PathStat> = c
+        .paths
+        .iter()
+        .filter(|p| p.count >= min_count)
+        .take(top.unwrap_or(usize::MAX))
+        .collect();
+
+    for p in &shown {
+        let attrs = if p.attrs.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "  [{}]",
+                p.attrs
+                    .iter()
+                    .map(|a| a.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        };
+        let text = if p.with_text > 0 {
+            format!("  (texto en {})", p.with_text)
+        } else {
+            String::new()
+        };
+        println!("{:>9}  {}{}{}", p.count, p.path, attrs, text);
+    }
+
+    let hidden = c.paths.len() - shown.len();
+    if hidden > 0 {
+        println!(
+            "
+… {} rutas más (subí --top o bajá --min para verlas)",
+            hidden
+        );
+    }
     Ok(())
 }
 

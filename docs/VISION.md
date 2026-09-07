@@ -6,10 +6,17 @@
 
 ## La idea en una frase
 
-Una herramienta para trabajar scripts (y, a futuro, esquema) de FileMaker con
-**dos puertas de entrada sobre un mismo motor**: una **humana** (editar
+fm-bridge es un **puente**: abre FileMaker a la IA y al desarrollador, con
+**dos puertas de entrada sobre un mismo motor** — una **humana** (editar
 `.fmscript` en VS Code) y una **IA** (vía MCP / CLI con JSON). Las dos se usan
 combinadas y son intercambiables.
+
+El trato del puente es traer a FileMaker lo que FileMaker no tiene — versionar
+en git, editar texto de verdad, buscar en todos los scripts a la vez con
+`Ctrl+Shift+F` — **sin perder la agilidad de FileMaker**. Por eso la experiencia
+de la extensión (colores, resaltado, diagnósticos, comandos a un click) no es
+cosmética: es la mitad humana del producto. Un dev de FileMaker que abre un
+`.fmscript` y lo ve gris y muerto no vuelve.
 
 ## Principios (no negociables)
 
@@ -26,6 +33,30 @@ combinadas y son intercambiables.
    archivos planos, no el estado interno de nadie.
 4. **Lossless / opaco por defecto.** Lo que no entendemos se **preserva tal
    cual** (round-trip byte-a-byte), nunca se descarta. (Ver #2.)
+5. **Nunca perder nada en silencio.** Es el principio 4 elevado a contrato con
+   el usuario, y manda sobre todos los demás. Ver abajo.
+
+### Por qué el silencio es el peor bug
+
+Una herramienta que funciona bien casi siempre es **más peligrosa** que una que
+falla: el usuario deja de revisar. A los dos meses de confiar, nadie audita el
+pegado. Si en ese momento nos tragamos una relación, un índice o un campo **sin
+decirlo**, el daño se descubre tarde y sin rastro de dónde empezó.
+
+De ahí la regla: **lo que no modelamos no puede desaparecer; tiene que aparecer
+en una lista explícita de "esto no se convirtió".** Una salida vacía no
+significa que salió perfecto — significa que algo se perdió sin contarse.
+
+Y la promesa se vuelve **garantía** cuando es mecánica, no cuando es una
+intención:
+
+- **Libro de cuentas (ledger).** Todo comando que transforme esquema o datos
+  informa cuánto entró, cuánto salió y **qué quedó afuera, enumerado**.
+- **Conservación de elementos.** Cada elemento y atributo del XML de origen o
+  está modelado, o está en la lista de no convertidos. Si la cuenta no cuadra,
+  el comando **falla** — no avisa: falla.
+
+(Precedentes de que esto es un riesgo real, no teórico: #53, #55.)
 
 ## Las dos vías
 
@@ -94,6 +125,22 @@ el esquema (ej.: un `Set Field` que apunta a un campo inexistente).
   (hoy `who-uses-field` las cubre con búsqueda por token, suficiente pero fuzzy).
 - 🔭 **OData** (futuro): una tool MCP que consulte datos reales de la base y los
   cruce con el esquema del export para entender errores con datos en vivo.
+
+### Fase 4 — Esquema como código y salida a otra DB — 🔭 en diseño
+
+Tres productos sobre el mismo modelo: **exportar** el esquema a SQL neutro (para
+quien quiera migrar fuera de FileMaker), **diffear** el esquema real contra un
+modelo versionado (detectar que alguien creó un campo a mano), y **aplicar** un
+modelo dentro de FileMaker por el portapapeles (varias tablas de una).
+
+Es donde el principio 5 se cobra su precio: una migración fuerza *cada campo de
+cada tabla* a través del parser, así que va a destapar bugs de `inspect`. Eso es
+una ventaja, no un riesgo: es la auditoría más dura a la que el parser puede
+someterse.
+
+El detalle completo — veredictos de viabilidad, lo que **no** se va a hacer, y
+las verificaciones contra FileMaker real que van primero — vive en
+[SCHEMA.md](SCHEMA.md).
 
 ### Fidelidad del core (en paralelo, cuando convenga)
 - #4 Show Custom Dialog (input fields). #5 Import/Export con DSL legible ✅.

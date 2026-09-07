@@ -49,6 +49,8 @@ interchangeable.
 - `editors/vscode/` — the VS Code extension (TypeScript).
 - `docs/VISION.md` — north star. `docs/MCP.md` — MCP setup + tools.
   `docs/USAGE.md` — user guide (ES). `docs/RELEASE.md` — build & release flow.
+  `docs/DATA.md` — live data over ODBC (read-only). `docs/SCHEMA.md` — Phase 4
+  design (schema-as-code + migrating out of FileMaker); read before touching it.
 
 ## Build & test
 

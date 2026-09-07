@@ -616,6 +616,12 @@ pub fn parse_text(text: &str) -> Result<Vec<Table>, Vec<ParseError>> {
     let mut auto_always = false;
     // Index language declared once on the table; each field starts from it.
     let mut table_lang = String::new();
+    // Where each field was declared, parallel to `tables[i].fields`. Without
+    // this the checks that need a whole field (a calc with no formula, a
+    // duplicate name) can only point at line 1, and the editor underlines the
+    // wrong place — which is worse than not underlining at all.
+    let mut field_lines: Vec<Vec<usize>> = Vec::new();
+    let mut pending_line = 0usize;
 
     let err = |errors: &mut Vec<ParseError>, line: usize, msg: String| {
         errors.push(ParseError {
@@ -656,6 +662,9 @@ pub fn parse_text(text: &str) -> Result<Vec<Table>, Vec<ParseError>> {
                 auto_always = false;
                 if let Some(t) = tables.last_mut() {
                     t.fields.push(f);
+                    if let Some(lines) = field_lines.last_mut() {
+                        lines.push(pending_line);
+                    }
                 }
             }
         };
@@ -700,6 +709,7 @@ pub fn parse_text(text: &str) -> Result<Vec<Table>, Vec<ParseError>> {
                     name: value.to_string(),
                     ..Default::default()
                 });
+                field_lines.push(Vec::new());
             }
             "field" => {
                 finish_field!();
@@ -711,7 +721,9 @@ pub fn parse_text(text: &str) -> Result<Vec<Table>, Vec<ParseError>> {
                             .to_string(),
                     );
                     tables.push(Table::default());
+                    field_lines.push(Vec::new());
                 }
+                pending_line = no;
                 if value.is_empty() {
                     err(&mut errors, no, "`field` necesita un nombre.".to_string());
                 }
@@ -866,6 +878,8 @@ pub fn parse_text(text: &str) -> Result<Vec<Table>, Vec<ParseError>> {
         });
     }
     for (ti, t) in tables.iter().enumerate() {
+        let lines = field_lines.get(ti).cloned().unwrap_or_default();
+        let line_of = |i: usize| lines.get(i).copied().unwrap_or(1);
         if t.name.trim().is_empty() {
             errors.push(ParseError {
                 line: 1,
@@ -881,10 +895,10 @@ pub fn parse_text(text: &str) -> Result<Vec<Table>, Vec<ParseError>> {
             });
         }
         let mut seen: Vec<&str> = Vec::new();
-        for f in &t.fields {
+        for (fi, f) in t.fields.iter().enumerate() {
             if seen.contains(&f.name.as_str()) {
                 errors.push(ParseError {
-                    line: 1,
+                    line: line_of(fi),
                     message: format!("Campo duplicado `{}` en la tabla `{}`.", f.name, t.name),
                     severity: "error".to_string(),
                 });
@@ -892,7 +906,7 @@ pub fn parse_text(text: &str) -> Result<Vec<Table>, Vec<ParseError>> {
             seen.push(&f.name);
             if f.field_type == "Calculated" && f.formula.is_none() {
                 errors.push(ParseError {
-                    line: 1,
+                    line: line_of(fi),
                     message: format!(
                         "`{}` es un campo calculado pero no tiene `formula`.",
                         f.name

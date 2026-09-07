@@ -3281,11 +3281,16 @@ fn parse_go_to_object_content(content: Option<&str>) -> (Option<String>, Option<
 fn parse_go_to_layout_content(
     content: Option<&str>,
 ) -> (Option<String>, Option<String>, Option<String>) {
+    // A bare `Go to Layout` with no bracket is FileMaker's "original layout".
+    // Returning None here made the encoder fall back to SelectedLayout with no
+    // <Layout> child, which FM pastes as "Ir a la presentación <desconocido>" —
+    // a broken step, produced silently. `inspect` decodes the real thing to a
+    // bare `Go to Layout`, so this is also what closes that round-trip.
     let content = match content {
         Some(c) => c.trim(),
-        None => return (None, None, None),
+        None => return (None, None, Some("OriginalLayout".to_string())),
     };
-    if content.eq_ignore_ascii_case("original") {
+    if content.is_empty() || content.eq_ignore_ascii_case("original") {
         return (None, None, Some("OriginalLayout".to_string()));
     }
     // Split off optional ` #N` numeric id suffix.
@@ -3302,7 +3307,9 @@ fn parse_go_to_layout_content(
     };
     let name = name_part.trim_matches('"').to_string();
     if name.is_empty() {
-        (None, id, None)
+        // No name to select: same reasoning as above — original layout, never a
+        // SelectedLayout with nothing selected.
+        (None, id, Some("OriginalLayout".to_string()))
     } else {
         (Some(name), id, Some("SelectedLayout".to_string()))
     }
@@ -4048,5 +4055,47 @@ mod tests {
         assert_eq!(reqs[0].criteria[0].table, "Ta_i_Productos");
         assert_eq!(reqs[0].criteria[0].field, "Pro_Imp_EsSX");
         assert_eq!(reqs[0].criteria[0].text, "1");
+    }
+
+    /// A bare `Go to Layout` means "original layout". It used to encode as
+    /// SelectedLayout with no <Layout> child, which FileMaker pastes as
+    /// "Ir a la presentación <desconocido>" — silently broken.
+    #[test]
+    fn bare_go_to_layout_is_original_layout() {
+        for src in [
+            "Go to Layout",
+            "Go to Layout []",
+            "Go to Layout [original]",
+            "Go to Layout [ORIGINAL]",
+        ] {
+            let script = super::parse_text_to_script(src).expect(src);
+            let step = &script.steps[0];
+            assert_eq!(
+                step.layout_destination.as_deref(),
+                Some("OriginalLayout"),
+                "wrong destination for {src:?}"
+            );
+            assert!(step.layout_name.is_none(), "unexpected layout for {src:?}");
+
+            let xml = String::from_utf8(crate::xmss::encode_xmss(src).expect(src)).unwrap();
+            assert!(
+                xml.contains(r#"<LayoutDestination value="OriginalLayout">"#),
+                "{src:?} did not encode as OriginalLayout: {xml}"
+            );
+            assert!(
+                !xml.contains("<Layout "),
+                "{src:?} emitted a <Layout> child: {xml}"
+            );
+        }
+    }
+
+    /// The named form must keep working, id and all.
+    #[test]
+    fn named_go_to_layout_still_selects() {
+        let script = super::parse_text_to_script("Go to Layout [\"Ta_Pedidos\" #2908]").unwrap();
+        let step = &script.steps[0];
+        assert_eq!(step.layout_destination.as_deref(), Some("SelectedLayout"));
+        assert_eq!(step.layout_name.as_deref(), Some("Ta_Pedidos"));
+        assert_eq!(step.layout_id.as_deref(), Some("2908"));
     }
 }

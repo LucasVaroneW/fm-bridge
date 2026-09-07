@@ -9,6 +9,7 @@ mod data;
 mod data_config;
 mod data_sql;
 mod fmsavexml;
+mod fmtable;
 mod import_records;
 mod mcp;
 mod normalization;
@@ -34,6 +35,11 @@ struct Command {
     command: String,
     #[serde(default)]
     script_text: Option<String>,
+    /// Which text format `script_text` is: "script" (`.fmscript`, the default)
+    /// or "table" (`.fmtable`). Optional — when absent the content is sniffed,
+    /// so older clients keep working unchanged.
+    #[serde(default)]
+    kind: Option<String>,
     // ── inspect / slice params (file-based commands, for AI/tooling) ──
     #[serde(default)]
     xml_path: Option<String>,
@@ -192,8 +198,12 @@ impl Response {
 fn handle_command(cmd: &Command) -> Response {
     match cmd.command.as_str() {
         "version" => Response::version(env!("CARGO_PKG_VERSION").to_string()),
-        "read" => match read_clipboard_script_text() {
-            Ok(text) => Response::ok_text(text),
+        "read" => match read_clipboard_text() {
+            Ok((text, kind, ledger)) => {
+                let mut r = Response::ok_text(text);
+                r.data = Some(serde_json::json!({ "kind": kind, "ledger": ledger }));
+                r
+            }
             Err(e) => Response::error(e),
         },
         // Save whatever FileMaker object is on the clipboard, verbatim, and say
@@ -222,6 +232,14 @@ fn handle_command(cmd: &Command) -> Response {
                 Some(t) => t,
                 None => return Response::error("No script_text provided".to_string()),
             };
+            if is_table_text(cmd.kind.as_deref(), script_text) {
+                let errors = fmtable::lint(script_text);
+                return if errors.is_empty() {
+                    Response::ok()
+                } else {
+                    Response::errors(errors)
+                };
+            }
             let errors = text_format::lint(script_text);
             if errors.is_empty() {
                 // Run post_validate to catch warnings (missing layout IDs, etc.)
@@ -284,6 +302,21 @@ fn handle_command(cmd: &Command) -> Response {
                     Ok(resolved) => script_text = resolved,
                     Err(e) => return Response::error(e),
                 }
+            }
+            // A `.fmtable` takes the table path: different linter, different
+            // codec, different clipboard type. Same command, so the editor's
+            // "write to clipboard" button works for both documents.
+            if is_table_text(cmd.kind.as_deref(), &script_text) {
+                return match fmtable::parse_text(&script_text) {
+                    Ok(tables) => {
+                        let xml = fmtable::encode_xmtb(&tables);
+                        match clipboard::write_fm_clipboard(xml.as_bytes()) {
+                            Ok(()) => Response::ok(),
+                            Err(e) => Response::error(e),
+                        }
+                    }
+                    Err(errors) => Response::errors(errors),
+                };
             }
             // Lint first: surface every format/structure error to the editor and
             // refuse to write a broken script to the clipboard.
@@ -729,6 +762,9 @@ fn run_cli_mode() -> Result<(), String> {
     match args[0].as_str() {
         "read" => run_read_cli(args.get(1).map(|s| s.as_str())),
         "dump-clipboard" => run_dump_clipboard_cli(&args[1..]),
+        "decode-table" => run_decode_table_cli(&args[1..]),
+        "encode-table" => run_encode_table_cli(&args[1..]),
+        "validate-table" => run_validate_table_cli(&args[1..]),
         "write" => {
             if args.len() < 2 {
                 return Err("Usage: fm-bridge write <file.fmscript>".to_string());
@@ -782,7 +818,7 @@ fn run_cli_mode() -> Result<(), String> {
         "data" => run_data_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, census, dump-clipboard, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
+            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, census, dump-clipboard, decode-table, encode-table, validate-table, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
             args[0]
         )),
     }
@@ -1415,17 +1451,61 @@ fn read_file_to_string(path: &str) -> Result<String, String> {
 /// steps found in XML": true, unhelpful, and indistinguishable from an empty
 /// clipboard. Naming what is actually there is the whole difference.
 fn read_clipboard_script_text() -> Result<String, String> {
-    let data = clipboard::read_fm_clipboard()?;
-    let xml = xmss::strip_header(&data)?;
-    let kind = snippet::detect(&xml);
-    if !kind.is_decodable_script() {
+    let (text, kind, _) = read_clipboard_text()?;
+    if kind != "script" {
         return Err(format!(
-            "El portapapeles tiene {}, no pasos de script. Guardalo con `fm-bridge dump-clipboard <archivo.xml>`.",
-            kind.label()
+            "El portapapeles tiene {}, no pasos de script.",
+            kind
         ));
     }
-    let script = xmss::decode_xmss(&data)?;
-    Ok(text_format::format_script(&script))
+    Ok(text)
+}
+
+/// Decode whatever the clipboard holds into the right text format.
+///
+/// Returns the text, which format it is ("script" or "table"), and the decode
+/// ledger for the formats that have one. One entry point so the CLI, the JSON
+/// protocol and the MCP door cannot drift apart.
+fn read_clipboard_text() -> Result<(String, String, serde_json::Value), String> {
+    let data = clipboard::read_fm_clipboard()?;
+    let xml = xmss::strip_header(&data)?;
+    match snippet::detect(&xml) {
+        snippet::SnippetKind::ScriptSteps { .. } => {
+            let script = xmss::decode_xmss(&data)?;
+            Ok((
+                text_format::format_script(&script),
+                "script".to_string(),
+                serde_json::Value::Null,
+            ))
+        }
+        snippet::SnippetKind::BaseTables { .. } => {
+            let (tables, ledger) = fmtable::decode_xmtb(&xml)?;
+            Ok((
+                fmtable::format_tables(&tables),
+                "table".to_string(),
+                serde_json::to_value(&ledger).unwrap_or(serde_json::Value::Null),
+            ))
+        }
+        other => Err(format!(
+            "El portapapeles tiene {}, que el motor todavía no sabe convertir a texto.              Guardalo con `fm-bridge dump-clipboard <archivo.xml>`.",
+            other.label()
+        )),
+    }
+}
+
+/// Is this text a `.fmtable`? Trusts an explicit `kind` from the client and
+/// falls back to the content, so the CLI and older clients need no flag.
+fn is_table_text(kind: Option<&str>, text: &str) -> bool {
+    match kind {
+        Some("table") => return true,
+        Some("script") => return false,
+        _ => {}
+    }
+    text.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l == "table" || l.starts_with("table "))
+        .unwrap_or(false)
 }
 
 /// Write whatever FileMaker object is on the clipboard to `path`, verbatim,
@@ -1437,6 +1517,92 @@ fn dump_clipboard_to(path: &str) -> Result<snippet::SnippetKind, String> {
     std::fs::write(path, xml.as_bytes())
         .map_err(|e| format!("No se puede escribir {}: {}", path, e))?;
     Ok(kind)
+}
+
+/// `decode-table <snippet.xml> [out.fmtable]` — XMTB XML → readable text.
+/// The ledger goes to stderr, so redirecting stdout still yields a clean file.
+fn run_decode_table_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("Usage: fm-bridge decode-table <snippet.xml> [out.fmtable]".to_string());
+    }
+    let xml = read_file_to_string(&args[0])?;
+    let (tables, ledger) = fmtable::decode_xmtb(&xml)?;
+    let text = fmtable::format_tables(&tables);
+    match args.get(1) {
+        Some(path) => {
+            std::fs::write(path, &text)
+                .map_err(|e| format!("No se puede escribir {}: {}", path, e))?;
+            println!(
+                "{} tabla(s), {} campo(s) → {}",
+                ledger.tables, ledger.fields, path
+            );
+        }
+        None => println!("{}", text),
+    }
+    if ledger.dropped.is_empty() {
+        eprintln!("Nada quedó afuera.");
+    } else {
+        eprintln!("{} elemento(s) no convertidos:", ledger.dropped.len());
+        for d in &ledger.dropped {
+            eprintln!("  · {}", d);
+        }
+    }
+    Ok(())
+}
+
+/// `encode-table <in.fmtable> [out.xml]` — readable text → XMTB XML. With no
+/// output file it writes the snippet to the clipboard, ready to paste.
+fn run_encode_table_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("Usage: fm-bridge encode-table <in.fmtable> [out.xml]".to_string());
+    }
+    let text = read_file_to_string(&args[0])?;
+    let tables = fmtable::parse_text(&text).map_err(format_errors)?;
+    let xml = fmtable::encode_xmtb(&tables);
+    let fields: usize = tables.iter().map(|t| t.fields.len()).sum();
+    match args.get(1) {
+        Some(path) => {
+            std::fs::write(path, &xml)
+                .map_err(|e| format!("No se puede escribir {}: {}", path, e))?;
+            println!("{} tabla(s), {} campo(s) → {}", tables.len(), fields, path);
+        }
+        None => {
+            clipboard::write_fm_clipboard(xml.as_bytes())?;
+            println!(
+                "{} tabla(s), {} campo(s) en el portapapeles — pegá en Gestionar → Base de datos.",
+                tables.len(),
+                fields
+            );
+        }
+    }
+    Ok(())
+}
+
+/// `validate-table <file.fmtable>` — the same check the editor underlines with.
+fn run_validate_table_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("Usage: fm-bridge validate-table <file.fmtable>".to_string());
+    }
+    let text = read_file_to_string(&args[0])?;
+    let errors = fmtable::lint(&text);
+    if errors.is_empty() {
+        let tables = fmtable::parse_text(&text).map_err(format_errors)?;
+        let fields: usize = tables.iter().map(|t| t.fields.len()).sum();
+        println!("OK — {} tabla(s), {} campo(s).", tables.len(), fields);
+        return Ok(());
+    }
+    Err(format_errors(errors))
+}
+
+fn format_errors(errors: Vec<text_format::ParseError>) -> String {
+    errors
+        .iter()
+        .map(|e| format!("línea {}: {}", e.line, e.message))
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        )
 }
 
 /// `dump-clipboard`: capture a FileMaker object the engine cannot decode yet.
@@ -1451,7 +1617,19 @@ fn run_dump_clipboard_cli(args: &[String]) -> Result<(), String> {
 }
 
 fn run_read_cli(output_path: Option<&str>) -> Result<(), String> {
-    let text = read_clipboard_script_text()?;
+    let (text, kind, ledger) = read_clipboard_text()?;
+    if kind == "table" {
+        // The ledger goes to stderr so `fm-bridge read > x.fmtable` still
+        // produces a clean file, while the user still sees what was dropped.
+        if let Some(dropped) = ledger.get("dropped").and_then(|d| d.as_array()) {
+            if !dropped.is_empty() {
+                eprintln!("{} elemento(s) no convertidos:", dropped.len());
+                for d in dropped.iter().filter_map(|d| d.as_str()) {
+                    eprintln!("  · {}", d);
+                }
+            }
+        }
+    }
     if let Some(path) = output_path {
         std::fs::write(path, &text).map_err(|e| format!("Cannot write file {}: {}", path, e))?;
         println!("Script written to {}", path);

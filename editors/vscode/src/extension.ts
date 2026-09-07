@@ -19,6 +19,8 @@ import {
   BinaryNotFoundError,
   type ClipboardDump,
   dumpClipboard,
+  type ReadResult,
+  type TextKind,
   parseScript,
   readClipboard,
   reformat,
@@ -40,6 +42,15 @@ import { StepFixProvider } from "./quickfix";
 import { ensureStableBinaries } from "./stableBin";
 
 const LANGUAGE = "fmscript";
+/** Tables as text. Same engine, same commands, different grammar. */
+const TABLE_LANGUAGE = "fmtable";
+
+/** The two documents this extension owns. */
+const OWNED_LANGUAGES = [LANGUAGE, TABLE_LANGUAGE];
+
+function kindOf(doc: vscode.TextDocument): TextKind {
+  return doc.languageId === TABLE_LANGUAGE ? "table" : "script";
+}
 
 /** Diagnostic log, visible in Output → "fm-bridge". Set in activate(). */
 let output: vscode.OutputChannel | undefined;
@@ -140,11 +151,33 @@ async function readFromClipboard(): Promise<void> {
       );
       return;
     }
+    // A table comes back as `.fmtable`, a script as `.fmscript`. The engine
+    // says which; the editor never guesses.
+    const info = resp.data as ReadResult | undefined;
     const doc = await vscode.workspace.openTextDocument({
-      language: LANGUAGE,
+      language: info?.kind === "table" ? TABLE_LANGUAGE : LANGUAGE,
       content: resp.script_text,
     });
     await vscode.window.showTextDocument(doc);
+
+    // Principle 5: what was not carried over is shown, never left implicit.
+    const dropped = info?.ledger?.dropped ?? [];
+    if (dropped.length > 0) {
+      void vscode.window
+        .showWarningMessage(
+          `fm-bridge: ${dropped.length} elemento(s) no se convirtieron a texto.`,
+          "Ver detalle",
+        )
+        .then((pick) => {
+          if (pick === "Ver detalle") {
+            log(`no convertidos (${dropped.length}):`);
+            for (const d of dropped) {
+              log(`  · ${d}`);
+            }
+            output?.show();
+          }
+        });
+    }
   } catch (err) {
     reportError(err);
   }
@@ -196,15 +229,18 @@ async function writeToClipboard(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     void vscode.window.showErrorMessage(
-      "fm-bridge: open a .fmscript file first.",
+      "fm-bridge: open a .fmscript or .fmtable file first.",
     );
     return;
   }
   try {
-    const resp = await writeClipboard(editor.document.getText());
+    const kind = kindOf(editor.document);
+    const resp = await writeClipboard(editor.document.getText(), kind);
     if (resp.status === "ok") {
       void vscode.window.showInformationMessage(
-        "fm-bridge: script copied — paste it in FileMaker (Cmd/Ctrl+V).",
+        kind === "table"
+          ? "fm-bridge: tabla copiada — pegala en FileMaker en Gestionar → Base de datos → Tablas."
+          : "fm-bridge: script copied — paste it in FileMaker (Cmd/Ctrl+V).",
       );
       return;
     }
@@ -325,12 +361,12 @@ function registerDiagnostics(
   const timers = new Map<string, NodeJS.Timeout>();
 
   const validate = async (doc: vscode.TextDocument): Promise<void> => {
-    if (doc.languageId !== LANGUAGE) {
+    if (!OWNED_LANGUAGES.includes(doc.languageId)) {
       return;
     }
     const name = doc.uri.path.split("/").pop() ?? doc.uri.path;
     try {
-      const resp = await parseScript(doc.getText());
+      const resp = await parseScript(doc.getText(), kindOf(doc));
       // Show warnings even when status is ok (e.g. missing layout IDs).
       if (resp.errors && resp.errors.length > 0) {
         collection.set(
@@ -373,7 +409,7 @@ function registerDiagnostics(
   };
 
   const scheduleValidate = (doc: vscode.TextDocument): void => {
-    if (doc.languageId !== LANGUAGE) {
+    if (!OWNED_LANGUAGES.includes(doc.languageId)) {
       return;
     }
     const validateOnType = vscode.workspace
@@ -409,9 +445,9 @@ function registerDiagnostics(
 
   // Validate already-open .fmscript documents on activation.
   const open = vscode.workspace.textDocuments;
-  const fmDocs = open.filter((d) => d.languageId === LANGUAGE);
+  const fmDocs = open.filter((d) => OWNED_LANGUAGES.includes(d.languageId));
   log(
-    `open documents: ${open.length}, of which fmscript: ${fmDocs.length}` +
+    `open documents: ${open.length}, of which fm-bridge: ${fmDocs.length}` +
       (fmDocs.length === 0 && open.length > 0
         ? " — if your .fmscript shows nothing, check the language mode (bottom-right) says 'FileMaker Script'"
         : ""),

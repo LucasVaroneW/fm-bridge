@@ -206,7 +206,16 @@ export async function runJson(
   }
 }
 
-/** Read the FileMaker clipboard and return the decoded .fmscript text. */
+/**
+ * What `read` decoded: which text format came back, plus the decode ledger for
+ * formats that have one (tables do — see `docs/SCHEMA.md`).
+ */
+export interface ReadResult {
+  kind?: TextKind;
+  ledger?: { tables?: number; fields?: number; dropped?: string[] } | null;
+}
+
+/** Read the FileMaker clipboard and return it as text (script or table). */
 export async function readClipboard(): Promise<BridgeResponse> {
   return runJson({ command: "read" });
 }
@@ -240,13 +249,24 @@ export async function dumpClipboard(
 /** Encode the given text and write it to the FileMaker clipboard. */
 export async function writeClipboard(
   scriptText: string,
+  kind: TextKind = "script",
 ): Promise<BridgeResponse> {
-  return runJson({ command: "write", script_text: scriptText });
+  return runJson({ command: "write", script_text: scriptText, kind });
 }
 
+/**
+ * Which text format a document is. The engine sniffs the content when this is
+ * omitted, but the editor knows from the language id, so it says so — an empty
+ * new `.fmtable` has nothing to sniff.
+ */
+export type TextKind = "script" | "table";
+
 /** Validate text without any clipboard side effect. Drives diagnostics. */
-export async function parseScript(scriptText: string): Promise<BridgeResponse> {
-  return runJson({ command: "parse", script_text: scriptText });
+export async function parseScript(
+  scriptText: string,
+  kind: TextKind = "script",
+): Promise<BridgeResponse> {
+  return runJson({ command: "parse", script_text: scriptText, kind });
 }
 
 /**

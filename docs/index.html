@@ -494,8 +494,14 @@
         </div>
       </div>
       <div class="card card-purple" style="margin-bottom:1.5rem">
-        <h3>📦 Save a table (or any object)</h3>
-        <p>FileMaker copies <strong>tables, fields, custom functions and value lists</strong> through the same clipboard as scripts. The engine decodes script steps to <code>.fmscript</code>; everything else it captures verbatim, tells you exactly what it was, and never reports it as an empty clipboard.</p>
+        <h3>🗂️ Tables as text, both ways</h3>
+        <p>Copy tables in <strong>Manage → Database → Tables</strong> and read them straight into a <code>.fmtable</code>: one key per line, highlighted, validated as you type. Edit it, write it back, paste it into FileMaker. A real two-table export went from <strong>279 KB of XML to 47 KB of text</strong> — small enough that an AI reads all of it instead of the first third.</p>
+        <div class="code-block">
+          <span style="color:#6272a4">Ctrl+Shift+P →</span> <span style="color:#818cf8">fm-bridge: Read script from clipboard</span>  <span style="color:#6272a4">opens .fmtable</span><br>
+          <span style="color:#6272a4">Ctrl+Shift+P →</span> <span style="color:#818cf8">fm-bridge: Write script to clipboard</span> <span style="color:#6272a4">back to FileMaker</span>
+        </div>
+        <p style="color:#94a3b8;font-size:.92rem">FileMaker keeps dead payloads in its XML, so this is not a byte-exact round trip and never claims to be: whatever is not carried across is <strong>counted and listed</strong>, never dropped quietly.</p>
+        <h3 style="margin-top:1.25rem">📦 Save any object verbatim</h3>
         <div class="code-block">
           <span style="color:#6272a4">Ctrl+Shift+P →</span> <span style="color:#818cf8">fm-bridge: Save FileMaker object from clipboard</span><br>
           <span style="color:#6272a4">→</span> <span style="color:#4ade80">3 tables with 589 fields: Pedidos, PedidosItems, PedidosItemsFechasJT</span>
@@ -643,6 +649,9 @@
       <tr><td><code>mcp</code></td><td>MCP server (JSON-RPC over stdio)</td></tr>
       <tr><td><code>steps</code></td><td>Step catalog as JSON</td></tr>
       <tr><td><code>dump-clipboard [file]</code></td><td>Save any FM object from the clipboard (table, fields…)</td></tr>
+      <tr><td><code>decode-table &lt;xml&gt; [out]</code></td><td>Table snippet → readable <code>.fmtable</code></td></tr>
+      <tr><td><code>encode-table &lt;in&gt; [out]</code></td><td><code>.fmtable</code> → FM clipboard (or a file)</td></tr>
+      <tr><td><code>validate-table &lt;file&gt;</code></td><td>Check a <code>.fmtable</code> the way the editor does</td></tr>
       <tr><td><code>census &lt;xml&gt;</code></td><td>Inventory an export: every element path and attribute</td></tr>
       <tr><td><code>debug</code></td><td>Dump debug_raw.xml and debug_built.xml</td></tr>
       <tr><td><code>inspect &lt;xml&gt; [dir]</code></td><td>Parse FMSaveAsXML → navigable directory</td></tr>

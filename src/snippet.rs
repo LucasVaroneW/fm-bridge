@@ -143,11 +143,18 @@ pub fn detect(xml: &str) -> SnippetKind {
                         .unwrap_or_default()
                 };
 
-                // Only direct children of the snippet root count as objects.
-                if depth == 1 {
+                // A copied script folder wraps its scripts in `<Group>`, so a
+                // catalog-level `<Script>` can sit several levels deep — but
+                // only ever inside `fmxmlsnippet`/`Group`, never inside a
+                // `Step` (that nesting is reserved for Perform Script's
+                // target reference, also literally `<Script id name/>`).
+                let in_step = stack.iter().any(|s| s == "Step");
+
+                if !in_step && name == "Script" {
+                    scripts.push(named());
+                } else if depth == 1 {
                     match name.as_str() {
                         "BaseTable" => tables.push(named()),
-                        "Script" => scripts.push(named()),
                         "CustomFunction" => functions.push(named()),
                         "ValueList" => value_lists.push(named()),
                         "Field" => loose_fields.push(named()),
@@ -303,6 +310,39 @@ mod tests {
             other => panic!("expected Scripts, got {:?}", other),
         }
         assert!(!detect(xml).is_decodable_script());
+    }
+
+    #[test]
+    fn scripts_grouped_in_folders_are_recognised_not_counted_as_loose_steps() {
+        // Copying a whole Script Workspace folder wraps its scripts in
+        // <Group>, several levels deep. Before, only depth-1 <Script>
+        // counted, so this fell through to the "steps found" branch and
+        // reported a wrong, misleading kind.
+        let xml = r#"<fmxmlsnippet type="FMObjectList">
+            <Group id="1" name="Folder">
+                <Script id="2" name="A"><Step id="1" name="Comment"><Text>a</Text></Step></Script>
+                <Group id="3" name="Sub">
+                    <Script id="4" name="B"><Step id="1" name="Comment"><Text>b</Text></Step></Script>
+                </Group>
+            </Group>
+        </fmxmlsnippet>"#;
+        match detect(xml) {
+            SnippetKind::Scripts { names } => assert_eq!(names, vec!["A", "B"]),
+            other => panic!("expected Scripts, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_perform_script_target_inside_a_step_is_not_counted_as_a_catalog_script() {
+        let xml = r#"<fmxmlsnippet type="FMObjectList">
+            <Script id="1" name="Caller">
+                <Step id="87" name="Perform Script"><Script id="99" name="Callee"></Script></Step>
+            </Script>
+        </fmxmlsnippet>"#;
+        match detect(xml) {
+            SnippetKind::Scripts { names } => assert_eq!(names, vec!["Caller"]),
+            other => panic!("expected Scripts, got {:?}", other),
+        }
     }
 
     #[test]

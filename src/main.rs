@@ -769,6 +769,7 @@ fn run_cli_mode() -> Result<(), String> {
     }
     match args[0].as_str() {
         "read" => run_read_cli(args.get(1).map(|s| s.as_str())),
+        "read-scripts" => run_read_scripts_cli(args.get(1).map(|s| s.as_str())),
         "dump-clipboard" => run_dump_clipboard_cli(&args[1..]),
         "decode-table" => run_decode_table_cli(&args[1..]),
         "encode-table" => run_encode_table_cli(&args[1..]),
@@ -826,7 +827,7 @@ fn run_cli_mode() -> Result<(), String> {
         "data" => run_data_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, census, dump-clipboard, decode-table, encode-table, validate-table, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
+            "Unknown command: {}. Use: read, read-scripts, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, census, dump-clipboard, decode-table, encode-table, validate-table, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
             args[0]
         )),
     }
@@ -1697,6 +1698,63 @@ fn run_read_cli(output_path: Option<&str>) -> Result<(), String> {
         println!("{}", text);
     }
     Ok(())
+}
+
+/// `read-scripts <dir>` — the clipboard holds a whole folder (or several
+/// scripts) copied from the Script Workspace, not one script's steps. Mirror
+/// the FileMaker folder structure into `<dir>` as one `.fmscript` per script.
+fn run_read_scripts_cli(output_dir: Option<&str>) -> Result<(), String> {
+    let dir = output_dir.ok_or("Usage: fm-bridge read-scripts <output-dir>")?;
+    let data = clipboard::read_fm_clipboard()?;
+    let xml = xmss::strip_header(&data)?;
+    let kind = snippet::detect(&xml);
+    if !matches!(kind, snippet::SnippetKind::Scripts { .. }) {
+        return Err(format!(
+            "El portapapeles tiene {}, no una carpeta o lista de scripts.",
+            kind.label()
+        ));
+    }
+    let tree = xmss::parse_script_catalog(&xml)?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("No se puede crear {}: {}", dir, e))?;
+    let (scripts, folders) = write_script_catalog_tree(&tree, std::path::Path::new(dir))?;
+    println!("{} script(s) en {} carpeta(s) → {}", scripts, folders, dir);
+    Ok(())
+}
+
+/// Recursively write a parsed script catalog to disk, one `.fmscript` per
+/// script and one subdirectory per `<Group>`, mirroring Script Workspace.
+/// Returns (scripts written, folders created).
+fn write_script_catalog_tree(
+    nodes: &[xmss::ScriptCatalogNode],
+    dir: &std::path::Path,
+) -> Result<(usize, usize), String> {
+    let mut scripts = 0usize;
+    let mut folders = 0usize;
+    for node in nodes {
+        match node {
+            xmss::ScriptCatalogNode::Separator => {}
+            xmss::ScriptCatalogNode::Script { id, name, script } => {
+                let safe_name = fmsavexml::sanitize_filename(name);
+                let filename = format!("{:04}_{}.fmscript", id, safe_name);
+                let text = text_format::format_script(script);
+                let path = dir.join(&filename);
+                std::fs::write(&path, &text)
+                    .map_err(|e| format!("No se puede escribir {}: {}", path.display(), e))?;
+                scripts += 1;
+            }
+            xmss::ScriptCatalogNode::Folder { name, children } => {
+                let safe_name = fmsavexml::sanitize_filename(name);
+                let subdir = dir.join(&safe_name);
+                std::fs::create_dir_all(&subdir)
+                    .map_err(|e| format!("No se puede crear {}: {}", subdir.display(), e))?;
+                folders += 1;
+                let (s, f) = write_script_catalog_tree(children, &subdir)?;
+                scripts += s;
+                folders += f;
+            }
+        }
+    }
+    Ok((scripts, folders))
 }
 
 fn run_write_cli(file_path: &str) -> Result<(), String> {

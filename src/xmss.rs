@@ -74,6 +74,11 @@ pub struct ScriptStep {
     /// (XMSS) form uses `<FileReference name="...">`. Both feed this field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub script_target_file: Option<String>,
+    /// The clipboard's `<FileReference>` element for that file, verbatim (its id
+    /// and UniversalPathList), so a round trip re-emits exactly what FileMaker
+    /// wrote instead of a reconstruction. Only set by the XMSS decode path.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub script_target_file_xml: Option<String>,
     pub current_script_mode: Option<String>,
     // For Go to Record/Request/Page (GoToRecord shape).
     pub goto_location: Option<String>,
@@ -517,9 +522,9 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     }
                     // Same thing, real clipboard shape: <FileReference id name>
                     // <UniversalPathList>file:Name</UniversalPathList></FileReference>.
-                    // The path list itself isn't preserved — FM resolves the link by
-                    // name/id on paste, same as DataSource above.
+                    // The whole element is also kept verbatim (see the End arm).
                     b"FileReference" => {
+                        parser.file_ref_start = Some(pos_before);
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"name" {
                                 parser.script_target_file =
@@ -833,6 +838,20 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                     b"DistanceFromLeft" => {
                         parser.pop_target(TextTarget::WinLeft);
                     }
+                    b"FileReference" => {
+                        // `pos_before` is where `</FileReference>` starts. A
+                        // self-closing element has no closing tag to slice, so
+                        // it falls back to the reconstruction on encode.
+                        const CLOSE: &str = "</FileReference>";
+                        if let Some(start) = parser.file_ref_start.take() {
+                            let end = pos_before + CLOSE.len();
+                            if let Some(raw) = xml_clean.get(start..end) {
+                                if raw.ends_with(CLOSE) {
+                                    parser.script_target_file_xml = raw.to_string();
+                                }
+                            }
+                        }
+                    }
                     b"Criteria" => {
                         if let (Some(req), Some(c)) = (
                             parser.current_find_request.as_mut(),
@@ -930,6 +949,8 @@ struct StepParser {
     script_target_name: String,
     script_target_id: String,
     script_target_file: String,
+    script_target_file_xml: String,
+    file_ref_start: Option<usize>,
     current_script_mode: String,
     goto_location: String,
     goto_exit_after_last: String,
@@ -1111,6 +1132,11 @@ impl StepParser {
                 None
             } else {
                 Some(self.script_target_file.clone())
+            },
+            script_target_file_xml: if self.script_target_file_xml.is_empty() {
+                None
+            } else {
+                Some(self.script_target_file_xml.clone())
             },
             current_script_mode: if self.current_script_mode.is_empty() {
                 None
@@ -1639,16 +1665,23 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                     xml_escape(mode)
                 ));
             }
-            // Cross-file target: FM re-resolves the external file by name/path on
-            // paste, so a synthetic id="1" (this step's own FileReference, not a
-            // document-wide catalog) round-trips fine even though we don't preserve
-            // the original numeric id or the exact UniversalPathList path.
+            // Cross-file target. Prefer FileMaker's own element, verbatim, as long
+            // as the file it names is still the one this step targets (the text
+            // round trip carries only the name, so an edit there wins). Otherwise
+            // reconstruct it: FM re-resolves the file by name on paste.
             if let Some(file) = &step.script_target_file {
-                xml.push_str(&format!(
-                    "<FileReference id=\"1\" name=\"{}\"><UniversalPathList>file:{}</UniversalPathList></FileReference>",
-                    xml_escape(file),
-                    xml_escape(file)
-                ));
+                let same_file = step
+                    .script_target_file_xml
+                    .as_deref()
+                    .filter(|raw| raw.contains(&format!("name=\"{}\"", xml_escape(file))));
+                match same_file {
+                    Some(raw) => xml.push_str(raw),
+                    None => xml.push_str(&format!(
+                        "<FileReference id=\"1\" name=\"{}\"><UniversalPathList>file:{}</UniversalPathList></FileReference>",
+                        xml_escape(file),
+                        xml_escape(file)
+                    )),
+                }
             }
             if let Some(calc) = &step.calculation {
                 xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
@@ -2230,6 +2263,26 @@ mod tests {
             again.steps[0].script_target_file.as_deref(),
             Some("Aba_Connect")
         );
+    }
+
+    #[test]
+    fn cross_file_reference_is_re_emitted_verbatim() {
+        let xml = CROSS_FILE_PERFORM.replace("file:Aba_Connect", "file:/Volumes/x/Aba_Connect");
+        let script = parse_fmxml_snippet(&xml).unwrap();
+        let out = build_xml_from_script(&script).unwrap();
+        assert!(
+            out.contains(r#"<FileReference id="27" name="Aba_Connect"><UniversalPathList>file:/Volumes/x/Aba_Connect</UniversalPathList></FileReference>"#),
+            "original id/path lost: {}",
+            out
+        );
+    }
+
+    #[test]
+    fn editing_the_target_file_wins_over_the_stored_reference() {
+        let mut script = parse_fmxml_snippet(CROSS_FILE_PERFORM).unwrap();
+        script.steps[0].script_target_file = Some("Otro".to_string());
+        let out = build_xml_from_script(&script).unwrap();
+        assert!(out.contains(r#"name="Otro""#) && !out.contains("Aba_Connect"));
     }
 
     #[test]

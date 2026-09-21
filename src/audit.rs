@@ -322,6 +322,7 @@ mod tests {
                     script_target_id: Some("3".to_string()),
                     script_target_name: Some("Remote".to_string()),
                     script_target_file: Some("Other.fmp12".to_string()),
+                    script_target_file_xml: None,
                     ..Default::default()
                 },
                 // broken layout

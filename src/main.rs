@@ -769,6 +769,8 @@ fn run_cli_mode() -> Result<(), String> {
     }
     match args[0].as_str() {
         "read" => run_read_cli(args.get(1).map(|s| s.as_str())),
+        "read-scripts" => run_read_scripts_cli(args.get(1).map(|s| s.as_str())),
+        "write-scripts" => run_write_scripts_cli(args.get(1).map(|s| s.as_str())),
         "dump-clipboard" => run_dump_clipboard_cli(&args[1..]),
         "decode-table" => run_decode_table_cli(&args[1..]),
         "encode-table" => run_encode_table_cli(&args[1..]),
@@ -826,7 +828,7 @@ fn run_cli_mode() -> Result<(), String> {
         "data" => run_data_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, census, dump-clipboard, decode-table, encode-table, validate-table, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
+            "Unknown command: {}. Use: read, read-scripts, write, write-scripts, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, census, dump-clipboard, decode-table, encode-table, validate-table, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
             args[0]
         )),
     }
@@ -1699,12 +1701,190 @@ fn run_read_cli(output_path: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+/// `read-scripts <dir>` — the clipboard holds a whole folder (or several
+/// scripts) copied from the Script Workspace, not one script's steps. Mirror
+/// the FileMaker folder structure into `<dir>` as one `.fmscript` per script.
+fn run_read_scripts_cli(output_dir: Option<&str>) -> Result<(), String> {
+    let dir = output_dir.ok_or("Usage: fm-bridge read-scripts <output-dir>")?;
+    let data = clipboard::read_fm_clipboard()?;
+    let xml = xmss::strip_header(&data)?;
+    let kind = snippet::detect(&xml);
+    if !matches!(kind, snippet::SnippetKind::Scripts { .. }) {
+        return Err(format!(
+            "El portapapeles tiene {}, no una carpeta o lista de scripts.",
+            kind.label()
+        ));
+    }
+    let tree = xmss::parse_script_catalog(&xml)?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("No se puede crear {}: {}", dir, e))?;
+    let (scripts, folders) = write_script_catalog_tree(&tree, std::path::Path::new(dir))?;
+    println!("{} script(s) en {} carpeta(s) → {}", scripts, folders, dir);
+    Ok(())
+}
+
+/// Recursively write a parsed script catalog to disk, one `.fmscript` per
+/// script and one subdirectory per `<Group>`, mirroring Script Workspace.
+/// Every entry — script, folder and separator — keeps its original id as a
+/// `{:04}_` filename prefix, so `read_script_catalog_dir` (the inverse, for
+/// `write-scripts`) can restore both the id and the original ordering.
+/// Returns (scripts written, folders created).
+fn write_script_catalog_tree(
+    nodes: &[xmss::ScriptCatalogNode],
+    dir: &std::path::Path,
+) -> Result<(usize, usize), String> {
+    let mut scripts = 0usize;
+    let mut folders = 0usize;
+    for node in nodes {
+        match node {
+            xmss::ScriptCatalogNode::Separator { id } => {
+                let path = dir.join(format!("{:04}_-.fmscript", id));
+                std::fs::write(&path, "")
+                    .map_err(|e| format!("No se puede escribir {}: {}", path.display(), e))?;
+            }
+            xmss::ScriptCatalogNode::Script { id, name, script } => {
+                let safe_name = fmsavexml::sanitize_filename(name);
+                let filename = format!("{:04}_{}.fmscript", id, safe_name);
+                let text = text_format::format_script(script);
+                let path = dir.join(&filename);
+                std::fs::write(&path, &text)
+                    .map_err(|e| format!("No se puede escribir {}: {}", path.display(), e))?;
+                scripts += 1;
+            }
+            xmss::ScriptCatalogNode::Folder { id, name, children } => {
+                let safe_name = fmsavexml::sanitize_filename(name);
+                let subdir = dir.join(format!("{:04}_{}", id, safe_name));
+                std::fs::create_dir_all(&subdir)
+                    .map_err(|e| format!("No se puede crear {}: {}", subdir.display(), e))?;
+                folders += 1;
+                let (s, f) = write_script_catalog_tree(children, &subdir)?;
+                scripts += s;
+                folders += f;
+            }
+        }
+    }
+    Ok((scripts, folders))
+}
+
 fn run_write_cli(file_path: &str) -> Result<(), String> {
     let text = read_file_to_string(file_path)?;
     let xmss_data = xmss::encode_xmss(&text)?;
     clipboard::write_fm_clipboard(&xmss_data)?;
     println!("Script written to clipboard from {}", file_path);
     Ok(())
+}
+
+/// `write-scripts <dir>` — the inverse of `read-scripts`: read a tree of
+/// `.fmscript` files (subdirectories = folders, `{:04}_-.fmscript` = a
+/// separator) and write it to the clipboard as a script catalog, ready to
+/// paste into the Script Workspace as a whole folder.
+fn run_write_scripts_cli(input_dir: Option<&str>) -> Result<(), String> {
+    let dir = input_dir.ok_or("Usage: fm-bridge write-scripts <input-dir>")?;
+    let path = std::path::Path::new(dir);
+    if !path.is_dir() {
+        return Err(format!("{} no es una carpeta", dir));
+    }
+    let (tree, scripts, folders) = read_script_catalog_dir(path)?;
+    if scripts == 0 {
+        return Err(format!("No se encontró ningún .fmscript en {}", dir));
+    }
+    let xml = xmss::build_script_catalog_xml(&tree)?;
+    clipboard::write_fm_clipboard(xml.as_bytes())?;
+    println!(
+        "{} script(s) en {} carpeta(s) → portapapeles (listo para pegar)",
+        scripts, folders
+    );
+    Ok(())
+}
+
+/// Read a directory tree written by `read-scripts` (or authored by hand) back
+/// into a script catalog. A `{:04}_` prefix on a file or subdirectory name
+/// restores its original id and ordering; without one, entries are sorted by
+/// name and assigned fresh ids starting at 1. `{:04}_-.fmscript` (or a bare
+/// `-.fmscript`) is a separator, matching what `read-scripts` writes for one.
+/// Returns (tree, scripts written, folders found).
+fn read_script_catalog_dir(
+    dir: &std::path::Path,
+) -> Result<(Vec<xmss::ScriptCatalogNode>, usize, usize), String> {
+    let mut entries: Vec<std::fs::DirEntry> = std::fs::read_dir(dir)
+        .map_err(|e| format!("No se puede leer {}: {}", dir.display(), e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("No se puede leer {}: {}", dir.display(), e))?;
+    // Sort by the numeric prefix when every entry has one (this is what
+    // read-scripts always writes), falling back to plain name order for a
+    // hand-authored folder that has none.
+    entries.sort_by_key(|e| {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let prefix = name.split('_').next().and_then(|p| p.parse::<u32>().ok());
+        (prefix.unwrap_or(u32::MAX), name)
+    });
+
+    let mut tree = Vec::new();
+    let mut scripts = 0usize;
+    let mut folders = 0usize;
+    let mut next_id: u32 = 1;
+    for entry in entries {
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("No se puede leer {}: {}", entry.path().display(), e))?;
+        let (id, stem) = split_id_prefix(&file_name, file_type.is_dir(), &mut next_id);
+
+        if file_type.is_dir() {
+            let (children, s, f) = read_script_catalog_dir(&entry.path())?;
+            tree.push(xmss::ScriptCatalogNode::Folder {
+                id,
+                name: stem,
+                children,
+            });
+            scripts += s;
+            folders += f + 1;
+        } else if file_name.ends_with(".fmscript") {
+            if stem == "-" {
+                tree.push(xmss::ScriptCatalogNode::Separator { id });
+                continue;
+            }
+            let text = read_file_to_string(
+                entry
+                    .path()
+                    .to_str()
+                    .ok_or_else(|| format!("Ruta no válida: {}", entry.path().display()))?,
+            )?;
+            let script = crate::text_format::parse_text_to_script(&text).map_err(|e| {
+                format!(
+                    "{}: línea {}: {}",
+                    entry.path().display(),
+                    e.line,
+                    e.message
+                )
+            })?;
+            tree.push(xmss::ScriptCatalogNode::Script {
+                id,
+                name: stem,
+                script,
+            });
+            scripts += 1;
+        }
+    }
+    Ok((tree, scripts, folders))
+}
+
+/// Split a `{:04}_name` filename (directory name or `.fmscript` file, without
+/// its extension) into its id and stem. No numeric prefix: assign the next
+/// fresh id and use the whole name as the stem.
+fn split_id_prefix(file_name: &str, is_dir: bool, next_id: &mut u32) -> (u32, String) {
+    let base = if is_dir {
+        file_name.to_string()
+    } else {
+        file_name.trim_end_matches(".fmscript").to_string()
+    };
+    if let Some((prefix, rest)) = base.split_once('_') {
+        if let Ok(id) = prefix.parse::<u32>() {
+            return (id, rest.to_string());
+        }
+    }
+    let id = *next_id;
+    *next_id += 1;
+    (id, base)
 }
 
 fn run_debug_cli() -> Result<(), String> {

@@ -1869,8 +1869,7 @@ fn build_step_from_name(
             }
         }
         Some(StepShape::PerformScript) => {
-            let (script_name, script_id, script_file, calc) =
-                parse_perform_script_content(content);
+            let (script_name, script_id, script_file, calc) = parse_perform_script_content(content);
             ScriptStep {
                 name: name.to_string(),
                 enable: enabled,
@@ -2986,7 +2985,12 @@ fn parse_goto_record_content(
 /// The script name is detected by a leading `"` and closes at the matching `"`.
 fn parse_perform_script_content(
     content: Option<&str>,
-) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     let content = match content {
         Some(c) => c.trim(),
         None => return (None, None, None, None),

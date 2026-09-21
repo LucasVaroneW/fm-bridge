@@ -2210,6 +2210,52 @@ mod tests {
         assert_eq!(script.steps.len(), 1);
     }
 
+    const CROSS_FILE_PERFORM: &str = r#"<fmxmlsnippet type="FMObjectList"><Step enable="True" id="1" name="Perform Script"><FileReference id="27" name="Aba_Connect"><UniversalPathList>file:Aba_Connect</UniversalPathList></FileReference><Script id="152" name="Connect"></Script></Step></fmxmlsnippet>"#;
+
+    #[test]
+    fn cross_file_perform_script_keeps_its_external_file() {
+        let script = parse_fmxml_snippet(CROSS_FILE_PERFORM).unwrap();
+        let step = &script.steps[0];
+        assert_eq!(step.script_target_file.as_deref(), Some("Aba_Connect"));
+        assert_eq!(step.script_target_name.as_deref(), Some("Connect"));
+    }
+
+    #[test]
+    fn cross_file_perform_script_survives_encode_and_decode() {
+        let script = parse_fmxml_snippet(CROSS_FILE_PERFORM).unwrap();
+        let xml = build_xml_from_script(&script).unwrap();
+        assert!(xml.contains("<FileReference"), "lost the file reference");
+        let again = parse_fmxml_snippet(&xml).unwrap();
+        assert_eq!(
+            again.steps[0].script_target_file.as_deref(),
+            Some("Aba_Connect")
+        );
+    }
+
+    #[test]
+    fn same_file_perform_script_gets_no_file_reference() {
+        let xml = r#"<fmxmlsnippet type="FMObjectList"><Step enable="True" id="1" name="Perform Script"><Script id="152" name="Connect"></Script></Step></fmxmlsnippet>"#;
+        let script = parse_fmxml_snippet(xml).unwrap();
+        assert_eq!(script.steps[0].script_target_file, None);
+        assert!(
+            !build_xml_from_script(&script)
+                .unwrap()
+                .contains("FileReference")
+        );
+    }
+
+    #[test]
+    fn cross_file_perform_script_survives_the_text_round_trip() {
+        let script = parse_fmxml_snippet(CROSS_FILE_PERFORM).unwrap();
+        let text = crate::text_format::format_script(&script);
+        assert!(text.contains("from \"Aba_Connect\""), "text was: {}", text);
+        let parsed = crate::text_format::parse_text_to_script(&text).unwrap();
+        assert_eq!(
+            parsed.steps[0].script_target_file.as_deref(),
+            Some("Aba_Connect")
+        );
+    }
+
     #[test]
     fn parse_tolerates_bom() {
         let with_bom = format!("\u{FEFF}{}", SNIPPET);

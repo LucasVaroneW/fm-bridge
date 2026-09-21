@@ -89,6 +89,10 @@ pub enum StepShape {
     /// <Lock state="..."/> + <ShowHide value="..."/> + <IncludeEditRecordToolbar state="..."/>
     /// (Show/Hide Toolbars).
     ShowHideToolbars,
+    /// <PauseTime value="ForDuration"/> + <Calculation> (Pause/Resume Script).
+    /// Text/parse behave like plain Calculation; only the XML encode differs —
+    /// without the PauseTime marker FM doesn't recognize the duration on paste.
+    PauseResumeScript,
 }
 
 /// Internal step kind identifier from steps.toml.

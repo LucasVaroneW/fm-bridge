@@ -1261,6 +1261,7 @@ impl StepParser {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ScriptCatalogNode {
     Folder {
+        id: u32,
         name: String,
         children: Vec<ScriptCatalogNode>,
     },
@@ -1270,7 +1271,7 @@ pub enum ScriptCatalogNode {
         script: FmScript,
     },
     /// A "-" entry with no steps: the visual separator line in a script folder.
-    Separator,
+    Separator { id: u32 },
 }
 
 /// Parse a clipboard snippet holding one or more whole scripts, optionally
@@ -1293,7 +1294,7 @@ pub fn parse_script_catalog(xml: &str) -> Result<Vec<ScriptCatalogNode>, String>
     // stack[0] is the root list; a `<Group>` pushes a new list, popped (and
     // wrapped into a Folder node) on `</Group>`.
     let mut stack: Vec<Vec<ScriptCatalogNode>> = vec![Vec::new()];
-    let mut folder_names: Vec<String> = Vec::new();
+    let mut folder_names: Vec<(u32, String)> = Vec::new();
 
     struct Capture {
         id: u32,
@@ -1316,7 +1317,8 @@ pub fn parse_script_catalog(xml: &str) -> Result<Vec<ScriptCatalogNode>, String>
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => match e.name().as_ref() {
                 b"Group" if capture.is_none() => {
-                    folder_names.push(attr_value(e, b"name"));
+                    let id = attr_value(e, b"id").parse().unwrap_or(0);
+                    folder_names.push((id, attr_value(e, b"name")));
                     stack.push(Vec::new());
                 }
                 b"Script" => {
@@ -1335,12 +1337,12 @@ pub fn parse_script_catalog(xml: &str) -> Result<Vec<ScriptCatalogNode>, String>
             },
             Ok(Event::End(ref e)) => match e.name().as_ref() {
                 b"Group" if capture.is_none() => {
-                    let name = folder_names.pop().unwrap_or_default();
+                    let (id, name) = folder_names.pop().unwrap_or_default();
                     let children = stack.pop().unwrap_or_default();
                     stack
                         .last_mut()
                         .ok_or("Unbalanced </Group> in script catalog")?
-                        .push(ScriptCatalogNode::Folder { name, children });
+                        .push(ScriptCatalogNode::Folder { id, name, children });
                 }
                 b"Script" => {
                     let done = match capture.as_mut() {
@@ -1354,7 +1356,7 @@ pub fn parse_script_catalog(xml: &str) -> Result<Vec<ScriptCatalogNode>, String>
                         let cap = capture.take().unwrap();
                         let inner = &xml_clean[cap.start..pos_before];
                         let node = if cap.name == "-" && inner.trim().is_empty() {
-                            ScriptCatalogNode::Separator
+                            ScriptCatalogNode::Separator { id: cap.id }
                         } else {
                             let wrapped = format!(
                                 "<fmxmlsnippet type=\"FMObjectList\">{}</fmxmlsnippet>",
@@ -1392,6 +1394,48 @@ pub fn parse_script_catalog(xml: &str) -> Result<Vec<ScriptCatalogNode>, String>
         return Err("Unbalanced <Group> in script catalog".to_string());
     }
     Ok(stack.pop().unwrap())
+}
+
+/// Build the clipboard snippet for a whole script catalog — the inverse of
+/// `parse_script_catalog`. Ready to write to the clipboard and paste into the
+/// Script Workspace, reconstructing folders and separators along with it.
+pub fn build_script_catalog_xml(nodes: &[ScriptCatalogNode]) -> Result<String, String> {
+    let mut xml = String::from("<fmxmlsnippet type=\"FMObjectList\">");
+    xml.push_str(&build_script_catalog_nodes_xml(nodes)?);
+    xml.push_str("</fmxmlsnippet>");
+    Ok(xml)
+}
+
+fn build_script_catalog_nodes_xml(nodes: &[ScriptCatalogNode]) -> Result<String, String> {
+    let mut xml = String::new();
+    for node in nodes {
+        match node {
+            ScriptCatalogNode::Separator { id } => {
+                xml.push_str(&format!("<Script id=\"{}\" name=\"-\"></Script>", id));
+            }
+            ScriptCatalogNode::Script { id, name, script } => {
+                xml.push_str(&format!(
+                    "<Script id=\"{}\" name=\"{}\">",
+                    id,
+                    xml_escape(name)
+                ));
+                for step in &script.steps {
+                    xml.push_str(&build_step_xml(step)?);
+                }
+                xml.push_str("</Script>");
+            }
+            ScriptCatalogNode::Folder { id, name, children } => {
+                xml.push_str(&format!(
+                    "<Group id=\"{}\" name=\"{}\">",
+                    id,
+                    xml_escape(name)
+                ));
+                xml.push_str(&build_script_catalog_nodes_xml(children)?);
+                xml.push_str("</Group>");
+            }
+        }
+    }
+    Ok(xml)
 }
 
 // ─── XML encoding ───
@@ -2005,12 +2049,12 @@ mod script_catalog_tests {
         let tree = parse_script_catalog(xml).unwrap();
         assert_eq!(tree.len(), 1);
         match &tree[0] {
-            ScriptCatalogNode::Folder { name, children } => {
+            ScriptCatalogNode::Folder { name, children, .. } => {
                 assert_eq!(name, "OUTER");
-                assert!(matches!(children[0], ScriptCatalogNode::Separator));
+                assert!(matches!(children[0], ScriptCatalogNode::Separator { .. }));
                 assert!(matches!(children[1], ScriptCatalogNode::Script { .. }));
                 match &children[2] {
-                    ScriptCatalogNode::Folder { name, children } => {
+                    ScriptCatalogNode::Folder { name, children, .. } => {
                         assert_eq!(name, "INNER");
                         assert_eq!(children.len(), 1);
                     }
@@ -2044,6 +2088,26 @@ mod script_catalog_tests {
             }
             other => panic!("expected Script, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn build_script_catalog_xml_round_trips_through_parse() {
+        let xml = r#"<fmxmlsnippet type="FMObjectList">
+            <Group id="10" name="OUTER">
+                <Script includeInMenu="True" id="1" name="-"></Script>
+                <Script includeInMenu="True" id="2" name="Top"><Step enable="True" id="1" name="Comment"><Text>t</Text></Step></Script>
+                <Group id="11" name="INNER">
+                    <Script includeInMenu="True" id="3" name="Nested"><Step enable="True" id="1" name="Comment"><Text>n</Text></Step></Script>
+                </Group>
+            </Group>
+        </fmxmlsnippet>"#;
+        let tree = parse_script_catalog(xml).unwrap();
+        let rebuilt_xml = build_script_catalog_xml(&tree).unwrap();
+        let tree2 = parse_script_catalog(&rebuilt_xml).unwrap();
+
+        // Comparing the two trees' debug output is enough: it will differ if
+        // ids, names, nesting, or step content diverge across the round trip.
+        assert_eq!(format!("{:?}", tree), format!("{:?}", tree2));
     }
 
     #[test]

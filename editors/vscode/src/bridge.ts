@@ -375,3 +375,20 @@ export async function runSlice(
 ): Promise<string> {
   return spawnSubcommand(["slice", outputDir, sliceDir, ...layouts]);
 }
+
+/**
+ * Extract a whole script folder (or several scripts) copied from the Script
+ * Workspace — the clipboard holds `<Group>`/`<Script>` nesting, not a single
+ * script's steps. Writes one `.fmscript` per script, mirroring subfolders.
+ */
+export async function runReadScripts(outputDir: string): Promise<string> {
+  return spawnSubcommand(["read-scripts", outputDir]);
+}
+
+/**
+ * The inverse of `runReadScripts`: put a tree of `.fmscript` files on the
+ * clipboard as a script catalog, ready to paste into the Script Workspace.
+ */
+export async function runWriteScripts(inputDir: string): Promise<string> {
+  return spawnSubcommand(["write-scripts", inputDir]);
+}

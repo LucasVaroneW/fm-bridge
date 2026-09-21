@@ -91,6 +91,16 @@
         "category": "fm-bridge"
       },
       {
+        "command": "fm-bridge.readScriptsFromClipboard",
+        "title": "Read scripts folder from clipboard",
+        "category": "fm-bridge"
+      },
+      {
+        "command": "fm-bridge.writeScriptsToClipboard",
+        "title": "Write scripts folder to clipboard",
+        "category": "fm-bridge"
+      },
+      {
         "command": "fm-bridge.writeTableFields",
         "title": "Write only some table fields to clipboard…",
         "category": "fm-bridge"

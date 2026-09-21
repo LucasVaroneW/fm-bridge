@@ -37,7 +37,12 @@ import {
   queryCommand,
   setDataLogChannel,
 } from "./data";
-import { inspectXmlCommand, sliceCommand } from "./inspect";
+import {
+  inspectXmlCommand,
+  readScriptsFromClipboardCommand,
+  sliceCommand,
+  writeScriptsToClipboardCommand,
+} from "./inspect";
 import { copyMcpConfigCommand } from "./mcpConfig";
 import { StepFixProvider } from "./quickfix";
 import { ensureStableBinaries } from "./stableBin";
@@ -81,6 +86,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       "fm-bridge.readFromClipboard",
       readFromClipboard,
+    ),
+    vscode.commands.registerCommand(
+      "fm-bridge.readScriptsFromClipboard",
+      readScriptsFromClipboardCommand,
+    ),
+    vscode.commands.registerCommand(
+      "fm-bridge.writeScriptsToClipboard",
+      writeScriptsToClipboardCommand,
     ),
     vscode.commands.registerCommand(
       "fm-bridge.writeTableFields",

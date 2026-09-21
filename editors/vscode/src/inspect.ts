@@ -7,9 +7,16 @@
 // notification.
 
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { BinaryNotFoundError, runInspect, runSlice } from "./bridge";
+import {
+  BinaryNotFoundError,
+  runInspect,
+  runReadScripts,
+  runSlice,
+  runWriteScripts,
+} from "./bridge";
 
 /** One entry of the inspect output's `layouts.json` index. */
 interface LayoutIndexEntry {
@@ -111,6 +118,69 @@ export async function sliceCommand(): Promise<void> {
       sliceDir,
       `Sliced ${layouts.length} layout(s) → ${sliceDir}`,
     );
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+/**
+ * Extract a whole folder (or several scripts) copied from the Script
+ * Workspace into a matching tree of `.fmscript` files. A single script or
+ * loose steps still go through "Read script from clipboard" — this is for
+ * when the clipboard holds a `<Group>`/`<Script>` catalog instead.
+ */
+export async function readScriptsFromClipboardCommand(): Promise<void> {
+  try {
+    const defaultOut = path.join(
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir(),
+      "fm-scripts",
+    );
+    const outputDir = await vscode.window.showInputBox({
+      title: "fm-bridge: script folder output",
+      prompt: "Where to write the scripts (copy the folder in FileMaker's Script Workspace first)",
+      value: defaultOut,
+      ignoreFocusOut: true,
+    });
+    if (!outputDir) {
+      return;
+    }
+
+    const summary = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "fm-bridge: extracting scripts from clipboard…",
+        cancellable: false,
+      },
+      async () => runReadScripts(outputDir),
+    );
+
+    // No single "primary" file to open here (it's a whole tree) — just offer
+    // to reveal the folder.
+    const choice = await vscode.window.showInformationMessage(
+      `fm-bridge: ${summary.trim()}`,
+      "Reveal folder",
+    );
+    if (choice === "Reveal folder") {
+      await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(outputDir));
+    }
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+/**
+ * Put a folder of `.fmscript` files (as written by "Read scripts folder from
+ * clipboard", subfolders included) on the clipboard, ready to paste into
+ * FileMaker's Script Workspace as a whole folder.
+ */
+export async function writeScriptsToClipboardCommand(): Promise<void> {
+  try {
+    const inputDir = await pickFolder("Select a folder of .fmscript files");
+    if (!inputDir) {
+      return;
+    }
+    const summary = await runWriteScripts(inputDir);
+    void vscode.window.showInformationMessage(`fm-bridge: ${summary.trim()}`);
   } catch (err) {
     reportError(err);
   }

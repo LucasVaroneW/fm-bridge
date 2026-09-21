@@ -2,6 +2,7 @@
 //
 // Wires up the human-facing features over the fm-bridge Rust binary:
 //   - Read script from clipboard  → opens the decoded .fmscript
+//   - Save object from clipboard  → captures a table/fields/etc. as raw XML
 //   - Write script to clipboard   → encodes the active .fmscript for FileMaker
 //   - Diagnostics                 → underlines format errors (on type + on save)
 //   - Autocomplete                → step names from the binary's catalog
@@ -16,6 +17,10 @@
 import * as vscode from "vscode";
 import {
   BinaryNotFoundError,
+  type ClipboardDump,
+  dumpClipboard,
+  type ReadResult,
+  type TextKind,
   parseScript,
   readClipboard,
   reformat,
@@ -23,6 +28,7 @@ import {
   resolveBinaryPath,
   resolveIds,
   writeClipboard,
+  writeTableFields,
 } from "./bridge";
 import { StepCompletionProvider, resetCatalogCache } from "./completion";
 import {
@@ -31,12 +37,26 @@ import {
   queryCommand,
   setDataLogChannel,
 } from "./data";
-import { inspectXmlCommand, sliceCommand } from "./inspect";
+import {
+  inspectXmlCommand,
+  readScriptsFromClipboardCommand,
+  sliceCommand,
+  writeScriptsToClipboardCommand,
+} from "./inspect";
 import { copyMcpConfigCommand } from "./mcpConfig";
 import { StepFixProvider } from "./quickfix";
 import { ensureStableBinaries } from "./stableBin";
 
 const LANGUAGE = "fmscript";
+/** Tables as text. Same engine, same commands, different grammar. */
+const TABLE_LANGUAGE = "fmtable";
+
+/** The two documents this extension owns. */
+const OWNED_LANGUAGES = [LANGUAGE, TABLE_LANGUAGE];
+
+function kindOf(doc: vscode.TextDocument): TextKind {
+  return doc.languageId === TABLE_LANGUAGE ? "table" : "script";
+}
 
 /** Diagnostic log, visible in Output → "fm-bridge". Set in activate(). */
 let output: vscode.OutputChannel | undefined;
@@ -66,6 +86,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       "fm-bridge.readFromClipboard",
       readFromClipboard,
+    ),
+    vscode.commands.registerCommand(
+      "fm-bridge.readScriptsFromClipboard",
+      readScriptsFromClipboardCommand,
+    ),
+    vscode.commands.registerCommand(
+      "fm-bridge.writeScriptsToClipboard",
+      writeScriptsToClipboardCommand,
+    ),
+    vscode.commands.registerCommand(
+      "fm-bridge.writeTableFields",
+      writeTableFieldsCommand,
+    ),
+    vscode.commands.registerCommand(
+      "fm-bridge.dumpClipboard",
+      dumpClipboardCommand,
     ),
     vscode.commands.registerCommand(
       "fm-bridge.writeToClipboard",
@@ -133,11 +169,137 @@ async function readFromClipboard(): Promise<void> {
       );
       return;
     }
+    // A table comes back as `.fmtable`, a script as `.fmscript`. The engine
+    // says which; the editor never guesses.
+    const info = resp.data as ReadResult | undefined;
     const doc = await vscode.workspace.openTextDocument({
-      language: LANGUAGE,
+      language: info?.kind === "table" ? TABLE_LANGUAGE : LANGUAGE,
       content: resp.script_text,
     });
     await vscode.window.showTextDocument(doc);
+
+    // Principle 5: what was not carried over is shown, never left implicit.
+    const dropped = info?.ledger?.dropped ?? [];
+    if (dropped.length > 0) {
+      void vscode.window
+        .showWarningMessage(
+          `fm-bridge: ${dropped.length} elemento(s) no se convirtieron a texto.`,
+          "Ver detalle",
+        )
+        .then((pick) => {
+          if (pick === "Ver detalle") {
+            log(`no convertidos (${dropped.length}):`);
+            for (const d of dropped) {
+              log(`  · ${d}`);
+            }
+            output?.show();
+          }
+        });
+    }
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+/**
+ * Save whatever FileMaker object is on the clipboard as raw XML.
+ *
+ * `readFromClipboard` only handles script steps, because that is all the codec
+ * decodes. But FileMaker copies tables, fields, custom functions and value
+ * lists through the very same clipboard, and until there is a text format for
+ * those, the useful thing a user can do is **keep the object**: version it,
+ * diff it, or send it in when something is missing. Capturing verbatim is
+ * principle 4 (opaque by default) applied to the clipboard door.
+ */
+/**
+ * Publish only some fields of the open `.fmtable`, for a table that already
+ * exists in FileMaker.
+ *
+ * Pasting a whole table into a file that already has it does not merge: it
+ * creates `PedidosCambios 2`, silently. Once a table is live, every later
+ * change has to go in through the Fields tab as loose fields — so this command
+ * exists precisely for the second and every later round.
+ */
+async function writeTableFieldsCommand(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== TABLE_LANGUAGE) {
+    void vscode.window.showErrorMessage(
+      "fm-bridge: abrí un archivo .fmtable primero.",
+    );
+    return;
+  }
+  try {
+    const text = editor.document.getText();
+    // Field names come straight from the document, in file order, so the list
+    // reads the way the author wrote it.
+    const names: string[] = [];
+    for (const line of text.split(/\r?\n/)) {
+      const m = /^field\s+(\S+)/.exec(line);
+      if (m) {
+        names.push(m[1]);
+      }
+    }
+    if (names.length === 0) {
+      void vscode.window.showErrorMessage(
+        "fm-bridge: este .fmtable no declara ningún campo.",
+      );
+      return;
+    }
+
+    const picked = await vscode.window.showQuickPick(names, {
+      canPickMany: true,
+      title: "¿Qué campos copiar al portapapeles?",
+      placeHolder:
+        "Se pegan en Gestionar → Base de datos → pestaña Campos de la tabla destino",
+    });
+    if (!picked || picked.length === 0) {
+      return;
+    }
+
+    const resp = await writeTableFields(text, picked);
+    if (resp.status !== "ok") {
+      const message =
+        resp.errors && resp.errors.length > 0
+          ? resp.errors.map((e) => `línea ${e.line}: ${e.message}`).join("\n")
+          : (resp.error ?? "no se pudo escribir el portapapeles");
+      void vscode.window.showErrorMessage(`fm-bridge: ${message}`);
+      return;
+    }
+    void vscode.window.showInformationMessage(
+      `fm-bridge: ${picked.length} campo(s) copiados — pegalos en la pestaña Campos de la tabla.`,
+    );
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+async function dumpClipboardCommand(): Promise<void> {
+  try {
+    const target = await vscode.window.showSaveDialog({
+      title: "Guardar objeto de FileMaker del portapapeles",
+      filters: { XML: ["xml"] },
+      saveLabel: "Guardar",
+    });
+    if (!target) {
+      return;
+    }
+
+    const resp = await dumpClipboard(target.fsPath);
+    if (resp.status !== "ok") {
+      void vscode.window.showErrorMessage(
+        `fm-bridge: ${resp.error ?? "no se pudo leer el portapapeles"}`,
+      );
+      return;
+    }
+
+    // Say what was captured, not just that something was. A user who copied
+    // the wrong thing in FileMaker finds out here, not three steps later.
+    const dump = resp.data as ClipboardDump | undefined;
+    const doc = await vscode.workspace.openTextDocument(target);
+    await vscode.window.showTextDocument(doc);
+    void vscode.window.showInformationMessage(
+      `fm-bridge: guardado ${dump?.label ?? "el objeto del portapapeles"}.`,
+    );
   } catch (err) {
     reportError(err);
   }
@@ -147,15 +309,18 @@ async function writeToClipboard(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     void vscode.window.showErrorMessage(
-      "fm-bridge: open a .fmscript file first.",
+      "fm-bridge: open a .fmscript or .fmtable file first.",
     );
     return;
   }
   try {
-    const resp = await writeClipboard(editor.document.getText());
+    const kind = kindOf(editor.document);
+    const resp = await writeClipboard(editor.document.getText(), kind);
     if (resp.status === "ok") {
       void vscode.window.showInformationMessage(
-        "fm-bridge: script copied — paste it in FileMaker (Cmd/Ctrl+V).",
+        kind === "table"
+          ? "fm-bridge: tabla copiada — pegala en FileMaker en Gestionar → Base de datos → Tablas."
+          : "fm-bridge: script copied — paste it in FileMaker (Cmd/Ctrl+V).",
       );
       return;
     }
@@ -276,12 +441,12 @@ function registerDiagnostics(
   const timers = new Map<string, NodeJS.Timeout>();
 
   const validate = async (doc: vscode.TextDocument): Promise<void> => {
-    if (doc.languageId !== LANGUAGE) {
+    if (!OWNED_LANGUAGES.includes(doc.languageId)) {
       return;
     }
     const name = doc.uri.path.split("/").pop() ?? doc.uri.path;
     try {
-      const resp = await parseScript(doc.getText());
+      const resp = await parseScript(doc.getText(), kindOf(doc));
       // Show warnings even when status is ok (e.g. missing layout IDs).
       if (resp.errors && resp.errors.length > 0) {
         collection.set(
@@ -324,7 +489,7 @@ function registerDiagnostics(
   };
 
   const scheduleValidate = (doc: vscode.TextDocument): void => {
-    if (doc.languageId !== LANGUAGE) {
+    if (!OWNED_LANGUAGES.includes(doc.languageId)) {
       return;
     }
     const validateOnType = vscode.workspace
@@ -360,9 +525,9 @@ function registerDiagnostics(
 
   // Validate already-open .fmscript documents on activation.
   const open = vscode.workspace.textDocuments;
-  const fmDocs = open.filter((d) => d.languageId === LANGUAGE);
+  const fmDocs = open.filter((d) => OWNED_LANGUAGES.includes(d.languageId));
   log(
-    `open documents: ${open.length}, of which fmscript: ${fmDocs.length}` +
+    `open documents: ${open.length}, of which fm-bridge: ${fmDocs.length}` +
       (fmDocs.length === 0 && open.length > 0
         ? " — if your .fmscript shows nothing, check the language mode (bottom-right) says 'FileMaker Script'"
         : ""),

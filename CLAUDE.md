@@ -35,6 +35,12 @@ interchangeable.
   (scripts) today; schema is greenfield (#6).
 - `src/text_format.rs` — `.fmscript` parser/formatter + `lint` (the validator
   behind diagnostics).
+- `src/fmtable.rs` — `.fmtable`: the clipboard↔text codec for **tables**
+  (decode/format/parse/lint/encode). Not byte-exact by design — FileMaker keeps
+  dead payloads; what is not carried is listed in the decode ledger. See
+  `docs/SCHEMA.md`.
+- `src/snippet.rs` — sniffs which FileMaker object a clipboard snippet holds, so
+  `read`/`write` pick the right codec and clipboard type instead of assuming.
 - `src/steps.rs` + `steps.toml` — the step catalog (single source for names,
   shapes, block behavior). `steps.toml` is the data; add steps there.
 - `src/fmsavexml.rs` + `src/slice.rs` — schema parser (`inspect`/`slice`, #6):
@@ -49,6 +55,8 @@ interchangeable.
 - `editors/vscode/` — the VS Code extension (TypeScript).
 - `docs/VISION.md` — north star. `docs/MCP.md` — MCP setup + tools.
   `docs/USAGE.md` — user guide (ES). `docs/RELEASE.md` — build & release flow.
+  `docs/DATA.md` — live data over ODBC (read-only). `docs/SCHEMA.md` — Phase 4
+  design (schema-as-code + migrating out of FileMaker); read before touching it.
 
 ## Build & test
 

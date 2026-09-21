@@ -206,21 +206,84 @@ export async function runJson(
   }
 }
 
-/** Read the FileMaker clipboard and return the decoded .fmscript text. */
+/**
+ * What `read` decoded: which text format came back, plus the decode ledger for
+ * formats that have one (tables do — see `docs/SCHEMA.md`).
+ */
+export interface ReadResult {
+  kind?: TextKind;
+  ledger?: { tables?: number; fields?: number; dropped?: string[] } | null;
+}
+
+/** Read the FileMaker clipboard and return it as text (script or table). */
 export async function readClipboard(): Promise<BridgeResponse> {
   return runJson({ command: "read" });
+}
+
+/**
+ * What kind of FileMaker object the clipboard held, as reported by the engine.
+ * Anything the codec cannot decode yet still gets named — a table, some loose
+ * fields, a value list — instead of being reported as an empty clipboard.
+ */
+export interface ClipboardDump {
+  /** Where the raw XML was written. */
+  path: string;
+  /** Human label, e.g. "3 tabla(s) con 589 campo(s): Pedidos, …". */
+  label: string;
+  /** Structured detail: { kind: "base_tables", names: [...], fields: 589 }. */
+  object?: { kind: string; names?: string[]; fields?: number; steps?: number };
+}
+
+/**
+ * Save whatever FileMaker object is on the clipboard to `xmlPath`, verbatim.
+ * The engine decodes script steps to `.fmscript`; everything else (tables,
+ * fields, custom functions…) can at least be captured, which is what lets a
+ * user keep it, diff it, or send it in.
+ */
+export async function dumpClipboard(
+  xmlPath: string,
+): Promise<BridgeResponse> {
+  return runJson({ command: "dump_clipboard", xml_path: xmlPath });
+}
+
+/**
+ * Publish only some fields of a `.fmtable` to the clipboard, as a loose-fields
+ * snippet. This is how you add fields to a table that already exists in
+ * FileMaker: pasting a whole table gives you `Table 2` instead.
+ */
+export async function writeTableFields(
+  scriptText: string,
+  fields: string[],
+): Promise<BridgeResponse> {
+  return runJson({
+    command: "write",
+    script_text: scriptText,
+    kind: "table",
+    fields,
+  });
 }
 
 /** Encode the given text and write it to the FileMaker clipboard. */
 export async function writeClipboard(
   scriptText: string,
+  kind: TextKind = "script",
 ): Promise<BridgeResponse> {
-  return runJson({ command: "write", script_text: scriptText });
+  return runJson({ command: "write", script_text: scriptText, kind });
 }
 
+/**
+ * Which text format a document is. The engine sniffs the content when this is
+ * omitted, but the editor knows from the language id, so it says so — an empty
+ * new `.fmtable` has nothing to sniff.
+ */
+export type TextKind = "script" | "table";
+
 /** Validate text without any clipboard side effect. Drives diagnostics. */
-export async function parseScript(scriptText: string): Promise<BridgeResponse> {
-  return runJson({ command: "parse", script_text: scriptText });
+export async function parseScript(
+  scriptText: string,
+  kind: TextKind = "script",
+): Promise<BridgeResponse> {
+  return runJson({ command: "parse", script_text: scriptText, kind });
 }
 
 /**
@@ -311,4 +374,21 @@ export async function runSlice(
   layouts: string[],
 ): Promise<string> {
   return spawnSubcommand(["slice", outputDir, sliceDir, ...layouts]);
+}
+
+/**
+ * Extract a whole script folder (or several scripts) copied from the Script
+ * Workspace — the clipboard holds `<Group>`/`<Script>` nesting, not a single
+ * script's steps. Writes one `.fmscript` per script, mirroring subfolders.
+ */
+export async function runReadScripts(outputDir: string): Promise<string> {
+  return spawnSubcommand(["read-scripts", outputDir]);
+}
+
+/**
+ * The inverse of `runReadScripts`: put a tree of `.fmscript` files on the
+ * clipboard as a script catalog, ready to paste into the Script Workspace.
+ */
+export async function runWriteScripts(inputDir: string): Promise<string> {
+  return spawnSubcommand(["write-scripts", inputDir]);
 }

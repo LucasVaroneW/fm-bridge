@@ -1263,6 +1263,192 @@ impl StepParser {
     }
 }
 
+// ─── Script catalog (clipboard copy of a whole folder / several scripts) ───
+
+/// One entry in a copied script catalog: FileMaker's Script Workspace lets you
+/// select a folder (or several scripts) and copy the lot in one go. The
+/// clipboard then holds `<Group>` (folder) and catalog-level `<Script>`
+/// elements instead of the bare `<Step>` list a single script's steps produce.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ScriptCatalogNode {
+    Folder {
+        id: u32,
+        name: String,
+        children: Vec<ScriptCatalogNode>,
+    },
+    Script {
+        id: u32,
+        name: String,
+        script: FmScript,
+    },
+    /// A "-" entry with no steps: the visual separator line in a script folder.
+    Separator { id: u32 },
+}
+
+/// Parse a clipboard snippet holding one or more whole scripts, optionally
+/// grouped into folders, into a tree that mirrors the Script Workspace layout.
+///
+/// A catalog-level `<Script>` is told apart from a Perform Script *target*
+/// reference (also literally `<Script id name/>`, nested inside a `<Step>`)
+/// by nesting: targets only ever appear inside a `<Step>`, catalog entries
+/// only ever appear inside `<fmxmlsnippet>`/`<Group>`. So once a catalog
+/// `<Script>` starts, everything until its matching `</Script>` — including
+/// any nested target references — is captured verbatim by byte offset and
+/// handed to `parse_fmxml_snippet` unchanged, reusing every step shape it
+/// already knows how to decode.
+pub fn parse_script_catalog(xml: &str) -> Result<Vec<ScriptCatalogNode>, String> {
+    let xml_clean = crate::normalization::to_nfc(strip_bom(xml));
+    let mut reader = Reader::from_reader(Cursor::new(xml_clean.as_str()));
+    reader.config_mut().expand_empty_elements = true;
+    let mut buf = Vec::new();
+
+    // stack[0] is the root list; a `<Group>` pushes a new list, popped (and
+    // wrapped into a Folder node) on `</Group>`.
+    let mut stack: Vec<Vec<ScriptCatalogNode>> = vec![Vec::new()];
+    let mut folder_names: Vec<(u32, String)> = Vec::new();
+
+    struct Capture {
+        id: u32,
+        name: String,
+        start: usize,
+        open_count: u32,
+    }
+    let mut capture: Option<Capture> = None;
+
+    fn attr_value(e: &quick_xml::events::BytesStart, key: &[u8]) -> String {
+        e.attributes()
+            .flatten()
+            .find(|a| a.key.as_ref() == key)
+            .map(|a| String::from_utf8_lossy(&a.value).into_owned())
+            .unwrap_or_default()
+    }
+
+    loop {
+        let pos_before = reader.buffer_position() as usize;
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => match e.name().as_ref() {
+                b"Group" if capture.is_none() => {
+                    let id = attr_value(e, b"id").parse().unwrap_or(0);
+                    folder_names.push((id, attr_value(e, b"name")));
+                    stack.push(Vec::new());
+                }
+                b"Script" => {
+                    if let Some(cap) = capture.as_mut() {
+                        cap.open_count += 1;
+                    } else {
+                        capture = Some(Capture {
+                            id: attr_value(e, b"id").parse().unwrap_or(0),
+                            name: attr_value(e, b"name"),
+                            start: reader.buffer_position() as usize,
+                            open_count: 1,
+                        });
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::End(ref e)) => match e.name().as_ref() {
+                b"Group" if capture.is_none() => {
+                    let (id, name) = folder_names.pop().unwrap_or_default();
+                    let children = stack.pop().unwrap_or_default();
+                    stack
+                        .last_mut()
+                        .ok_or("Unbalanced </Group> in script catalog")?
+                        .push(ScriptCatalogNode::Folder { id, name, children });
+                }
+                b"Script" => {
+                    let done = match capture.as_mut() {
+                        Some(cap) => {
+                            cap.open_count -= 1;
+                            cap.open_count == 0
+                        }
+                        None => false,
+                    };
+                    if done {
+                        let cap = capture.take().unwrap();
+                        let inner = &xml_clean[cap.start..pos_before];
+                        let node = if cap.name == "-" && inner.trim().is_empty() {
+                            ScriptCatalogNode::Separator { id: cap.id }
+                        } else {
+                            let wrapped = format!(
+                                "<fmxmlsnippet type=\"FMObjectList\">{}</fmxmlsnippet>",
+                                inner
+                            );
+                            // A script can legitimately have zero steps (a fresh
+                            // placeholder in the folder); `parse_fmxml_snippet`
+                            // rejects that as "no steps found" because for its
+                            // other callers an empty result means garbage input,
+                            // not an empty script. Here it just means empty.
+                            let script = parse_fmxml_snippet(&wrapped)
+                                .unwrap_or(FmScript { steps: Vec::new() });
+                            ScriptCatalogNode::Script {
+                                id: cap.id,
+                                name: cap.name,
+                                script,
+                            }
+                        };
+                        stack
+                            .last_mut()
+                            .ok_or("Unbalanced </Script> in script catalog")?
+                            .push(node);
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(format!("XML parse error: {}", e)),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if stack.len() != 1 {
+        return Err("Unbalanced <Group> in script catalog".to_string());
+    }
+    Ok(stack.pop().unwrap())
+}
+
+/// Build the clipboard snippet for a whole script catalog — the inverse of
+/// `parse_script_catalog`. Ready to write to the clipboard and paste into the
+/// Script Workspace, reconstructing folders and separators along with it.
+pub fn build_script_catalog_xml(nodes: &[ScriptCatalogNode]) -> Result<String, String> {
+    let mut xml = String::from("<fmxmlsnippet type=\"FMObjectList\">");
+    xml.push_str(&build_script_catalog_nodes_xml(nodes)?);
+    xml.push_str("</fmxmlsnippet>");
+    Ok(xml)
+}
+
+fn build_script_catalog_nodes_xml(nodes: &[ScriptCatalogNode]) -> Result<String, String> {
+    let mut xml = String::new();
+    for node in nodes {
+        match node {
+            ScriptCatalogNode::Separator { id } => {
+                xml.push_str(&format!("<Script id=\"{}\" name=\"-\"></Script>", id));
+            }
+            ScriptCatalogNode::Script { id, name, script } => {
+                xml.push_str(&format!(
+                    "<Script id=\"{}\" name=\"{}\">",
+                    id,
+                    xml_escape(name)
+                ));
+                for step in &script.steps {
+                    xml.push_str(&build_step_xml(step)?);
+                }
+                xml.push_str("</Script>");
+            }
+            ScriptCatalogNode::Folder { id, name, children } => {
+                xml.push_str(&format!(
+                    "<Group id=\"{}\" name=\"{}\">",
+                    id,
+                    xml_escape(name)
+                ));
+                xml.push_str(&build_script_catalog_nodes_xml(children)?);
+                xml.push_str("</Group>");
+            }
+        }
+    }
+    Ok(xml)
+}
+
 // ─── XML encoding ───
 
 /// Escape special XML characters. Includes apostrophe for completeness.
@@ -1847,6 +2033,119 @@ pub fn encode_xmss(text: &str) -> Result<Vec<u8>, String> {
 pub fn decode_xmss(data: &[u8]) -> Result<FmScript, String> {
     let xml_str = strip_header(data)?;
     parse_fmxml_snippet(&xml_str)
+}
+
+#[cfg(test)]
+mod script_catalog_tests {
+    use super::*;
+
+    #[test]
+    fn flat_scripts_with_no_group_decode() {
+        let xml = r#"<fmxmlsnippet type="FMObjectList">
+            <Script includeInMenu="True" id="1" name="A"><Step enable="True" id="1" name="Comment"><Text>a</Text></Step></Script>
+            <Script includeInMenu="True" id="2" name="B"><Step enable="True" id="1" name="Comment"><Text>b</Text></Step></Script>
+        </fmxmlsnippet>"#;
+        let tree = parse_script_catalog(xml).unwrap();
+        assert_eq!(tree.len(), 2);
+        match &tree[0] {
+            ScriptCatalogNode::Script { id, name, script } => {
+                assert_eq!(*id, 1);
+                assert_eq!(name, "A");
+                assert_eq!(script.steps.len(), 1);
+            }
+            other => panic!("expected Script, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn nested_groups_build_a_tree_and_separators_are_recognised() {
+        let xml = r#"<fmxmlsnippet type="FMObjectList">
+            <Group id="10" name="OUTER">
+                <Script includeInMenu="True" id="1" name="-"></Script>
+                <Script includeInMenu="True" id="2" name="Top"><Step enable="True" id="1" name="Comment"><Text>t</Text></Step></Script>
+                <Group id="11" name="INNER">
+                    <Script includeInMenu="True" id="3" name="Nested"><Step enable="True" id="1" name="Comment"><Text>n</Text></Step></Script>
+                </Group>
+            </Group>
+        </fmxmlsnippet>"#;
+        let tree = parse_script_catalog(xml).unwrap();
+        assert_eq!(tree.len(), 1);
+        match &tree[0] {
+            ScriptCatalogNode::Folder { name, children, .. } => {
+                assert_eq!(name, "OUTER");
+                assert!(matches!(children[0], ScriptCatalogNode::Separator { .. }));
+                assert!(matches!(children[1], ScriptCatalogNode::Script { .. }));
+                match &children[2] {
+                    ScriptCatalogNode::Folder { name, children, .. } => {
+                        assert_eq!(name, "INNER");
+                        assert_eq!(children.len(), 1);
+                    }
+                    other => panic!("expected inner Folder, got {:?}", other),
+                }
+            }
+            other => panic!("expected Folder, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn perform_script_target_reference_is_not_mistaken_for_a_catalog_entry() {
+        // The `<Script id name/>` inside a Perform Script step targets another
+        // script by reference — it must stay part of that step, not become a
+        // sibling catalog entry or split the capture early.
+        let xml = r#"<fmxmlsnippet type="FMObjectList">
+            <Script includeInMenu="True" id="1" name="Caller">
+                <Step enable="True" id="87" name="Perform Script"><Script id="99" name="Callee"></Script></Step>
+            </Script>
+        </fmxmlsnippet>"#;
+        let tree = parse_script_catalog(xml).unwrap();
+        assert_eq!(tree.len(), 1);
+        match &tree[0] {
+            ScriptCatalogNode::Script { name, script, .. } => {
+                assert_eq!(name, "Caller");
+                assert_eq!(script.steps.len(), 1);
+                assert_eq!(
+                    script.steps[0].script_target_name.as_deref(),
+                    Some("Callee")
+                );
+            }
+            other => panic!("expected Script, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn build_script_catalog_xml_round_trips_through_parse() {
+        let xml = r#"<fmxmlsnippet type="FMObjectList">
+            <Group id="10" name="OUTER">
+                <Script includeInMenu="True" id="1" name="-"></Script>
+                <Script includeInMenu="True" id="2" name="Top"><Step enable="True" id="1" name="Comment"><Text>t</Text></Step></Script>
+                <Group id="11" name="INNER">
+                    <Script includeInMenu="True" id="3" name="Nested"><Step enable="True" id="1" name="Comment"><Text>n</Text></Step></Script>
+                </Group>
+            </Group>
+        </fmxmlsnippet>"#;
+        let tree = parse_script_catalog(xml).unwrap();
+        let rebuilt_xml = build_script_catalog_xml(&tree).unwrap();
+        let tree2 = parse_script_catalog(&rebuilt_xml).unwrap();
+
+        // Comparing the two trees' debug output is enough: it will differ if
+        // ids, names, nesting, or step content diverge across the round trip.
+        assert_eq!(format!("{:?}", tree), format!("{:?}", tree2));
+    }
+
+    #[test]
+    fn an_empty_script_decodes_with_no_steps_instead_of_erroring() {
+        let xml = r#"<fmxmlsnippet type="FMObjectList">
+            <Script includeInMenu="True" id="1" name="Empty"></Script>
+        </fmxmlsnippet>"#;
+        let tree = parse_script_catalog(xml).unwrap();
+        match &tree[0] {
+            ScriptCatalogNode::Script { name, script, .. } => {
+                assert_eq!(name, "Empty");
+                assert!(script.steps.is_empty());
+            }
+            other => panic!("expected Script, got {:?}", other),
+        }
+    }
 }
 
 #[cfg(test)]

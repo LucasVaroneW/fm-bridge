@@ -1,0 +1,60 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "FileMaker Table",
+  "scopeName": "source.fmtable",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#declaration" },
+    { "include": "#formula-line" },
+    { "include": "#property" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "^\\s*#.*$",
+      "name": "comment.line.number-sign.fmtable"
+    },
+    "declaration": {
+      "match": "^(table|field)\\s+(.*)$",
+      "captures": {
+        "1": { "name": "keyword.control.fmtable" },
+        "2": { "name": "entity.name.type.fmtable" }
+      }
+    },
+    "formula-line": {
+      "match": "^\\s*(\\|)(.*)$",
+      "captures": {
+        "1": { "name": "punctuation.definition.quote.fmtable" },
+        "2": { "name": "string.unquoted.fmtable" }
+      }
+    },
+    "property": {
+      "match": "^\\s+(type|calc|comment|formula|context|auto|auto-formula|validate|message|index|lang|global|repetitions)\\b(.*)$",
+      "captures": {
+        "1": { "name": "variable.parameter.fmtable" },
+        "2": {
+          "patterns": [
+            {
+              "match": "\\b(text|number|date|time|timestamp|binary|container)\\b",
+              "name": "support.type.fmtable"
+            },
+            {
+              "match": "\\b(stored|unstored|summary|serial|constant|lookup|calc|from|always|all|minimal|none|true|false)\\b",
+              "name": "constant.language.fmtable"
+            },
+            {
+              "match": "\\b(not-empty|unique|existing|strict)\\b",
+              "name": "support.function.fmtable"
+            },
+            {
+              "match": "\\b([a-zA-Z-]+)(=)",
+              "captures": {
+                "1": { "name": "entity.other.attribute-name.fmtable" },
+                "2": { "name": "keyword.operator.fmtable" }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

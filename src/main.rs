@@ -4,16 +4,19 @@
 
 mod audit;
 mod clipboard;
+mod coverage;
 mod data;
 mod data_config;
 mod data_sql;
 mod fmsavexml;
+mod fmtable;
 mod import_records;
 mod mcp;
 mod normalization;
 #[cfg(windows)]
 mod ole_clipboard;
 mod slice;
+mod snippet;
 mod step_dsl;
 mod steps;
 mod text_format;
@@ -32,6 +35,11 @@ struct Command {
     command: String,
     #[serde(default)]
     script_text: Option<String>,
+    /// Which text format `script_text` is: "script" (`.fmscript`, the default)
+    /// or "table" (`.fmtable`). Optional — when absent the content is sniffed,
+    /// so older clients keep working unchanged.
+    #[serde(default)]
+    kind: Option<String>,
     // ── inspect / slice params (file-based commands, for AI/tooling) ──
     #[serde(default)]
     xml_path: Option<String>,
@@ -51,7 +59,9 @@ struct Command {
     table: Option<String>,
     #[serde(default)]
     layout: Option<String>,
-    /// get_table: return only these fields' full definitions (size control).
+    /// Two uses, both "only these fields": for `get_table`, which definitions
+    /// to return; for `write` with `kind: "table"`, which fields to publish as
+    /// a loose-fields snippet instead of the whole table.
     #[serde(default)]
     fields: Option<Vec<String>>,
     /// get_table: one compact line per field instead of full definitions.
@@ -190,13 +200,32 @@ impl Response {
 fn handle_command(cmd: &Command) -> Response {
     match cmd.command.as_str() {
         "version" => Response::version(env!("CARGO_PKG_VERSION").to_string()),
-        "read" => match clipboard::read_fm_clipboard() {
-            Ok(data) => match xmss::decode_xmss(&data) {
-                Ok(script) => Response::ok_text(text_format::format_script(&script)),
-                Err(e) => Response::error(e),
-            },
+        "read" => match read_clipboard_text() {
+            Ok((text, kind, ledger)) => {
+                let mut r = Response::ok_text(text);
+                r.data = Some(serde_json::json!({ "kind": kind, "ledger": ledger }));
+                r
+            }
             Err(e) => Response::error(e),
         },
+        // Save whatever FileMaker object is on the clipboard, verbatim, and say
+        // what it was. The engine only decodes script steps today; everything
+        // else (tables, fields, value lists…) still has to be capturable, or a
+        // user cannot even report what we are missing. Opaque by default (#2).
+        "dump_clipboard" => {
+            let path = match &cmd.xml_path {
+                Some(p) => p.clone(),
+                None => return Response::error("No xml_path provided".to_string()),
+            };
+            match dump_clipboard_to(&path) {
+                Ok(kind) => Response::ok_data(serde_json::json!({
+                    "path": path,
+                    "label": kind.label(),
+                    "object": kind,
+                })),
+                Err(e) => Response::error(e),
+            }
+        }
         // Validate-only: parse the text and report a positioned error, but do
         // NOT touch the clipboard. The editor calls this on every change (with a
         // debounce) to drive diagnostics, so it must be side-effect free.
@@ -205,6 +234,14 @@ fn handle_command(cmd: &Command) -> Response {
                 Some(t) => t,
                 None => return Response::error("No script_text provided".to_string()),
             };
+            if is_table_text(cmd.kind.as_deref(), script_text) {
+                let errors = fmtable::lint(script_text);
+                return if errors.is_empty() {
+                    Response::ok()
+                } else {
+                    Response::errors(errors)
+                };
+            }
             let errors = text_format::lint(script_text);
             if errors.is_empty() {
                 // Run post_validate to catch warnings (missing layout IDs, etc.)
@@ -267,6 +304,27 @@ fn handle_command(cmd: &Command) -> Response {
                     Ok(resolved) => script_text = resolved,
                     Err(e) => return Response::error(e),
                 }
+            }
+            // A `.fmtable` takes the table path: different linter, different
+            // codec, different clipboard type. Same command, so the editor's
+            // "write to clipboard" button works for both documents.
+            if is_table_text(cmd.kind.as_deref(), &script_text) {
+                return match fmtable::parse_text(&script_text) {
+                    Ok(tables) => {
+                        let xml = match &cmd.fields {
+                            Some(names) => match fmtable::encode_fields(&tables, Some(names)) {
+                                Ok(x) => x,
+                                Err(e) => return Response::error(e),
+                            },
+                            None => fmtable::encode_xmtb(&tables),
+                        };
+                        match clipboard::write_fm_clipboard(xml.as_bytes()) {
+                            Ok(()) => Response::ok(),
+                            Err(e) => Response::error(e),
+                        }
+                    }
+                    Err(errors) => Response::errors(errors),
+                };
             }
             // Lint first: surface every format/structure error to the editor and
             // refuse to write a broken script to the clipboard.
@@ -711,6 +769,12 @@ fn run_cli_mode() -> Result<(), String> {
     }
     match args[0].as_str() {
         "read" => run_read_cli(args.get(1).map(|s| s.as_str())),
+        "read-scripts" => run_read_scripts_cli(args.get(1).map(|s| s.as_str())),
+        "write-scripts" => run_write_scripts_cli(args.get(1).map(|s| s.as_str())),
+        "dump-clipboard" => run_dump_clipboard_cli(&args[1..]),
+        "decode-table" => run_decode_table_cli(&args[1..]),
+        "encode-table" => run_encode_table_cli(&args[1..]),
+        "validate-table" => run_validate_table_cli(&args[1..]),
         "write" => {
             if args.len() < 2 {
                 return Err("Usage: fm-bridge write <file.fmscript>".to_string());
@@ -751,6 +815,7 @@ fn run_cli_mode() -> Result<(), String> {
         "inspect" => run_inspect_cli(&args[1..]),
         "slice" => run_slice_cli(&args[1..]),
         "audit" => run_audit_cli(&args[1..]),
+        "census" => run_census_cli(&args[1..]),
         "who-calls" => run_who_calls_cli(&args[1..]),
         "who-uses-field" => run_who_uses_field_cli(&args[1..]),
         "reformat" => run_reformat_cli(&args[1..]),
@@ -763,7 +828,7 @@ fn run_cli_mode() -> Result<(), String> {
         "data" => run_data_cli(&args[1..]),
         "mcp" => mcp::run(),
         _ => Err(format!(
-            "Unknown command: {}. Use: read, write, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
+            "Unknown command: {}. Use: read, read-scripts, write, write-scripts, json, mcp, steps, debug, test, passthrough, dump-ids, inspect, slice, audit, census, dump-clipboard, decode-table, encode-table, validate-table, who-calls, who-uses-field, describe, get-table, get-field, get-relationships, get-script, data",
             args[0]
         )),
     }
@@ -1044,6 +1109,98 @@ fn run_slice_cli(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// `census`: inventory of everything inside a FMSaveAsXML export — element
+/// paths, attributes, depth. It is the measuring tape for principle 5 (nunca
+/// perder nada en silencio): you cannot claim nothing was dropped until you
+/// know what was there. Deliberately knows nothing about FileMaker semantics.
+fn run_census_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err(
+            "Usage: fm-bridge census <FMSaveAsXML.xml> [--json] [--top N] [--min N]".to_string(),
+        );
+    }
+    let mut json = false;
+    let mut top: Option<usize> = None;
+    let mut min_count: u64 = 0;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => json = true,
+            "--top" => {
+                i += 1;
+                top = Some(
+                    args.get(i)
+                        .and_then(|v| v.parse().ok())
+                        .ok_or("--top needs a number")?,
+                );
+            }
+            "--min" => {
+                i += 1;
+                min_count = args
+                    .get(i)
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("--min needs a number")?;
+            }
+            other => return Err(format!("Unknown flag for census: {}", other)),
+        }
+        i += 1;
+    }
+
+    let c = coverage::census(&args[0])?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&c).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+
+    println!(
+        "{}: {} elementos, {} atributos, {} rutas distintas, profundidad máxima {}",
+        c.file_name, c.total_elements, c.total_attributes, c.distinct_paths, c.max_depth
+    );
+    println!();
+
+    let shown: Vec<&coverage::PathStat> = c
+        .paths
+        .iter()
+        .filter(|p| p.count >= min_count)
+        .take(top.unwrap_or(usize::MAX))
+        .collect();
+
+    for p in &shown {
+        let attrs = if p.attrs.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "  [{}]",
+                p.attrs
+                    .iter()
+                    .map(|a| a.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        };
+        let text = if p.with_text > 0 {
+            format!("  (texto en {})", p.with_text)
+        } else {
+            String::new()
+        };
+        println!("{:>9}  {}{}{}", p.count, p.path, attrs, text);
+    }
+
+    let hidden = c.paths.len() - shown.len();
+    if hidden > 0 {
+        println!(
+            "
+… {} rutas más (subí --top o bajá --min para verlas)",
+            hidden
+        );
+    }
+    Ok(())
+}
+
 /// Audit a FMSaveAsXML export for broken references and print a human report.
 /// Exit is still 0 (it's a report, not a failure); the issues are the output.
 fn run_audit_cli(args: &[String]) -> Result<(), String> {
@@ -1297,10 +1454,244 @@ fn read_file_to_string(path: &str) -> Result<String, String> {
     Ok(crate::xmss::decode_windows1252(&bytes))
 }
 
-fn run_read_cli(output_path: Option<&str>) -> Result<(), String> {
+/// Read the clipboard and render it as `.fmscript` text — or explain, in terms
+/// the user can act on, why this particular FileMaker object cannot be.
+///
+/// Before this went through the sniffer, copying a table produced "No script
+/// steps found in XML": true, unhelpful, and indistinguishable from an empty
+/// clipboard. Naming what is actually there is the whole difference.
+fn read_clipboard_script_text() -> Result<String, String> {
+    let (text, kind, _) = read_clipboard_text()?;
+    if kind != "script" {
+        return Err(format!(
+            "El portapapeles tiene {}, no pasos de script.",
+            kind
+        ));
+    }
+    Ok(text)
+}
+
+/// Decode whatever the clipboard holds into the right text format.
+///
+/// Returns the text, which format it is ("script" or "table"), and the decode
+/// ledger for the formats that have one. One entry point so the CLI, the JSON
+/// protocol and the MCP door cannot drift apart.
+fn read_clipboard_text() -> Result<(String, String, serde_json::Value), String> {
     let data = clipboard::read_fm_clipboard()?;
-    let script = xmss::decode_xmss(&data)?;
-    let text = text_format::format_script(&script);
+    let xml = xmss::strip_header(&data)?;
+    match snippet::detect(&xml) {
+        snippet::SnippetKind::ScriptSteps { .. } => {
+            let script = xmss::decode_xmss(&data)?;
+            Ok((
+                text_format::format_script(&script),
+                "script".to_string(),
+                serde_json::Value::Null,
+            ))
+        }
+        snippet::SnippetKind::BaseTables { .. } => {
+            let (tables, ledger) = fmtable::decode_xmtb(&xml)?;
+            Ok((
+                fmtable::format_tables(&tables),
+                "table".to_string(),
+                serde_json::to_value(&ledger).unwrap_or(serde_json::Value::Null),
+            ))
+        }
+        other => Err(format!(
+            "El portapapeles tiene {}, que el motor todavía no sabe convertir a texto.              Guardalo con `fm-bridge dump-clipboard <archivo.xml>`.",
+            other.label()
+        )),
+    }
+}
+
+/// Is this text a `.fmtable`? Trusts an explicit `kind` from the client and
+/// falls back to the content, so the CLI and older clients need no flag.
+fn is_table_text(kind: Option<&str>, text: &str) -> bool {
+    match kind {
+        Some("table") => return true,
+        Some("script") => return false,
+        _ => {}
+    }
+    text.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l == "table" || l.starts_with("table "))
+        .unwrap_or(false)
+}
+
+/// Write whatever FileMaker object is on the clipboard to `path`, verbatim,
+/// and return what it turned out to be.
+fn dump_clipboard_to(path: &str) -> Result<snippet::SnippetKind, String> {
+    let data = clipboard::read_fm_clipboard()?;
+    let xml = xmss::strip_header(&data)?;
+    let kind = snippet::detect(&xml);
+    std::fs::write(path, xml.as_bytes())
+        .map_err(|e| format!("No se puede escribir {}: {}", path, e))?;
+    Ok(kind)
+}
+
+/// `decode-table <snippet.xml> [out.fmtable]` — XMTB XML → readable text.
+/// The ledger goes to stderr, so redirecting stdout still yields a clean file.
+fn run_decode_table_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("Usage: fm-bridge decode-table <snippet.xml> [out.fmtable]".to_string());
+    }
+    let xml = read_file_to_string(&args[0])?;
+    let (tables, ledger) = fmtable::decode_xmtb(&xml)?;
+    let text = fmtable::format_tables(&tables);
+    match args.get(1) {
+        Some(path) => {
+            std::fs::write(path, &text)
+                .map_err(|e| format!("No se puede escribir {}: {}", path, e))?;
+            println!(
+                "{} tabla(s), {} campo(s) → {}",
+                ledger.tables, ledger.fields, path
+            );
+        }
+        None => println!("{}", text),
+    }
+    if ledger.dropped.is_empty() {
+        eprintln!("Nada quedó afuera.");
+    } else {
+        eprintln!("{} elemento(s) no convertidos:", ledger.dropped.len());
+        for d in &ledger.dropped {
+            eprintln!("  · {}", d);
+        }
+    }
+    Ok(())
+}
+
+/// `encode-table <in.fmtable> [out.xml]` — readable text → XMTB XML. With no
+/// output file it writes the snippet to the clipboard, ready to paste.
+fn run_encode_table_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err(
+            "Usage: fm-bridge encode-table <in.fmtable> [out.xml] [--fields a,b,c | --fields-only]"
+                .to_string(),
+        );
+    }
+    let text = read_file_to_string(&args[0])?;
+    let tables = fmtable::parse_text(&text).map_err(format_errors)?;
+
+    // `--fields` publishes loose fields instead of a whole table — the only way
+    // to add fields to a table that already exists. Pasting a <BaseTable> into
+    // a file that has one gives you `Table 2`, silently.
+    let mut only: Option<Vec<String>> = None;
+    let mut fields_only = false;
+    let mut positional: Vec<&String> = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--fields" => {
+                i += 1;
+                let list = args
+                    .get(i)
+                    .ok_or("--fields necesita una lista de nombres")?;
+                only = Some(list.split(',').map(|s| s.trim().to_string()).collect());
+                fields_only = true;
+            }
+            "--fields-only" => fields_only = true,
+            other if other.starts_with("--") => {
+                return Err(format!("Opción desconocida: {}", other));
+            }
+            _ => positional.push(&args[i]),
+        }
+        i += 1;
+    }
+
+    let xml = if fields_only {
+        fmtable::encode_fields(&tables, only.as_deref())?
+    } else {
+        fmtable::encode_xmtb(&tables)
+    };
+    let fields: usize = match &only {
+        Some(names) => names.len(),
+        None => tables.iter().map(|t| t.fields.len()).sum(),
+    };
+    let args: Vec<String> = std::iter::once(args[0].clone())
+        .chain(positional.into_iter().cloned())
+        .collect();
+    let args = &args[..];
+    match args.get(1) {
+        Some(path) => {
+            std::fs::write(path, &xml)
+                .map_err(|e| format!("No se puede escribir {}: {}", path, e))?;
+            if fields_only {
+                println!("{} campo(s) → {}", fields, path);
+            } else {
+                println!("{} tabla(s), {} campo(s) → {}", tables.len(), fields, path);
+            }
+        }
+        None => {
+            clipboard::write_fm_clipboard(xml.as_bytes())?;
+            if fields_only {
+                println!(
+                    "{} campo(s) en el portapapeles — pegá en Gestionar → Base de datos → pestaña Campos de la tabla destino.",
+                    fields
+                );
+            } else {
+                println!(
+                    "{} tabla(s), {} campo(s) en el portapapeles — pegá en Gestionar → Base de datos → pestaña Tablas.",
+                    tables.len(),
+                    fields
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `validate-table <file.fmtable>` — the same check the editor underlines with.
+fn run_validate_table_cli(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("Usage: fm-bridge validate-table <file.fmtable>".to_string());
+    }
+    let text = read_file_to_string(&args[0])?;
+    let errors = fmtable::lint(&text);
+    if errors.is_empty() {
+        let tables = fmtable::parse_text(&text).map_err(format_errors)?;
+        let fields: usize = tables.iter().map(|t| t.fields.len()).sum();
+        println!("OK — {} tabla(s), {} campo(s).", tables.len(), fields);
+        return Ok(());
+    }
+    Err(format_errors(errors))
+}
+
+fn format_errors(errors: Vec<text_format::ParseError>) -> String {
+    errors
+        .iter()
+        .map(|e| format!("línea {}: {}", e.line, e.message))
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        )
+}
+
+/// `dump-clipboard`: capture a FileMaker object the engine cannot decode yet.
+fn run_dump_clipboard_cli(args: &[String]) -> Result<(), String> {
+    let path = args
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "clipboard.xml".to_string());
+    let kind = dump_clipboard_to(&path)?;
+    println!("{} → {}", kind.label(), path);
+    Ok(())
+}
+
+fn run_read_cli(output_path: Option<&str>) -> Result<(), String> {
+    let (text, kind, ledger) = read_clipboard_text()?;
+    if kind == "table" {
+        // The ledger goes to stderr so `fm-bridge read > x.fmtable` still
+        // produces a clean file, while the user still sees what was dropped.
+        if let Some(dropped) = ledger.get("dropped").and_then(|d| d.as_array()) {
+            if !dropped.is_empty() {
+                eprintln!("{} elemento(s) no convertidos:", dropped.len());
+                for d in dropped.iter().filter_map(|d| d.as_str()) {
+                    eprintln!("  · {}", d);
+                }
+            }
+        }
+    }
     if let Some(path) = output_path {
         std::fs::write(path, &text).map_err(|e| format!("Cannot write file {}: {}", path, e))?;
         println!("Script written to {}", path);
@@ -1310,12 +1701,190 @@ fn run_read_cli(output_path: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+/// `read-scripts <dir>` — the clipboard holds a whole folder (or several
+/// scripts) copied from the Script Workspace, not one script's steps. Mirror
+/// the FileMaker folder structure into `<dir>` as one `.fmscript` per script.
+fn run_read_scripts_cli(output_dir: Option<&str>) -> Result<(), String> {
+    let dir = output_dir.ok_or("Usage: fm-bridge read-scripts <output-dir>")?;
+    let data = clipboard::read_fm_clipboard()?;
+    let xml = xmss::strip_header(&data)?;
+    let kind = snippet::detect(&xml);
+    if !matches!(kind, snippet::SnippetKind::Scripts { .. }) {
+        return Err(format!(
+            "El portapapeles tiene {}, no una carpeta o lista de scripts.",
+            kind.label()
+        ));
+    }
+    let tree = xmss::parse_script_catalog(&xml)?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("No se puede crear {}: {}", dir, e))?;
+    let (scripts, folders) = write_script_catalog_tree(&tree, std::path::Path::new(dir))?;
+    println!("{} script(s) en {} carpeta(s) → {}", scripts, folders, dir);
+    Ok(())
+}
+
+/// Recursively write a parsed script catalog to disk, one `.fmscript` per
+/// script and one subdirectory per `<Group>`, mirroring Script Workspace.
+/// Every entry — script, folder and separator — keeps its original id as a
+/// `{:04}_` filename prefix, so `read_script_catalog_dir` (the inverse, for
+/// `write-scripts`) can restore both the id and the original ordering.
+/// Returns (scripts written, folders created).
+fn write_script_catalog_tree(
+    nodes: &[xmss::ScriptCatalogNode],
+    dir: &std::path::Path,
+) -> Result<(usize, usize), String> {
+    let mut scripts = 0usize;
+    let mut folders = 0usize;
+    for node in nodes {
+        match node {
+            xmss::ScriptCatalogNode::Separator { id } => {
+                let path = dir.join(format!("{:04}_-.fmscript", id));
+                std::fs::write(&path, "")
+                    .map_err(|e| format!("No se puede escribir {}: {}", path.display(), e))?;
+            }
+            xmss::ScriptCatalogNode::Script { id, name, script } => {
+                let safe_name = fmsavexml::sanitize_filename(name);
+                let filename = format!("{:04}_{}.fmscript", id, safe_name);
+                let text = text_format::format_script(script);
+                let path = dir.join(&filename);
+                std::fs::write(&path, &text)
+                    .map_err(|e| format!("No se puede escribir {}: {}", path.display(), e))?;
+                scripts += 1;
+            }
+            xmss::ScriptCatalogNode::Folder { id, name, children } => {
+                let safe_name = fmsavexml::sanitize_filename(name);
+                let subdir = dir.join(format!("{:04}_{}", id, safe_name));
+                std::fs::create_dir_all(&subdir)
+                    .map_err(|e| format!("No se puede crear {}: {}", subdir.display(), e))?;
+                folders += 1;
+                let (s, f) = write_script_catalog_tree(children, &subdir)?;
+                scripts += s;
+                folders += f;
+            }
+        }
+    }
+    Ok((scripts, folders))
+}
+
 fn run_write_cli(file_path: &str) -> Result<(), String> {
     let text = read_file_to_string(file_path)?;
     let xmss_data = xmss::encode_xmss(&text)?;
     clipboard::write_fm_clipboard(&xmss_data)?;
     println!("Script written to clipboard from {}", file_path);
     Ok(())
+}
+
+/// `write-scripts <dir>` — the inverse of `read-scripts`: read a tree of
+/// `.fmscript` files (subdirectories = folders, `{:04}_-.fmscript` = a
+/// separator) and write it to the clipboard as a script catalog, ready to
+/// paste into the Script Workspace as a whole folder.
+fn run_write_scripts_cli(input_dir: Option<&str>) -> Result<(), String> {
+    let dir = input_dir.ok_or("Usage: fm-bridge write-scripts <input-dir>")?;
+    let path = std::path::Path::new(dir);
+    if !path.is_dir() {
+        return Err(format!("{} no es una carpeta", dir));
+    }
+    let (tree, scripts, folders) = read_script_catalog_dir(path)?;
+    if scripts == 0 {
+        return Err(format!("No se encontró ningún .fmscript en {}", dir));
+    }
+    let xml = xmss::build_script_catalog_xml(&tree)?;
+    clipboard::write_fm_clipboard(xml.as_bytes())?;
+    println!(
+        "{} script(s) en {} carpeta(s) → portapapeles (listo para pegar)",
+        scripts, folders
+    );
+    Ok(())
+}
+
+/// Read a directory tree written by `read-scripts` (or authored by hand) back
+/// into a script catalog. A `{:04}_` prefix on a file or subdirectory name
+/// restores its original id and ordering; without one, entries are sorted by
+/// name and assigned fresh ids starting at 1. `{:04}_-.fmscript` (or a bare
+/// `-.fmscript`) is a separator, matching what `read-scripts` writes for one.
+/// Returns (tree, scripts written, folders found).
+fn read_script_catalog_dir(
+    dir: &std::path::Path,
+) -> Result<(Vec<xmss::ScriptCatalogNode>, usize, usize), String> {
+    let mut entries: Vec<std::fs::DirEntry> = std::fs::read_dir(dir)
+        .map_err(|e| format!("No se puede leer {}: {}", dir.display(), e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("No se puede leer {}: {}", dir.display(), e))?;
+    // Sort by the numeric prefix when every entry has one (this is what
+    // read-scripts always writes), falling back to plain name order for a
+    // hand-authored folder that has none.
+    entries.sort_by_key(|e| {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let prefix = name.split('_').next().and_then(|p| p.parse::<u32>().ok());
+        (prefix.unwrap_or(u32::MAX), name)
+    });
+
+    let mut tree = Vec::new();
+    let mut scripts = 0usize;
+    let mut folders = 0usize;
+    let mut next_id: u32 = 1;
+    for entry in entries {
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("No se puede leer {}: {}", entry.path().display(), e))?;
+        let (id, stem) = split_id_prefix(&file_name, file_type.is_dir(), &mut next_id);
+
+        if file_type.is_dir() {
+            let (children, s, f) = read_script_catalog_dir(&entry.path())?;
+            tree.push(xmss::ScriptCatalogNode::Folder {
+                id,
+                name: stem,
+                children,
+            });
+            scripts += s;
+            folders += f + 1;
+        } else if file_name.ends_with(".fmscript") {
+            if stem == "-" {
+                tree.push(xmss::ScriptCatalogNode::Separator { id });
+                continue;
+            }
+            let text = read_file_to_string(
+                entry
+                    .path()
+                    .to_str()
+                    .ok_or_else(|| format!("Ruta no válida: {}", entry.path().display()))?,
+            )?;
+            let script = crate::text_format::parse_text_to_script(&text).map_err(|e| {
+                format!(
+                    "{}: línea {}: {}",
+                    entry.path().display(),
+                    e.line,
+                    e.message
+                )
+            })?;
+            tree.push(xmss::ScriptCatalogNode::Script {
+                id,
+                name: stem,
+                script,
+            });
+            scripts += 1;
+        }
+    }
+    Ok((tree, scripts, folders))
+}
+
+/// Split a `{:04}_name` filename (directory name or `.fmscript` file, without
+/// its extension) into its id and stem. No numeric prefix: assign the next
+/// fresh id and use the whole name as the stem.
+fn split_id_prefix(file_name: &str, is_dir: bool, next_id: &mut u32) -> (u32, String) {
+    let base = if is_dir {
+        file_name.to_string()
+    } else {
+        file_name.trim_end_matches(".fmscript").to_string()
+    };
+    if let Some((prefix, rest)) = base.split_once('_') {
+        if let Ok(id) = prefix.parse::<u32>() {
+            return (id, rest.to_string());
+        }
+    }
+    let id = *next_id;
+    *next_id += 1;
+    (id, base)
 }
 
 fn run_debug_cli() -> Result<(), String> {

@@ -866,7 +866,7 @@ kind = "CloseWindow"
 id = 121
 en = "Close Window"
 es = "Cerrar ventana"
-shape = "plain"
+shape = "select_window"
 opens_block = false
 closes_block = false
 

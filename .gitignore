@@ -19,3 +19,8 @@ test_roundtrip.xml
 built_*.xml
 decoded_*.fmscript
 clipboard_*.fmscript
+
+# Payloads reales capturados del portapapeles para probar contra FileMaker.
+# Llevan nombres de tabla y campo de bases de clientes: se quedan en local.
+pruebas.xml
+*.fmtable

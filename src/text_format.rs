@@ -139,7 +139,9 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
                 line.push_str(&format!(" [{}]", state));
             }
         }
-        Some(StepShape::Calculation) | Some(StepShape::CalculationWithRestore) => {
+        Some(StepShape::Calculation)
+        | Some(StepShape::CalculationWithRestore)
+        | Some(StepShape::PauseResumeScript) => {
             if let Some(calc) = &step.calculation {
                 let collapsed;
                 let trimmed = match style {
@@ -2714,9 +2716,13 @@ fn build_step_from_name(
                 indent_level: indent,
             }
         }
-        // Calculation, Plain, Opaque, or unknown — store content as calculation.
-        // Opaque keeps the bracket content (raw inner FM XML) verbatim.
-        Some(StepShape::Calculation) | Some(StepShape::Plain) | Some(StepShape::Opaque) | None => {
+        // Calculation, Plain, Opaque, PauseResumeScript, or unknown — store content
+        // as calculation. Opaque keeps the bracket content (raw inner FM XML) verbatim.
+        Some(StepShape::Calculation)
+        | Some(StepShape::Plain)
+        | Some(StepShape::Opaque)
+        | Some(StepShape::PauseResumeScript)
+        | None => {
             ScriptStep {
                 name: name.to_string(),
                 enable: enabled,

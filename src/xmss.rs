@@ -1507,6 +1507,14 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                 xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
             }
         }
+        Some(StepShape::PauseResumeScript) => {
+            // Without <PauseTime value="ForDuration"/> FM doesn't associate the
+            // calc with a duration on paste — it just doesn't pick up the value.
+            if let Some(calc) = &step.calculation {
+                xml.push_str("<PauseTime value=\"ForDuration\"></PauseTime>");
+                xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
+            }
+        }
         Some(StepShape::SetState) => {
             let state = step.set_state.as_deref().unwrap_or("True");
             xml.push_str(&format!("<Set state=\"{}\"></Set>", state));
@@ -2193,5 +2201,38 @@ mod tests {
         let with_bom = format!("\u{FEFF}{}", SNIPPET);
         let script = parse_fmxml_snippet(&with_bom).unwrap();
         assert_eq!(script.steps.len(), 1);
+    }
+
+    const PAUSE_RESUME_FOR_DURATION: &str = r#"<fmxmlsnippet type="FMObjectList"><Step enable="True" id="1" name="Pause/Resume Script"><PauseTime value="ForDuration"></PauseTime><Calculation><![CDATA[5]]></Calculation></Step></fmxmlsnippet>"#;
+
+    #[test]
+    fn pause_resume_script_duration_survives_encode_and_decode() {
+        let script = parse_fmxml_snippet(PAUSE_RESUME_FOR_DURATION).unwrap();
+        assert_eq!(script.steps[0].calculation.as_deref(), Some("5"));
+
+        let xml = build_xml_from_script(&script).unwrap();
+        assert!(
+            xml.contains("<PauseTime value=\"ForDuration\">"),
+            "lost the PauseTime marker: {}",
+            xml
+        );
+
+        let again = parse_fmxml_snippet(&xml).unwrap();
+        assert_eq!(again.steps[0].calculation.as_deref(), Some("5"));
+    }
+
+    #[test]
+    fn pause_resume_script_duration_survives_the_text_round_trip() {
+        let script = parse_fmxml_snippet(PAUSE_RESUME_FOR_DURATION).unwrap();
+        let text = crate::text_format::format_script(&script);
+        let parsed = crate::text_format::parse_text_to_script(&text).unwrap();
+        assert_eq!(parsed.steps[0].calculation.as_deref(), Some("5"));
+
+        let xml = build_xml_from_script(&parsed).unwrap();
+        assert!(
+            xml.contains("<PauseTime value=\"ForDuration\">"),
+            "text round-trip lost the PauseTime marker: {}",
+            xml
+        );
     }
 }

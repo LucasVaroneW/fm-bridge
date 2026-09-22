@@ -1659,6 +1659,27 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                 xml.push_str("/>");
             }
         }
+        Some(StepShape::FieldTarget) => {
+            // Go to Field: optional SelectAll flag, then the target field.
+            if let Some(sel) = &step.select_all_state {
+                xml.push_str(&format!(
+                    "<SelectAll state=\"{}\"></SelectAll>",
+                    xml_escape(sel)
+                ));
+            }
+            if step.field_target.is_some() || step.field_table.is_some() {
+                // Emit only table+name. No `id` attribute — FM resolves by name on paste,
+                // which is what makes from-scratch authoring possible (same as Set Field).
+                xml.push_str("<Field");
+                if let Some(t) = &step.field_table {
+                    xml.push_str(&format!(" table=\"{}\"", xml_escape(t)));
+                }
+                if let Some(name) = &step.field_target {
+                    xml.push_str(&format!(" name=\"{}\"", xml_escape(name)));
+                }
+                xml.push_str("></Field>");
+            }
+        }
         Some(StepShape::ReplaceFieldContents) => {
             // Fixed element order matching FM's output for the calculated-result mode.
             let no_int = step.goto_no_interact.as_deref().unwrap_or("False");
@@ -2193,5 +2214,27 @@ mod tests {
         let with_bom = format!("\u{FEFF}{}", SNIPPET);
         let script = parse_fmxml_snippet(&with_bom).unwrap();
         assert_eq!(script.steps.len(), 1);
+    }
+
+    #[test]
+    fn go_to_field_roundtrips_field_reference() {
+        // Regression test: Go to Field used to be shape `Plain`, which dropped
+        // the <Field> target entirely on both decode-to-text and re-encode.
+        let xml = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"17\" name=\"Go to Field\"><SelectAll state=\"True\"></SelectAll><Field table=\"Contacts\" id=\"5\" name=\"Email\"></Field></Step></fmxmlsnippet>";
+        let script = decode_xmss(xml.as_bytes()).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        let step = &script.steps[0];
+        assert_eq!(step.field_table.as_deref(), Some("Contacts"));
+        assert_eq!(step.field_target.as_deref(), Some("Email"));
+        assert_eq!(step.select_all_state.as_deref(), Some("True"));
+
+        // Re-encode and decode again: the reference must survive the round trip.
+        let re_xml = build_xml_from_script(&script).unwrap();
+        assert!(re_xml.contains("<Field table=\"Contacts\" name=\"Email\">"));
+        assert!(re_xml.contains("<SelectAll state=\"True\">"));
+        let script2 = decode_xmss(re_xml.as_bytes()).unwrap();
+        let step2 = &script2.steps[0];
+        assert_eq!(step2.field_table.as_deref(), Some("Contacts"));
+        assert_eq!(step2.field_target.as_deref(), Some("Email"));
     }
 }

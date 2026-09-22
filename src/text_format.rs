@@ -335,6 +335,25 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
                 (None, true) => {}
             }
         }
+        Some(StepShape::FieldTarget) => {
+            // Go to Field: `[Table::Field]`, plus a trailing `SelectAll` when the
+            // "select entire contents" option is on.
+            let target_display: Option<String> = match (&step.field_table, &step.field_target) {
+                (Some(t), Some(n)) => Some(format!("{}::{}", t, n)),
+                (None, Some(n)) => Some(n.clone()),
+                _ => None,
+            };
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(tgt) = target_display {
+                parts.push(tgt);
+            }
+            if step.select_all_state.as_deref() == Some("True") {
+                parts.push("SelectAll".to_string());
+            }
+            if !parts.is_empty() {
+                line.push_str(&format!(" [{}]", parts.join("; ")));
+            }
+        }
         Some(StepShape::ReplaceFieldContents) => {
             // Like Set Field — `[Table::Field; calc]` — plus a trailing `Dialog: Off`
             // when the dialog is suppressed. Parts joined with `; `.
@@ -1986,6 +2005,65 @@ fn build_step_from_name(
                 indent_level: indent,
             }
         }
+        Some(StepShape::FieldTarget) => {
+            let (table, target, select_all) = parse_field_target_content(content);
+            ScriptStep {
+                name: name.to_string(),
+                enable: enabled,
+                id,
+                text: None,
+                calculation: None,
+                var_name: None,
+                repetition: None,
+                object_name: None,
+                function_name: None,
+                parameters: Vec::new(),
+                restore_state: None,
+                set_state: None,
+                dialog_title: None,
+                dialog_message: None,
+                dialog_buttons: Vec::new(),
+                input_fields: Vec::new(),
+                field_result: None,
+                field_target: target,
+                field_table: table,
+                field_numeric_id: None,
+                script_target_name: None,
+                script_target_id: None,
+                script_target_file: None,
+                current_script_mode: None,
+                goto_location: None,
+                goto_exit_after_last: None,
+                goto_no_interact: None,
+                window_mode: None,
+                window_limit_current_file: None,
+                window_state: None,
+                layout_name: None,
+                layout_id: None,
+                layout_destination: None,
+                window_height: None,
+                window_width: None,
+                window_top: None,
+                window_left: None,
+                window_style_name: None,
+                find_requests: Vec::new(),
+                curl_options: None,
+                dont_encode_url: None,
+                verify_ssl: None,
+                select_all_state: select_all,
+                flush_cached_joins: None,
+                flush_cached_sql_data: None,
+                error_condition: None,
+                error_code: None,
+                error_message: None,
+                skip_auto_entry: None,
+                ess_force_commit: None,
+                lock_state: None,
+                show_hide_value: None,
+                include_edit_record_toolbar: None,
+                indent_level: indent,
+            }
+        }
         Some(StepShape::ReplaceFieldContents) => {
             let (table, target, calc, dialog_off) = parse_replace_field_contents_content(content);
             ScriptStep {
@@ -3112,6 +3190,46 @@ fn parse_field_and_calc_content(
     (table, name, numeric_id, calc)
 }
 
+/// Parse "Go to Field" bracket content: `Table::Field[; SelectAll]`.
+/// Returns (table, field_name, select_all_state). `select_all_state` is
+/// `Some("True")` when the `SelectAll` flag is present, else `None` (FM's
+/// own default for the "select entire contents" option).
+fn parse_field_target_content(
+    content: Option<&str>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let content = match content {
+        Some(c) => c.trim(),
+        None => return (None, None, None),
+    };
+    if content.is_empty() {
+        return (None, None, None);
+    }
+
+    let mut select_all = None;
+    let mut target_str = content;
+    if let Some(idx) = content.find(';') {
+        target_str = content[..idx].trim();
+        for part in content[idx + 1..].split(';') {
+            if part.trim().eq_ignore_ascii_case("SelectAll") {
+                select_all = Some("True".to_string());
+            }
+        }
+    }
+
+    let (table, name) = if let Some(idx) = target_str.find("::") {
+        (
+            Some(target_str[..idx].to_string()),
+            Some(target_str[idx + 2..].to_string()),
+        )
+    } else if target_str.is_empty() {
+        (None, None)
+    } else {
+        (None, Some(target_str.to_string()))
+    };
+
+    (table, name, select_all)
+}
+
 /// Parse "Replace Field Contents" bracket content: `Table::Field; calc[; Dialog: Off]`.
 /// Returns (table, field, calc, dialog_off). The first `;`-segment (bracket-aware)
 /// is the target; a segment equal to `Dialog: Off` toggles the flag; the rest is the
@@ -3760,6 +3878,45 @@ mod tests {
         assert!(xml.contains("<NoInteract state=\"False\">")); // dialog on (default)
         assert!(xml.contains("<Calculation><![CDATA[1]]></Calculation>"));
         assert!(xml.contains("<With value=\"Calculation\">"));
+    }
+
+    // Go to Field used to be shape `Plain`, which silently dropped the target
+    // field on decode-to-text (nothing showed up in the editor) and on re-encode
+    // (paste back into FM lost the reference entirely).
+    const GO_TO_FIELD: &str = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"17\" name=\"Go to Field\"><SelectAll state=\"True\"></SelectAll><Field table=\"Contacts\" id=\"5\" name=\"Email\"></Field></Step></fmxmlsnippet>";
+
+    #[test]
+    fn go_to_field_decodes_to_structured_text() {
+        let script = xmss::parse_fmxml_snippet(GO_TO_FIELD).unwrap();
+        let s = &script.steps[0];
+        assert_eq!(s.field_table.as_deref(), Some("Contacts"));
+        assert_eq!(s.field_target.as_deref(), Some("Email"));
+        assert_eq!(s.select_all_state.as_deref(), Some("True"));
+
+        let text = super::format_script(&script);
+        assert_eq!(text, "Go to Field [Contacts::Email; SelectAll]");
+    }
+
+    #[test]
+    fn go_to_field_roundtrips_through_text() {
+        let script = xmss::parse_fmxml_snippet(GO_TO_FIELD).unwrap();
+        let text = super::format_script(&script);
+        let script2 = super::parse_text_to_script(&text).unwrap();
+        let rebuilt = xmss::build_xml_from_script(&script2).unwrap();
+        let expected = GO_TO_FIELD.replace(" id=\"5\"", "");
+        assert_eq!(rebuilt, expected);
+    }
+
+    #[test]
+    fn go_to_field_authored_from_scratch() {
+        let script = super::parse_text_to_script("Go to Field [Contacts::Email]").unwrap();
+        let s = &script.steps[0];
+        assert_eq!(s.field_table.as_deref(), Some("Contacts"));
+        assert_eq!(s.field_target.as_deref(), Some("Email"));
+        assert_eq!(s.select_all_state, None);
+        let xml = xmss::build_xml_from_script(&script).unwrap();
+        assert!(xml.contains("<Field table=\"Contacts\" name=\"Email\"></Field>"));
+        assert!(!xml.contains("SelectAll"));
     }
 
     #[test]

@@ -507,7 +507,7 @@ kind = "GoToField"
 id = 17
 en = "Go to Field"
 es = "Ir al campo"
-shape = "plain"
+shape = "field_target"
 opens_block = false
 closes_block = false
 

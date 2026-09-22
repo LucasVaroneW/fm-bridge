@@ -89,6 +89,10 @@ pub enum StepShape {
     /// <Lock state="..."/> + <ShowHide value="..."/> + <IncludeEditRecordToolbar state="..."/>
     /// (Show/Hide Toolbars).
     ShowHideToolbars,
+    /// Optional <SelectAll state="..."/> + <Field table="..." name="..."/>
+    /// (Go to Field). No numeric ID — FM resolves by table+name on paste,
+    /// same as Set Field.
+    FieldTarget,
 }
 
 /// Internal step kind identifier from steps.toml.

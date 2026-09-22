@@ -572,7 +572,9 @@ kind = "InsertCalculatedResult"
 id = 77
 en = "Insert Calculated Result"
 es = "Insertar resultado calculado"
-shape = "plain"
+# Opaque: carries a calculation + target field (+ likely a select-entire-contents
+# flag) verbatim. `plain` used to drop all of it on round-trip.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -581,7 +583,9 @@ kind = "InsertCurrentDate"
 id = 13
 en = "Insert Current Date"
 es = "Insertar fecha actual"
-shape = "plain"
+# Opaque: carries an optional target field + select-entire-contents flag
+# verbatim. `plain` used to drop it on round-trip.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -590,7 +594,8 @@ kind = "InsertCurrentTime"
 id = 14
 en = "Insert Current Time"
 es = "Insertar hora actual"
-shape = "plain"
+# Opaque: same target-field config as Insert Current Date.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -599,7 +604,8 @@ kind = "InsertCurrentUserName"
 id = 60
 en = "Insert Current User Name"
 es = "Insertar nombre del usuario actual"
-shape = "plain"
+# Opaque: same target-field config as Insert Current Date.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -608,7 +614,8 @@ kind = "InsertFromIndex"
 id = 11
 en = "Insert from Index"
 es = "Insertar desde índice"
-shape = "plain"
+# Opaque: same target-field config as Insert Current Date.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -626,7 +633,8 @@ kind = "InsertFromDevice"
 id = 161
 en = "Insert from Device"
 es = "Insertar desde dispositivo"
-shape = "plain"
+# Opaque: carries target field + device-source options verbatim.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -635,7 +643,9 @@ kind = "InsertPicture"
 id = 56
 en = "Insert Picture"
 es = "Insertar imagen"
-shape = "plain"
+# Opaque: same file/media config family as Insert File (target field,
+# store-reference-only, etc.) — see that step's comment.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -644,7 +654,8 @@ kind = "InsertAudioVideo"
 id = 159
 en = "Insert Audio/Video"
 es = "Insertar audio/vídeo"
-shape = "plain"
+# Opaque: same file/media config family as Insert File.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -653,7 +664,8 @@ kind = "InsertPDF"
 id = 158
 en = "Insert PDF"
 es = "Insertar PDF"
-shape = "plain"
+# Opaque: same file/media config family as Insert File.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -662,7 +674,10 @@ kind = "InsertFile"
 id = 131
 en = "Insert File"
 es = "Insertar archivo"
-shape = "plain"
+# Opaque: carries its target field + options (store-reference-only,
+# specify-by-calculation, etc.) verbatim so they round-trip. `plain` used to
+# drop all of it — see the shape's doc comment.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -671,7 +686,8 @@ kind = "InsertEmbedded"
 id = 215
 en = "Insert Embedded"
 es = "Insertar incrustación"
-shape = "plain"
+# Opaque: carries target field + embedding/model config verbatim.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -680,7 +696,8 @@ kind = "InsertEmbeddedInFoundSet"
 id = 216
 en = "Insert Embedded in Found Set"
 es = "Insertar incrustación en el conjunto encontrado"
-shape = "plain"
+# Opaque: same config family as Insert Embedded.
+shape = "opaque"
 opens_block = false
 closes_block = false
 

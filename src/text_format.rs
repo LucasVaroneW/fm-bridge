@@ -3762,6 +3762,22 @@ mod tests {
         assert!(xml.contains("<With value=\"Calculation\">"));
     }
 
+    // Insert File used to be shape `Plain`, which dropped its target field and
+    // every other option on decode-to-text and re-encode. Now `Opaque`: the raw
+    // inner XML round-trips verbatim through the bracket content.
+    const INSERT_FILE: &str = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"131\" name=\"Insert File\"><NoInteract state=\"False\"></NoInteract><Restore state=\"False\"></Restore><Field table=\"Contacts\" id=\"5\" name=\"Attachment\"></Field></Step></fmxmlsnippet>";
+
+    #[test]
+    fn insert_file_roundtrips_through_text() {
+        let script = xmss::parse_fmxml_snippet(INSERT_FILE).unwrap();
+        let text = super::format_script(&script);
+        assert!(text.contains("Insert File ["));
+        assert!(text.contains("Field table=\"Contacts\""));
+        let script2 = super::parse_text_to_script(&text).unwrap();
+        let rebuilt = xmss::build_xml_from_script(&script2).unwrap();
+        assert_eq!(rebuilt, INSERT_FILE);
+    }
+
     #[test]
     fn replace_field_contents_spanish_name_translates() {
         let es = REPLACE_FIELD_CONTENTS.replace(

@@ -2194,4 +2194,110 @@ mod tests {
         let script = parse_fmxml_snippet(&with_bom).unwrap();
         assert_eq!(script.steps.len(), 1);
     }
+
+    #[test]
+    fn insert_file_roundtrips_configuration() {
+        // Regression test: Insert File used to be shape `Plain`, which dropped
+        // its target field and every other option (store-reference-only,
+        // specify-by-calculation, ...) on both decode-to-text and re-encode.
+        // Opaque round-trips whatever FM actually emits, verbatim, rather than
+        // guessing at an XML shape we can't verify against a real capture.
+        let xml = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"131\" name=\"Insert File\"><NoInteract state=\"False\"></NoInteract><Restore state=\"False\"></Restore><Field table=\"Contacts\" id=\"5\" name=\"Attachment\"></Field></Step></fmxmlsnippet>";
+        let script = decode_xmss(xml.as_bytes()).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        let step = &script.steps[0];
+        assert_eq!(
+            step.calculation.as_deref(),
+            Some(
+                "<NoInteract state=\"False\"></NoInteract><Restore state=\"False\"></Restore><Field table=\"Contacts\" id=\"5\" name=\"Attachment\"></Field>"
+            )
+        );
+
+        // Re-encode and decode again: every option must survive the round trip.
+        let re_xml = build_xml_from_script(&script).unwrap();
+        assert_eq!(re_xml, xml);
+        let script2 = decode_xmss(re_xml.as_bytes()).unwrap();
+        assert_eq!(script2.steps[0].calculation, step.calculation);
+    }
+
+    #[test]
+    fn insert_family_siblings_roundtrip_configuration() {
+        // Same bug, same fix, across the rest of the "Insert" family: all of
+        // these used to be shape `Plain` (dropping target field / options).
+        // Each body below is a plausible-but-synthetic capture (no real FM
+        // dump available) — the point is that whatever child XML is present
+        // survives the round trip byte-for-byte, regardless of its exact shape.
+        let cases: &[(&str, &str, &str)] = &[
+            (
+                "131",
+                "Insert Picture",
+                "<NoInteract state=\"False\"></NoInteract><Field table=\"Contacts\" id=\"5\" name=\"Photo\"></Field>",
+            ),
+            (
+                "159",
+                "Insert Audio/Video",
+                "<NoInteract state=\"False\"></NoInteract><Field table=\"Contacts\" id=\"5\" name=\"Clip\"></Field>",
+            ),
+            (
+                "158",
+                "Insert PDF",
+                "<NoInteract state=\"False\"></NoInteract><Field table=\"Contacts\" id=\"5\" name=\"Doc\"></Field>",
+            ),
+            (
+                "77",
+                "Insert Calculated Result",
+                "<SelectAll state=\"True\"></SelectAll><Calculation><![CDATA[Get(CurrentDate)]]></Calculation><Field table=\"Contacts\" id=\"5\" name=\"Created\"></Field>",
+            ),
+            (
+                "13",
+                "Insert Current Date",
+                "<SelectAll state=\"True\"></SelectAll><Field table=\"Contacts\" id=\"5\" name=\"CreatedDate\"></Field>",
+            ),
+            (
+                "14",
+                "Insert Current Time",
+                "<SelectAll state=\"True\"></SelectAll><Field table=\"Contacts\" id=\"5\" name=\"CreatedTime\"></Field>",
+            ),
+            (
+                "60",
+                "Insert Current User Name",
+                "<SelectAll state=\"True\"></SelectAll><Field table=\"Contacts\" id=\"5\" name=\"CreatedBy\"></Field>",
+            ),
+            (
+                "11",
+                "Insert from Index",
+                "<SelectAll state=\"True\"></SelectAll><Field table=\"Contacts\" id=\"5\" name=\"Category\"></Field>",
+            ),
+            (
+                "161",
+                "Insert from Device",
+                "<NoInteract state=\"False\"></NoInteract><Field table=\"Contacts\" id=\"5\" name=\"Photo\"></Field>",
+            ),
+            (
+                "215",
+                "Insert Embedded",
+                "<Field table=\"Contacts\" id=\"5\" name=\"Embedding\"></Field>",
+            ),
+            (
+                "216",
+                "Insert Embedded in Found Set",
+                "<Field table=\"Contacts\" id=\"5\" name=\"Embedding\"></Field>",
+            ),
+        ];
+
+        for (id, name, body) in cases {
+            let xml = format!(
+                "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"{}\" name=\"{}\">{}</Step></fmxmlsnippet>",
+                id, name, body
+            );
+            let script = decode_xmss(xml.as_bytes()).unwrap();
+            assert_eq!(
+                script.steps[0].calculation.as_deref(),
+                Some(*body),
+                "{name}"
+            );
+            let re_xml = build_xml_from_script(&script).unwrap();
+            assert_eq!(re_xml, xml, "{name}");
+        }
+    }
 }

@@ -372,13 +372,17 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
         }
         Some(StepShape::GoToLayoutNamed) => {
             // `Go to Layout ["Name" #id]` (round-trip) or `["Name"]` (from-scratch);
-            // `[original]` for OriginalLayout.
+            // `[original]` for OriginalLayout; `[Calc: <expr>]` for byCalculation
+            // (e.g. a layout name held in a variable, like $LayoutFacturas).
             let dest = step
                 .layout_destination
                 .as_deref()
                 .unwrap_or("SelectedLayout");
             if dest == "OriginalLayout" {
                 line.push_str(" [original]");
+            } else if dest == "byCalculation" {
+                let calc = step.calculation.as_deref().map(|c| c.trim()).unwrap_or("");
+                line.push_str(&format!(" [Calc: {}]", calc));
             } else if let Some(name) = &step.layout_name {
                 match &step.layout_id {
                     Some(id) => line.push_str(&format!(" [\"{}\" #{}]", name, id)),
@@ -2168,13 +2172,13 @@ fn build_step_from_name(
             }
         }
         Some(StepShape::GoToLayoutNamed) => {
-            let (layout, layout_id, dest) = parse_go_to_layout_content(content);
+            let (layout, layout_id, dest, calc) = parse_go_to_layout_content(content);
             ScriptStep {
                 name: name.to_string(),
                 enable: enabled,
                 id,
                 text: None,
-                calculation: None,
+                calculation: calc,
                 var_name: None,
                 repetition: None,
                 object_name: None,
@@ -3277,10 +3281,15 @@ fn parse_go_to_object_content(content: Option<&str>) -> (Option<String>, Option<
 ///   `original`         → OriginalLayout
 ///   `"Name"`           → SelectedLayout, no id (FM may fail to link on paste)
 ///   `"Name" #N`        → SelectedLayout with FM Layout id N (round-trip exact)
-/// Returns (layout_name, layout_id, destination).
+/// Returns (layout_name, layout_id, destination, calculation).
 fn parse_go_to_layout_content(
     content: Option<&str>,
-) -> (Option<String>, Option<String>, Option<String>) {
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     // A bare `Go to Layout` with no bracket is FileMaker's "original layout".
     // Returning None here made the encoder fall back to SelectedLayout with no
     // <Layout> child, which FM pastes as "Ir a la presentación <desconocido>" —
@@ -3288,10 +3297,20 @@ fn parse_go_to_layout_content(
     // bare `Go to Layout`, so this is also what closes that round-trip.
     let content = match content {
         Some(c) => c.trim(),
-        None => return (None, None, Some("OriginalLayout".to_string())),
+        None => return (None, None, Some("OriginalLayout".to_string()), None),
     };
     if content.is_empty() || content.eq_ignore_ascii_case("original") {
-        return (None, None, Some("OriginalLayout".to_string()));
+        return (None, None, Some("OriginalLayout".to_string()), None);
+    }
+    // `Calc: <expr>` → byCalculation, e.g. a layout name held in a variable
+    // like $LayoutFacturas.
+    if let Some(calc) = content.strip_prefix("Calc:") {
+        return (
+            None,
+            None,
+            Some("byCalculation".to_string()),
+            Some(calc.trim().to_string()),
+        );
     }
     // Split off optional ` #N` numeric id suffix.
     let (name_part, id) = match content.rfind(" #") {
@@ -3309,9 +3328,9 @@ fn parse_go_to_layout_content(
     if name.is_empty() {
         // No name to select: same reasoning as above — original layout, never a
         // SelectedLayout with nothing selected.
-        (None, id, Some("OriginalLayout".to_string()))
+        (None, id, Some("OriginalLayout".to_string()), None)
     } else {
-        (Some(name), id, Some("SelectedLayout".to_string()))
+        (Some(name), id, Some("SelectedLayout".to_string()), None)
     }
 }
 
@@ -4097,5 +4116,43 @@ mod tests {
         assert_eq!(step.layout_destination.as_deref(), Some("SelectedLayout"));
         assert_eq!(step.layout_name.as_deref(), Some("Ta_Pedidos"));
         assert_eq!(step.layout_id.as_deref(), Some("2908"));
+    }
+
+    // Regression test: Go to Layout's "Specify by calculation" mode
+    // (byCalculation, e.g. a layout name held in $LayoutFacturas) decoded fine
+    // internally but was invisible in the .fmscript text and never re-encoded —
+    // the target silently disappeared on decode-to-text and on re-encode.
+    const GO_TO_LAYOUT_BY_CALC: &str = "<fmxmlsnippet type=\"FMObjectList\"><Step enable=\"True\" id=\"6\" name=\"Go to Layout\"><LayoutDestination value=\"byCalculation\"></LayoutDestination><Calculation><![CDATA[$LayoutFacturas]]></Calculation></Step></fmxmlsnippet>";
+
+    #[test]
+    fn go_to_layout_by_calculation_decodes_to_structured_text() {
+        let script = xmss::parse_fmxml_snippet(GO_TO_LAYOUT_BY_CALC).unwrap();
+        let s = &script.steps[0];
+        assert_eq!(s.layout_destination.as_deref(), Some("byCalculation"));
+        assert_eq!(s.calculation.as_deref(), Some("$LayoutFacturas"));
+
+        let text = super::format_script(&script);
+        assert_eq!(text, "Go to Layout [Calc: $LayoutFacturas]");
+    }
+
+    #[test]
+    fn go_to_layout_by_calculation_roundtrips_through_text() {
+        let script = xmss::parse_fmxml_snippet(GO_TO_LAYOUT_BY_CALC).unwrap();
+        let text = super::format_script(&script);
+        let script2 = super::parse_text_to_script(&text).unwrap();
+        let rebuilt = xmss::build_xml_from_script(&script2).unwrap();
+        assert_eq!(rebuilt, GO_TO_LAYOUT_BY_CALC);
+    }
+
+    #[test]
+    fn go_to_layout_by_calculation_authored_from_scratch() {
+        let script = super::parse_text_to_script("Go to Layout [Calc: $LayoutFacturas]").unwrap();
+        let s = &script.steps[0];
+        assert_eq!(s.layout_destination.as_deref(), Some("byCalculation"));
+        assert_eq!(s.calculation.as_deref(), Some("$LayoutFacturas"));
+        let xml = xmss::build_xml_from_script(&script).unwrap();
+        assert!(xml.contains(r#"<LayoutDestination value="byCalculation">"#));
+        assert!(xml.contains("<Calculation><![CDATA[$LayoutFacturas]]></Calculation>"));
+        assert!(!xml.contains("<Layout "));
     }
 }

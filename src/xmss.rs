@@ -1768,6 +1768,10 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
                     }
                     xml.push_str(&format!(" name=\"{}\"></Layout>", xml_escape(name)));
                 }
+            } else if dest == "byCalculation" {
+                if let Some(calc) = &step.calculation {
+                    xml.push_str(&format!("<Calculation>{}</Calculation>", cdata(calc)));
+                }
             }
         }
         Some(StepShape::NewWindow) => {

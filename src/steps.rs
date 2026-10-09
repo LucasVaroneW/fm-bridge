@@ -37,6 +37,8 @@ pub enum StepShape {
     /// (reuses goto_no_interact). No Field id is emitted — FM resolves by name.
     ReplaceFieldContents,
     /// <Script id="..." name="..."/> + optional <Calculation> + <CurrentScript value="..."/>
+    /// + optional <FileReference> (cross-file target, text `from file: "X"`) and,
+    /// for Perform Script on Server, <WaitForCompletion> (text `; Wait for completion`).
     /// Used by Perform Script and Perform Script on Server.
     PerformScript,
     /// <NoInteract state="..."/> + optional <Exit state="..."/> + <RowPageLocation value="..."/>

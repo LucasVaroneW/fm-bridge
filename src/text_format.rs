@@ -304,18 +304,32 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
                 (Some(n), None) => format!("\"{}\"", n),
                 (None, _) => String::new(),
             };
-            // Cross-file Perform Script: surface the external file the target lives
-            // in (decode-only; inspect uses this to show "de dónde se llama").
-            if let Some(file) = &step.script_target_file {
-                if !name_part.is_empty() {
-                    name_part.push_str(&format!(" from \"{}\"", file));
+            // Cross-file target: `"Script" #id from file: "File" #fileId` — the
+            // same words FileMaker shows (`… desde el archivo: …` in Spanish). It
+            // round-trips: write emits the <FileReference> so the paste points at
+            // the other file instead of the current one.
+            if let Some(file) = &step.script_target_file
+                && !name_part.is_empty()
+            {
+                name_part.push_str(&format!(" from file: \"{}\"", file));
+                if let Some(fid) = &step.script_target_file_id {
+                    name_part.push_str(&format!(" #{}", fid));
                 }
             }
-            match (name_part.is_empty(), calc.is_empty()) {
-                (false, false) => line.push_str(&format!(" [{}; {}]", name_part, calc)),
-                (false, true) => line.push_str(&format!(" [{}]", name_part)),
-                (true, false) => line.push_str(&format!(" [{}]", calc)),
-                (true, true) => {}
+            let mut parts: Vec<String> = Vec::new();
+            if !name_part.is_empty() {
+                parts.push(name_part);
+            }
+            if !calc.is_empty() {
+                parts.push(calc.to_string());
+            }
+            // PSoS "Wait for completion": a trailing flag segment (a calc never
+            // has a top-level `;`, so it can't be confused with the parameter).
+            if step.wait_for_completion.as_deref() == Some("True") {
+                parts.push(WAIT_FOR_COMPLETION.to_string());
+            }
+            if !parts.is_empty() {
+                line.push_str(&format!(" [{}]", parts.join("; ")));
             }
         }
         Some(StepShape::FieldAndCalc) => {
@@ -607,6 +621,13 @@ pub fn format_step_with(step: &ScriptStep, style: FormatStyle) -> String {
                     // exactly (else keep the verbatim XML so we never lose data).
                     let dsl = crate::step_dsl::to_dsl(&step.name, trimmed);
                     match dsl {
+                        // One-line DSLs (flag steps: `Dialog: Off`, `Pause: Off`)
+                        // stay on the step line in both styles, like FileMaker.
+                        Some(dsl) if !dsl.contains('\n') => {
+                            if !dsl.is_empty() {
+                                line.push_str(&format!(" [{}]", dsl));
+                            }
+                        }
                         Some(dsl) if style == FormatStyle::Inline => {
                             // One line: join the DSL fields with " | " so the step
                             // occupies a single .fmscript line (matches FileMaker's
@@ -825,6 +846,8 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -906,6 +929,8 @@ pub fn parse_text_to_script(text: &str) -> Result<FmScript, ParseError> {
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -1179,6 +1204,24 @@ pub fn lint(text: &str) -> Vec<ParseError> {
                 }
                 current_text = lines[i];
             }
+            // Flag steps (Delete/Revert/Sort/Enter Find Mode): an option we don't
+            // recognize would be pasted as junk and FileMaker would use its own
+            // defaults (dialog ON, Restore ON) — say so instead of failing silently.
+            if terminated && i == step_line && crate::step_dsl::is_flag_step(&step_name) {
+                let inner = content[idx + 2..].trim_end();
+                let inner = inner.strip_suffix(']').unwrap_or(inner).trim();
+                if !inner.starts_with('<') && crate::step_dsl::from_dsl(&step_name, inner).is_none()
+                {
+                    errors.push(ParseError::warning(
+                        step_line + 1,
+                        format!(
+                            "Unrecognized options for '{}': `{}` — expected e.g. `Dialog: Off`, \
+                             `Pause: Off`, `Restore`",
+                            step_name, inner
+                        ),
+                    ));
+                }
+            }
         }
         i += 1;
     }
@@ -1303,6 +1346,8 @@ fn build_step_from_name(
             script_target_name: None,
             script_target_id: None,
             script_target_file: None,
+            script_target_file_id: None,
+            wait_for_completion: None,
             current_script_mode: None,
             goto_location: None,
             goto_exit_after_last: None,
@@ -1361,6 +1406,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -1418,6 +1465,8 @@ fn build_step_from_name(
             script_target_name: None,
             script_target_id: None,
             script_target_file: None,
+            script_target_file_id: None,
+            wait_for_completion: None,
             current_script_mode: None,
             goto_location: None,
             goto_exit_after_last: None,
@@ -1474,6 +1523,8 @@ fn build_step_from_name(
             script_target_name: None,
             script_target_id: None,
             script_target_file: None,
+            script_target_file_id: None,
+            wait_for_completion: None,
             current_script_mode: None,
             goto_location: None,
             goto_exit_after_last: None,
@@ -1532,6 +1583,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -1591,6 +1644,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -1656,6 +1711,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -1717,6 +1774,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -1776,6 +1835,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -1835,6 +1896,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: loc,
                 goto_exit_after_last: exit,
@@ -1869,7 +1932,15 @@ fn build_step_from_name(
             }
         }
         Some(StepShape::PerformScript) => {
-            let (script_name, script_id, calc) = parse_perform_script_content(content);
+            let ps = parse_perform_script_content(content);
+            let (script_name, script_id, calc) = (ps.name, ps.id, ps.calc);
+            // Only Perform Script on Server has the flag; for it, an unstated
+            // flag is written as False (FileMaker's paste default anyway).
+            let wait = if name == crate::xmss::PSOS_NAME {
+                Some(if ps.wait { "True" } else { "False" }.to_string())
+            } else {
+                None
+            };
             ScriptStep {
                 name: name.to_string(),
                 enable: enabled,
@@ -1893,7 +1964,9 @@ fn build_step_from_name(
                 field_numeric_id: None,
                 script_target_name: script_name,
                 script_target_id: script_id,
-                script_target_file: None,
+                script_target_file: ps.file,
+                script_target_file_id: ps.file_id,
+                wait_for_completion: wait,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -1953,6 +2026,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2012,6 +2087,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2075,6 +2152,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2134,6 +2213,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2193,6 +2274,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2252,6 +2335,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2311,6 +2396,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: location,
                 goto_exit_after_last: None,
@@ -2370,6 +2457,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2429,6 +2518,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2488,6 +2579,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2547,6 +2640,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2606,6 +2701,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2681,6 +2778,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2725,14 +2824,22 @@ fn build_step_from_name(
                 // Opaque steps may carry the readable DSL instead of raw XML;
                 // convert it back to the exact FM payload. Raw XML (starts with
                 // `<`) and everything else pass through unchanged.
-                calculation: content.map(|c| {
-                    let t = c.trim();
-                    if !t.starts_with('<') {
-                        crate::step_dsl::from_dsl(name, t).unwrap_or_else(|| c.to_string())
-                    } else {
-                        c.to_string()
+                calculation: match content {
+                    Some(c) => {
+                        let t = c.trim();
+                        if !t.starts_with('<') {
+                            Some(
+                                crate::step_dsl::from_dsl(name, t).unwrap_or_else(|| c.to_string()),
+                            )
+                        } else {
+                            Some(c.to_string())
+                        }
                     }
-                }),
+                    // A bare flag step (`Enter Find Mode`, `Delete Record/Request`)
+                    // still states its options, at their defaults — otherwise
+                    // FileMaker pastes its own (Restore ON, dialog ON).
+                    None => crate::step_dsl::default_flag_xml(name),
+                },
                 var_name: None,
                 repetition: None,
                 object_name: None,
@@ -2751,6 +2858,8 @@ fn build_step_from_name(
                 script_target_name: None,
                 script_target_id: None,
                 script_target_file: None,
+                script_target_file_id: None,
+                wait_for_completion: None,
                 current_script_mode: None,
                 goto_location: None,
                 goto_exit_after_last: None,
@@ -2976,51 +3085,147 @@ fn parse_goto_record_content(
     (location, exit_flag, no_interact, calc)
 }
 
-/// Parse Perform Script content. Recognized forms:
-///   `"ScriptName"`           → script only, no param
-///   `"ScriptName"; param`    → script + param
-///   `param`                  → param only (legacy, when no script target was set)
-/// The script name is detected by a leading `"` and closes at the matching `"`.
-fn parse_perform_script_content(
-    content: Option<&str>,
-) -> (Option<String>, Option<String>, Option<String>) {
-    let content = match content {
-        Some(c) => c.trim(),
-        None => return (None, None, None),
-    };
+/// Text of the Perform Script on Server "Wait for completion" flag, as FileMaker
+/// shows it. Written as a trailing `; Wait for completion` segment.
+pub const WAIT_FOR_COMPLETION: &str = "Wait for completion";
 
-    if !content.starts_with('"') {
-        // No script target — entire content is the parameter calc.
-        return (None, None, Some(content.to_string()));
-    }
+/// Parsed bracket content of Perform Script / Perform Script on Server.
+#[derive(Debug, Default, PartialEq)]
+struct ParsedPerformScript {
+    name: Option<String>,
+    id: Option<String>,
+    /// External file (`from file: "X"`), for cross-file calls.
+    file: Option<String>,
+    file_id: Option<String>,
+    calc: Option<String>,
+    /// PSoS "Wait for completion".
+    wait: bool,
+}
 
-    let after_open = &content[1..];
-    let close_pos = match after_open.find('"') {
-        Some(p) => p,
-        None => return (None, None, Some(content.to_string())),
-    };
-    let script_name = after_open[..close_pos].to_string();
-    let rest = after_open[close_pos + 1..].trim_start();
-
-    // Optional `#N` id suffix — required by FM to resolve the script link on paste.
-    let (script_id, rest) = if let Some(after_hash) = rest.strip_prefix('#') {
+/// Split off an optional ` #N` id at the start of `rest` (after a quoted name).
+fn take_hash_id(rest: &str) -> (Option<String>, &str) {
+    if let Some(after_hash) = rest.strip_prefix('#') {
         let after_hash = after_hash.trim_start();
         let end = after_hash
             .find(|c: char| !c.is_ascii_digit())
             .unwrap_or(after_hash.len());
         if end > 0 {
-            (
+            return (
                 Some(after_hash[..end].to_string()),
                 after_hash[end..].trim_start(),
-            )
-        } else {
-            (None, rest)
+            );
         }
-    } else {
-        (None, rest)
+    }
+    (None, rest)
+}
+
+/// Byte offset of the last `;` that is outside string literals and outside
+/// ()/[] — i.e. a separator between bracket segments, never part of a calc.
+fn last_top_level_semicolon(s: &str) -> Option<usize> {
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut last = None;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '"' => in_string = !in_string,
+            '(' | '[' if !in_string => depth += 1,
+            ')' | ']' if !in_string => depth -= 1,
+            ';' if !in_string && depth == 0 => last = Some(i),
+            _ => {}
+        }
+    }
+    last
+}
+
+/// `Some(true/false)` if `seg` is the PSoS wait flag: `Wait for completion`
+/// (= on), `Wait for completion: On|Off`, or the short `Wait: On|Off`.
+fn parse_wait_flag(seg: &str) -> Option<bool> {
+    let s = seg.trim();
+    let lower = s.to_ascii_lowercase();
+    if lower == "wait for completion" {
+        return Some(true);
+    }
+    let value = lower
+        .strip_prefix("wait for completion:")
+        .or_else(|| lower.strip_prefix("wait:"))?
+        .trim()
+        .to_string();
+    match value.as_str() {
+        "on" | "true" => Some(true),
+        "off" | "false" => Some(false),
+        _ => None,
+    }
+}
+
+/// Parse Perform Script / Perform Script on Server content. Recognized forms:
+///   `"Script"`                                   → script only, no param
+///   `"Script" #12; param`                        → script (+ id) + param
+///   `"Script" from file: "Other" #3; param`      → script in ANOTHER file
+///   `…; Wait for completion`                     → PSoS waits for the result
+///   `param`                                      → param only (no target set)
+/// The script name is detected by a leading `"` and closes at the matching `"`.
+/// `from "Other"` (the older inspect output) is accepted as `from file: "Other"`.
+fn parse_perform_script_content(content: Option<&str>) -> ParsedPerformScript {
+    let mut out = ParsedPerformScript::default();
+    let mut content = match content {
+        Some(c) => c.trim(),
+        None => return out,
     };
 
-    let calc = if let Some(stripped) = rest.strip_prefix(';') {
+    // Trailing wait flag (a calc never has a top-level `;`, so this is safe).
+    if let Some(pos) = last_top_level_semicolon(content) {
+        if let Some(w) = parse_wait_flag(&content[pos + 1..]) {
+            out.wait = w;
+            content = content[..pos].trim_end();
+        }
+    } else if let Some(w) = parse_wait_flag(content) {
+        out.wait = w;
+        return out;
+    }
+
+    if !content.starts_with('"') {
+        // No script target — entire content is the parameter calc.
+        if !content.is_empty() {
+            out.calc = Some(content.to_string());
+        }
+        return out;
+    }
+
+    let after_open = &content[1..];
+    let close_pos = match after_open.find('"') {
+        Some(p) => p,
+        None => {
+            out.calc = Some(content.to_string());
+            return out;
+        }
+    };
+    out.name = Some(after_open[..close_pos].to_string());
+    let rest = after_open[close_pos + 1..].trim_start();
+
+    // Optional `#N` id suffix — lets FM resolve the script link on paste.
+    let (id, mut rest) = take_hash_id(rest);
+    out.id = id;
+
+    // Optional external file: `from file: "X"` (canonical) or `from "X"` (legacy).
+    let lower = rest.to_ascii_lowercase();
+    let after_from = if lower.starts_with("from file:") {
+        Some(rest["from file:".len()..].trim_start())
+    } else if lower.starts_with("from ") {
+        Some(rest["from ".len()..].trim_start())
+    } else {
+        None
+    };
+    if let Some(after) = after_from
+        && let Some(inner) = after.strip_prefix('"')
+        && let Some(end) = inner.find('"')
+    {
+        out.file = Some(inner[..end].to_string());
+        let (fid, r) = take_hash_id(inner[end + 1..].trim_start());
+        out.file_id = fid;
+        rest = r;
+    }
+
+    out.calc = if let Some(stripped) = rest.strip_prefix(';') {
         let s = stripped.trim();
         if s.is_empty() {
             None
@@ -3033,7 +3238,7 @@ fn parse_perform_script_content(
         Some(rest.to_string())
     };
 
-    (Some(script_name), script_id, calc)
+    out
 }
 
 /// Parse Set Field content: `Table::Field #id; calc` or any subset.
@@ -3186,8 +3391,8 @@ fn parse_replace_field_contents_content(
     let mut dialog_off = false;
     let mut calc_parts: Vec<String> = Vec::new();
     for seg in segments.iter().skip(1) {
-        if seg.eq_ignore_ascii_case("Dialog: Off") {
-            dialog_off = true;
+        if let Some(off) = crate::step_dsl::dialog_flag(seg) {
+            dialog_off = off;
         } else {
             calc_parts.push(seg.clone());
         }
@@ -3398,8 +3603,8 @@ fn parse_go_to_portal_row_content(
         let p = part.trim();
         if p.eq_ignore_ascii_case("SelectAll") {
             sel_all = Some("True".to_string());
-        } else if p.eq_ignore_ascii_case("Dialog: Off") {
-            no_int = Some("True".to_string());
+        } else if let Some(off) = crate::step_dsl::dialog_flag(p) {
+            no_int = Some(if off { "True" } else { "False" }.to_string());
         } else if first && !p.contains(':') && !p.eq_ignore_ascii_case("SelectAll") {
             calc = Some(p.to_string());
             location = Some("ByCalculation".to_string());
@@ -3568,10 +3773,8 @@ fn parse_insert_from_url_content(content: Option<&str>) -> ParsedInsertFromUrl {
             out.url = Some(v.trim().to_string());
         } else if let Some(v) = p.strip_prefix("cURL:") {
             out.curl = Some(v.trim().to_string());
-        } else if let Some(v) = p.strip_prefix("Dialog:") {
-            if v.trim().eq_ignore_ascii_case("off") {
-                out.dialog_off = true;
-            }
+        } else if let Some(off) = crate::step_dsl::dialog_flag(p) {
+            out.dialog_off = off;
         } else if p.eq_ignore_ascii_case("VerifySSL") {
             out.verify_ssl = true;
         } else if p.eq_ignore_ascii_case("SelectAll") {
@@ -4097,5 +4300,303 @@ mod tests {
         assert_eq!(step.layout_destination.as_deref(), Some("SelectedLayout"));
         assert_eq!(step.layout_name.as_deref(), Some("Ta_Pedidos"));
         assert_eq!(step.layout_id.as_deref(), Some("2908"));
+    }
+}
+
+/// Regressions for what used to paste wrong into FileMaker 22 and had to be
+/// fixed by hand: cross-file Perform Script / PSoS (target file + Wait for
+/// completion), Restore ticked on finds without stored requests, and the dialog
+/// option ignored. Fixtures are FileMaker 22 DDR steps (same step XML as the
+/// clipboard), compacted to the clipboard's single-line, paired-tag form.
+#[cfg(test)]
+mod paste_fidelity_tests {
+    use crate::xmss;
+
+    fn snippet(steps: &str) -> String {
+        format!(
+            "<fmxmlsnippet type=\"FMObjectList\">{}</fmxmlsnippet>",
+            steps
+        )
+    }
+
+    fn write(text: &str) -> String {
+        let script = super::parse_text_to_script(text).unwrap();
+        xmss::build_xml_from_script(&script).unwrap()
+    }
+
+    fn read(xml: &str) -> String {
+        super::format_script(&xmss::parse_fmxml_snippet(xml).unwrap())
+    }
+
+    /// text → write → read gives back the same text.
+    fn assert_text_round_trips(text: &str) {
+        assert_eq!(read(&write(text)), text, "text did not round-trip");
+    }
+
+    // ── 1. Cross-file Perform Script / Perform Script on Server ──
+
+    const PSOS_CROSS_FILE: &str = "<Step enable=\"True\" id=\"164\" name=\"Perform Script on Server\">\
+        <WaitForCompletion state=\"True\"></WaitForCompletion>\
+        <FileReference id=\"48\" name=\"By_22_Fabricacion\"><UniversalPathList>file:By_22_Fabricacion</UniversalPathList></FileReference>\
+        <Calculation><![CDATA[$jsonFmDataApi]]></Calculation>\
+        <Script id=\"1201\" name=\"Api_StepsRRHHJT\"></Script></Step>";
+
+    #[test]
+    fn psos_cross_file_with_wait_reads_and_writes_back_identical() {
+        let xml = snippet(PSOS_CROSS_FILE);
+        let text = read(&xml);
+        assert_eq!(
+            text,
+            "Perform Script on Server [\"Api_StepsRRHHJT\" #1201 from file: \"By_22_Fabricacion\" #48; $jsonFmDataApi; Wait for completion]"
+        );
+        assert_eq!(write(&text), xml, "write must rebuild FileMaker's XML");
+        assert_text_round_trips(&text);
+    }
+
+    #[test]
+    fn cross_file_perform_script_reads_target_file() {
+        let xml = snippet(
+            "<Step enable=\"True\" id=\"1\" name=\"Perform Script\">\
+             <FileReference id=\"52\" name=\"By_00_1Launch\"><UniversalPathList>file:By_00_1Launch.fmp12</UniversalPathList></FileReference>\
+             <Calculation><![CDATA[1 & \"¶\" & GetValue ( $PG ; 2 )]]></Calculation>\
+             <Script id=\"798\" name=\"Gen_Abrir\"></Script></Step>",
+        );
+        let text = read(&xml);
+        assert_eq!(
+            text,
+            "Perform Script [\"Gen_Abrir\" #798 from file: \"By_00_1Launch\" #52; 1 & \"¶\" & GetValue ( $PG ; 2 )]"
+        );
+        let out = write(&text);
+        assert!(
+            out.contains("<FileReference id=\"52\" name=\"By_00_1Launch\">"),
+            "{}",
+            out
+        );
+        assert!(
+            !out.contains("WaitForCompletion"),
+            "only PSoS has the flag: {}",
+            out
+        );
+        assert_text_round_trips(&text);
+    }
+
+    #[test]
+    fn authored_cross_file_psos_emits_file_reference_and_wait() {
+        // The way it's written by hand in the .fmscript files: no ids.
+        let text = "Perform Script on Server [\"Fab_Web_Escribir_Caja\" from file: \"By_22_Fabricacion\"; JSONSetElement ( \"{}\" ; [ \"a\" ; $a ; JSONArray ] ); Wait for completion]";
+        let xml = write(text);
+        assert!(
+            xml.contains(
+                "<WaitForCompletion state=\"True\"></WaitForCompletion>\
+                 <FileReference name=\"By_22_Fabricacion\"><UniversalPathList>file:By_22_Fabricacion</UniversalPathList></FileReference>\
+                 <Calculation><![CDATA[JSONSetElement ( \"{}\" ; [ \"a\" ; $a ; JSONArray ] )]]></Calculation>\
+                 <Script name=\"Fab_Web_Escribir_Caja\"></Script>"
+            ),
+            "{}",
+            xml
+        );
+        assert_text_round_trips(text);
+    }
+
+    #[test]
+    fn authored_cross_file_perform_script_without_param() {
+        let text = "Perform Script [\"Sto_Web_Entrada_Embalaje\" from file: \"By_20_Stock\"]";
+        let xml = write(text);
+        assert!(
+            xml.contains("<FileReference name=\"By_20_Stock\">"),
+            "{}",
+            xml
+        );
+        assert!(xml.contains("<Script name=\"Sto_Web_Entrada_Embalaje\"></Script>"));
+        assert_text_round_trips(text);
+    }
+
+    #[test]
+    fn psos_wait_spellings_and_default() {
+        for flag in ["Wait for completion", "Wait for completion: On", "wait: on"] {
+            let xml = write(&format!("Perform Script on Server [\"S\"; $p; {}]", flag));
+            assert!(
+                xml.contains("<WaitForCompletion state=\"True\">"),
+                "{flag}: {xml}"
+            );
+            assert!(xml.contains("<Calculation><![CDATA[$p]]>"), "{flag}: {xml}");
+        }
+        // Not stated (or Off) → explicit False, like FileMaker writes it.
+        for text in [
+            "Perform Script on Server [\"S\"; $p]",
+            "Perform Script on Server [\"S\"; $p; Wait for completion: Off]",
+        ] {
+            let xml = write(text);
+            assert!(xml.contains("<WaitForCompletion state=\"False\">"), "{xml}");
+            assert_eq!(read(&xml), "Perform Script on Server [\"S\"; $p]");
+        }
+        // Wait without a parameter.
+        let xml = write("Perform Script on Server [\"S\"; Wait for completion]");
+        assert!(xml.contains("<WaitForCompletion state=\"True\">"));
+        assert!(!xml.contains("<Calculation>"), "{xml}");
+    }
+
+    #[test]
+    fn legacy_inspect_from_syntax_is_accepted() {
+        // The older inspect output: `"Script" #id from "File"`.
+        let xml = write("Perform Script [\"Remote\" #3 from \"Other\"; 1]");
+        assert!(xml.contains("<FileReference name=\"Other\">"), "{}", xml);
+        assert!(xml.contains("<Script id=\"3\" name=\"Remote\">"));
+    }
+
+    // ── 2. Finds: Restore only with stored requests ──
+
+    #[test]
+    fn perform_find_without_requests_pastes_restore_off() {
+        for text in ["Perform Find []", "Perform Find"] {
+            let xml = write(text);
+            assert!(xml.contains("<Restore state=\"False\">"), "{text}: {xml}");
+            assert!(!xml.contains("<Query>"));
+        }
+        assert_eq!(
+            read(&snippet(
+                "<Step enable=\"True\" id=\"28\" name=\"Perform Find\"><Restore state=\"False\"></Restore></Step>"
+            )),
+            "Perform Find"
+        );
+    }
+
+    #[test]
+    fn perform_find_with_requests_keeps_restore_and_round_trips() {
+        let xml = snippet(
+            "<Step enable=\"True\" id=\"28\" name=\"Perform Find\"><Restore state=\"True\"></Restore>\
+             <Query><RequestRow operation=\"Include\"><Criteria><Field table=\"Seg_d_Registros\" name=\"Reg_PK\"></Field><Text>$PK</Text></Criteria>\
+             <Criteria><Field table=\"Seg_d_Registros\" name=\"Reg_Del\"></Field><Text>0</Text></Criteria></RequestRow></Query></Step>",
+        );
+        let text = read(&xml);
+        assert_eq!(write(&text), xml);
+        assert_text_round_trips(&text);
+    }
+
+    #[test]
+    fn enter_find_mode_pastes_restore_off() {
+        // FileMaker 22 DDR: <Pause state="False"/><Restore state="False"/>.
+        let xml = snippet(
+            "<Step enable=\"True\" id=\"22\" name=\"Enter Find Mode\"><Pause state=\"False\"></Pause><Restore state=\"False\"></Restore></Step>",
+        );
+        assert_eq!(read(&xml), "Enter Find Mode [Pause: Off]");
+        assert_eq!(write("Enter Find Mode [Pause: Off]"), xml);
+        // Bare step: options stated at their defaults, never left to the paste.
+        assert_eq!(write("Enter Find Mode"), xml);
+        assert_eq!(write("Enter Find Mode []"), xml);
+        let on = write("Enter Find Mode [Pause: On]");
+        assert!(on.contains("<Pause state=\"True\">") && on.contains("<Restore state=\"False\">"));
+        assert_text_round_trips("Enter Find Mode [Pause: On]");
+    }
+
+    #[test]
+    fn enter_find_mode_with_stored_requests_round_trips_verbatim() {
+        let xml = snippet(
+            "<Step enable=\"True\" id=\"22\" name=\"Enter Find Mode\"><Pause state=\"False\"></Pause><Restore state=\"True\"></Restore>\
+             <Query><RequestRow operation=\"Include\"><Criteria><Field table=\"T\" name=\"F\"></Field><Text>1</Text></Criteria></RequestRow></Query></Step>",
+        );
+        let text = read(&xml);
+        assert_eq!(write(&text), xml);
+    }
+
+    // ── 3. Dialog option honored ──
+
+    #[test]
+    fn commit_with_dialog_off_pastes_dialog_off() {
+        let full = "<NoInteract state=\"True\"></NoInteract><Option state=\"False\"></Option>\
+                    <ESSForceCommit state=\"False\"></ESSForceCommit>";
+        for text in [
+            "Commit Records/Requests [With dialog: Off]",
+            "Commit Records/Requests [Dialog: Off]",
+            "Commit Records/Requests [with dialog: off]",
+        ] {
+            assert!(write(text).contains(full), "{text}: {}", write(text));
+        }
+        let xml = write(
+            "Commit Records/Requests [With dialog: Off; Skip data entry validation; Force commit]",
+        );
+        assert!(xml.contains(
+            "<NoInteract state=\"True\"></NoInteract><Option state=\"True\"></Option>\
+             <ESSForceCommit state=\"True\"></ESSForceCommit>"
+        ));
+        // FileMaker 22 DDR form round-trips.
+        let ddr = snippet(&format!(
+            "<Step enable=\"True\" id=\"75\" name=\"Commit Records/Requests\">{}</Step>",
+            full
+        ));
+        assert_eq!(write(&read(&ddr)), ddr);
+    }
+
+    #[test]
+    fn delete_revert_steps_honor_dialog() {
+        for name in [
+            "Delete Record/Request",
+            "Delete All Records",
+            "Delete Portal Row",
+            "Revert Record/Request",
+        ] {
+            let off = write(&format!("{name} [With dialog: Off]"));
+            assert!(
+                off.contains("<NoInteract state=\"True\"></NoInteract>"),
+                "{name}: {off}"
+            );
+            assert_eq!(read(&off), format!("{name} [Dialog: Off]"));
+            let on = write(&format!("{name} [Dialog: On]"));
+            assert!(
+                on.contains("<NoInteract state=\"False\"></NoInteract>"),
+                "{name}: {on}"
+            );
+            assert_text_round_trips(&format!("{name} [Dialog: Off]"));
+            assert_text_round_trips(&format!("{name} [Dialog: On]"));
+        }
+        // FileMaker 22 DDR: Delete Record/Request [ Sin diálogo ].
+        let ddr = snippet(
+            "<Step enable=\"True\" id=\"9\" name=\"Delete Record/Request\"><NoInteract state=\"True\"></NoInteract></Step>",
+        );
+        assert_eq!(read(&ddr), "Delete Record/Request [Dialog: Off]");
+        assert_eq!(write(&read(&ddr)), ddr);
+    }
+
+    #[test]
+    fn sort_records_dialog_and_stored_order() {
+        let off = write("Sort Records [With dialog: Off]");
+        assert!(off.contains(
+            "<NoInteract state=\"True\"></NoInteract><Restore state=\"False\"></Restore>"
+        ));
+        assert_text_round_trips("Sort Records [Dialog: Off]");
+        // A stored sort order (SortList) is kept verbatim — previously dropped.
+        let ddr = snippet(
+            "<Step enable=\"True\" id=\"39\" name=\"Sort Records\"><NoInteract state=\"True\"></NoInteract><Restore state=\"True\"></Restore>\
+             <SortList Maintain=\"True\" value=\"True\"><Sort type=\"Ascending\"><PrimaryField><Field table=\"T\" id=\"450\" name=\"Ser_Ref\"></Field></PrimaryField></Sort></SortList></Step>",
+        );
+        assert_eq!(write(&read(&ddr)), ddr);
+    }
+
+    #[test]
+    fn replace_field_contents_accepts_with_dialog() {
+        let xml = write("Replace Field Contents [T::F; 1; With dialog: Off]");
+        assert!(xml.contains("<NoInteract state=\"True\">"), "{}", xml);
+        assert!(xml.contains("<Calculation><![CDATA[1]]>"), "{}", xml);
+        // `Dialog: On` is the default, not part of the calculation.
+        let on = write("Replace Field Contents [T::F; 1; Dialog: On]");
+        assert!(on.contains("<NoInteract state=\"False\">") && on.contains("<![CDATA[1]]>"));
+    }
+
+    #[test]
+    fn lint_warns_on_unrecognized_flag_options() {
+        let errs = super::lint("Delete Record/Request [Sin dialogo]");
+        assert_eq!(errs.len(), 1, "{:?}", errs);
+        assert_eq!(errs[0].severity, "warning");
+        assert!(super::lint("Delete Record/Request [With dialog: Off]").is_empty());
+        assert!(super::lint("Enter Find Mode [Pause: Off]").is_empty());
+        assert!(super::lint("Sort Records [Dialog: Off; Restore]").is_empty());
+    }
+
+    #[test]
+    fn insert_from_url_and_portal_row_accept_with_dialog() {
+        let xml = write("Insert from URL [Target: $r; URL: \"https://x\"; With dialog: Off]");
+        assert!(xml.contains("<NoInteract state=\"True\">"), "{}", xml);
+        let xml = write("Go to Portal Row [1; With dialog: Off]");
+        assert!(xml.contains("<NoInteract state=\"True\">"), "{}", xml);
     }
 }

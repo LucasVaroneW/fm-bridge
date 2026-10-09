@@ -69,11 +69,19 @@ pub struct ScriptStep {
     // For Perform Script (PerformScript shape): target script + parent mode.
     pub script_target_name: Option<String>,
     pub script_target_id: Option<String>,
-    /// External file the target script lives in, for cross-file Perform Script
-    /// (`<DataSourceReference>` in FMSaveAsXML). `None` = same file. Decode-only
-    /// (inspect): never set on the clipboard read/write path.
+    /// External file the target script lives in, for cross-file Perform Script /
+    /// Perform Script on Server. Clipboard: `<FileReference id name>`; FMSaveAsXML:
+    /// `<DataSourceReference>`. `None` = same file. Text: `"Script" from file: "File"`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub script_target_file: Option<String>,
+    /// Id of that `<FileReference>` (the external data source) in the source file.
+    /// Optional on write: FileMaker resolves the data source by name on paste.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub script_target_file_id: Option<String>,
+    /// Perform Script on Server "Wait for completion" (`<WaitForCompletion state>`):
+    /// "True"/"False". `None` = not stated (write emits False).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub wait_for_completion: Option<String>,
     pub current_script_mode: Option<String>,
     // For Go to Record/Request/Page (GoToRecord shape).
     pub goto_location: Option<String>,
@@ -505,9 +513,34 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
                             }
                         }
                     }
-                    // External file of a cross-file Perform Script target. Emitted by
-                    // the FMSaveAsXML→XMSS transform from <DataSourceReference>; never
-                    // present in clipboard XMSS, so it's inert on the read/write path.
+                    // External file of a cross-file Perform Script / PSoS target.
+                    // Clipboard (and DDR) form, verified against a FileMaker 22 DDR:
+                    //   <FileReference id="48" name="By_22_Fabricacion">
+                    //     <UniversalPathList>file:By_22_Fabricacion</UniversalPathList>
+                    //   </FileReference>
+                    // The FMSaveAsXML transform emits the same element. The inner
+                    // UniversalPathList text has no capture target, so it's dropped.
+                    b"FileReference" => {
+                        for attr in e.attributes().flatten() {
+                            let val = String::from_utf8_lossy(&attr.value).to_string();
+                            match attr.key.as_ref() {
+                                b"name" => parser.script_target_file = val,
+                                b"id" => parser.script_target_file_id = val,
+                                _ => {}
+                            }
+                        }
+                    }
+                    // Perform Script on Server: <WaitForCompletion state="True"/>.
+                    b"WaitForCompletion" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"state" {
+                                parser.wait_for_completion =
+                                    String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    // Legacy name the FMSaveAsXML transform used to emit for
+                    // <DataSourceReference>; still accepted.
                     b"DataSource" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"name" {
@@ -919,6 +952,8 @@ struct StepParser {
     script_target_name: String,
     script_target_id: String,
     script_target_file: String,
+    script_target_file_id: String,
+    wait_for_completion: String,
     current_script_mode: String,
     goto_location: String,
     goto_exit_after_last: String,
@@ -1100,6 +1135,16 @@ impl StepParser {
                 None
             } else {
                 Some(self.script_target_file.clone())
+            },
+            script_target_file_id: if self.script_target_file_id.is_empty() {
+                None
+            } else {
+                Some(self.script_target_file_id.clone())
+            },
+            wait_for_completion: if self.wait_for_completion.is_empty() {
+                None
+            } else {
+                Some(self.wait_for_completion.clone())
             },
             current_script_mode: if self.current_script_mode.is_empty() {
                 None
@@ -1440,6 +1485,10 @@ fn build_script_catalog_nodes_xml(nodes: &[ScriptCatalogNode]) -> Result<String,
 
 // ─── XML encoding ───
 
+/// Canonical name of Perform Script on Server (the only Perform Script variant
+/// with a "Wait for completion" flag).
+pub const PSOS_NAME: &str = "Perform Script on Server";
+
 /// Escape special XML characters. Includes apostrophe for completeness.
 pub fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -1622,10 +1671,36 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             }
         }
         Some(StepShape::PerformScript) => {
+            // Element order as FileMaker emits it (FM 22 DDR):
+            //   [WaitForCompletion] [CurrentScript] [FileReference] [Calculation] [Script]
+            // Perform Script on Server always carries WaitForCompletion; leaving it
+            // out pastes the step with "Wait for completion" unticked.
+            if step.name == PSOS_NAME {
+                let wait = step.wait_for_completion.as_deref().unwrap_or("False");
+                xml.push_str(&format!(
+                    "<WaitForCompletion state=\"{}\"></WaitForCompletion>",
+                    xml_escape(wait)
+                ));
+            }
             if let Some(mode) = &step.current_script_mode {
                 xml.push_str(&format!(
                     "<CurrentScript value=\"{}\"></CurrentScript>",
                     xml_escape(mode)
+                ));
+            }
+            // Cross-file target: without the FileReference FileMaker looks the
+            // script up in the current file and the step pastes pointing nowhere
+            // (runtime error 104). FileMaker resolves the external data source by
+            // name on paste; the id (when we have it from a read) is carried too.
+            if let Some(file) = &step.script_target_file {
+                xml.push_str("<FileReference");
+                if let Some(fid) = &step.script_target_file_id {
+                    xml.push_str(&format!(" id=\"{}\"", xml_escape(fid)));
+                }
+                xml.push_str(&format!(
+                    " name=\"{}\"><UniversalPathList>file:{}</UniversalPathList></FileReference>",
+                    xml_escape(file),
+                    xml_escape(file)
                 ));
             }
             if let Some(calc) = &step.calculation {
@@ -1948,7 +2023,15 @@ fn build_step_xml(step: &ScriptStep) -> Result<String, String> {
             }
         }
         Some(StepShape::PerformFind) => {
-            xml.push_str("<Restore state=\"True\"></Restore>");
+            // "Restore" = "Specify find requests". On only when the step stores
+            // requests: with no stored request FileMaker must paste it unticked
+            // (a bare `Perform Find` runs the requests built in Find mode).
+            let restore = if step.find_requests.is_empty() {
+                "False"
+            } else {
+                "True"
+            };
+            xml.push_str(&format!("<Restore state=\"{}\"></Restore>", restore));
             if !step.find_requests.is_empty() {
                 xml.push_str("<Query>");
                 for req in &step.find_requests {

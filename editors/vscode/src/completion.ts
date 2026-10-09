@@ -47,9 +47,13 @@ function templateFor(step: StepInfo): vscode.SnippetString {
         'Show Custom Dialog [Title: ${1:"Title"}; Message: ${2:"Message"}; Buttons: ${3:"OK"}]',
       );
     case "Perform Script":
-    case "Perform Script on Server":
       return new vscode.SnippetString(
         `${step.en} [\${1:"ScriptName"} #\${2:id}; \${3:parameter}]`,
+      );
+    case "Perform Script on Server":
+      // Cross-file target (`from file: "File"`) + trailing wait flag.
+      return new vscode.SnippetString(
+        `${step.en} [\${1:"ScriptName"} from file: \${2:"FileName"}; \${3:parameter}; Wait for completion]`,
       );
     case "Go to Layout":
       return new vscode.SnippetString('Go to Layout [${1:"LayoutName"} #${2:id}]');

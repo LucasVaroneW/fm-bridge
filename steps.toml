@@ -140,6 +140,7 @@ kind = "PerformScriptOnServer"
 id = 164
 en = "Perform Script on Server"
 es = "Ejecutar guión en el servidor"
+# Text: ["Script" from file: "Archivo"; param; Wait for completion]
 shape = "perform_script"
 opens_block = false
 closes_block = false
@@ -196,7 +197,9 @@ kind = "DeleteRecord"
 id = 9
 en = "Delete Record/Request"
 es = "Eliminar registro/petición"
-shape = "plain"
+# Opaque + flag DSL (step_dsl): its options (dialog / pause / restore)
+# round-trip instead of being dropped and pasted with FileMaker defaults.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -205,7 +208,9 @@ kind = "DeleteAllRecords"
 id = 10
 en = "Delete All Records"
 es = "Eliminar todos los registros"
-shape = "plain"
+# Opaque + flag DSL (step_dsl): its options (dialog / pause / restore)
+# round-trip instead of being dropped and pasted with FileMaker defaults.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -241,7 +246,9 @@ kind = "RevertRecord"
 id = 51
 en = "Revert Record/Request"
 es = "Restablecer registro/petición"
-shape = "plain"
+# Opaque + flag DSL (step_dsl): its options (dialog / pause / restore)
+# round-trip instead of being dropped and pasted with FileMaker defaults.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -299,7 +306,9 @@ kind = "DeletePortalRow"
 id = 104
 en = "Delete Portal Row"
 es = "Eliminar fila del portal"
-shape = "plain"
+# Opaque + flag DSL (step_dsl): its options (dialog / pause / restore)
+# round-trip instead of being dropped and pasted with FileMaker defaults.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -447,7 +456,9 @@ kind = "SortRecords"
 id = 39
 en = "Sort Records"
 es = "Ordenar registros"
-shape = "plain"
+# Opaque + flag DSL (step_dsl): its options (dialog / pause / restore)
+# round-trip instead of being dropped and pasted with FileMaker defaults.
+shape = "opaque"
 opens_block = false
 closes_block = false
 
@@ -783,7 +794,9 @@ kind = "EnterFindMode"
 id = 22
 en = "Enter Find Mode"
 es = "Modo Buscar"
-shape = "plain"
+# Opaque + flag DSL (step_dsl): its options (dialog / pause / restore)
+# round-trip instead of being dropped and pasted with FileMaker defaults.
+shape = "opaque"
 opens_block = false
 closes_block = false
 

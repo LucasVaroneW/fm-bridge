@@ -2599,6 +2599,28 @@ fn transform_step_tags(xml: &str) -> String {
                 i = tag_end;
                 continue;
             }
+            // Typed options that have a dedicated clipboard element: map them to
+            // it, so inspect shows them like a clipboard read does. "With dialog"
+            // is inverted: dialog False = <NoInteract state="True">.
+            if let (Some(kind), Some(value)) = (
+                extract_xml_attr(tag, "type"),
+                extract_xml_attr(tag, "value"),
+            ) {
+                let flip = |v: &str| if v == "True" { "False" } else { "True" };
+                let mapped = match kind {
+                    "With dialog" => Some(("NoInteract", flip(value))),
+                    "Wait for completion" => Some(("WaitForCompletion", value)),
+                    "Skip data entry validation" => Some(("Option", value)),
+                    "Force Commit" => Some(("ESSForceCommit", value)),
+                    "Pause" => Some(("Pause", value)),
+                    _ => None,
+                };
+                if let Some((elem, state)) = mapped {
+                    out.push_str(&format!("<{} state=\"{}\"/>", elem, state));
+                    i = tag_end;
+                    continue;
+                }
+            }
             if let Some(value) = extract_xml_attr(tag, "value") {
                 out.push_str(&format!("<Set state=\"{}\"/>", value));
                 i = tag_end;
@@ -2653,7 +2675,20 @@ fn transform_step_tags(xml: &str) -> String {
                 i = tag_end;
                 continue;
             }
-            out.push_str(&format!("<DataSource name=\"{}\"/>", xml_escape_attr(name)));
+            // Same element the clipboard uses, so one decoder path serves both.
+            let id = extract_xml_attr(tag, "id").unwrap_or("");
+            if id.is_empty() {
+                out.push_str(&format!(
+                    "<FileReference name=\"{}\"/>",
+                    xml_escape_attr(name)
+                ));
+            } else {
+                out.push_str(&format!(
+                    "<FileReference id=\"{}\" name=\"{}\"/>",
+                    id,
+                    xml_escape_attr(name)
+                ));
+            }
             i = tag_end;
             continue;
         }
@@ -3151,14 +3186,15 @@ mod tests {
     }
 
     /// A cross-file Perform Script (`<DataSourceReference>`) keeps the target
-    /// file, so the decoded `.fmscript` shows "de dónde se llama".
+    /// file, so the decoded `.fmscript` shows "de dónde se llama". It becomes the
+    /// clipboard `<FileReference>`, so inspect and read share one decoder path.
     #[test]
     fn cross_file_perform_script_keeps_target_file() {
         let raw = r#"<fmxmlsnippet type="FMObjectList"><Step enable="True" id="1" name="Perform Script"><ParameterValues membercount="1"><Parameter type="List"><List name="From list" value="1"><DataSourceReference id="28" name="By_99_Import_MTs" UUID="X"></DataSourceReference><ScriptReference id="56" name="Imp_ImasD_1_Inicial" UUID="Y"></ScriptReference></List></Parameter></ParameterValues></Step></fmxmlsnippet>"#;
 
         let xmss = fmsavexml_to_xmss(raw);
         assert!(
-            xmss.contains(r#"<DataSource name="By_99_Import_MTs"/>"#),
+            xmss.contains(r#"<FileReference id="28" name="By_99_Import_MTs"/>"#),
             "{}",
             xmss
         );
@@ -3166,10 +3202,45 @@ mod tests {
         let script = crate::xmss::parse_fmxml_snippet(&xmss).unwrap();
         let text = crate::text_format::format_script(&script);
         assert!(
-            text.contains(r#"#56 from "By_99_Import_MTs""#),
+            text.contains(r#"#56 from file: "By_99_Import_MTs" #28"#),
             "rendered: {}",
             text
         );
+    }
+
+    /// Typed Booleans keep their meaning in inspect: PSoS "Wait for completion"
+    /// and Commit's "With dialog" (inverted to NoInteract) / skip validation /
+    /// force commit. Samples from a real FileMaker 22 FMSaveAsXML export.
+    #[test]
+    fn typed_booleans_survive_inspect() {
+        let raw = concat!(
+            "<fmxmlsnippet type=\"FMObjectList\">",
+            "<Step hash=\"H\" index=\"21\" id=\"164\" name=\"Perform Script on Server\" enable=\"True\">",
+            "<UUID>A</UUID><OwnerID></OwnerID><Options>64</Options><ParameterValues membercount=\"3\">",
+            "<Parameter type=\"List\"><List name=\"From list\" value=\"1\">",
+            "<ScriptReference id=\"1842\" name=\"Gen_Plugin_MBS\" UUID=\"B\"></ScriptReference></List></Parameter>",
+            "<Parameter type=\"Parameter\"><Parameter></Parameter></Parameter>",
+            "<Parameter type=\"Boolean\"><Boolean type=\"Wait for completion\" id=\"256\" value=\"True\"></Boolean></Parameter>",
+            "</ParameterValues></Step>",
+            "<Step hash=\"H\" index=\"27\" id=\"75\" name=\"Commit Records/Requests\" enable=\"True\">",
+            "<UUID>C</UUID><OwnerID></OwnerID><Options>128</Options><ParameterValues membercount=\"3\">",
+            "<Parameter type=\"Boolean\"><Boolean type=\"Skip data entry validation\" id=\"256\" value=\"False\"></Boolean></Parameter>",
+            "<Parameter type=\"Boolean\"><Boolean type=\"With dialog\" id=\"128\" value=\"False\"></Boolean></Parameter>",
+            "<Parameter type=\"Boolean\"><Boolean type=\"Force Commit\" id=\"512\" value=\"False\"></Boolean></Parameter>",
+            "</ParameterValues></Step></fmxmlsnippet>"
+        );
+        let xmss = fmsavexml_to_xmss(raw);
+        let script = crate::xmss::parse_fmxml_snippet(&xmss).unwrap();
+        let text = crate::text_format::format_script(&script);
+        assert!(
+            text.contains(
+                "Perform Script on Server [\"Gen_Plugin_MBS\" #1842; Wait for completion]"
+            ),
+            "{}",
+            text
+        );
+        assert!(text.contains("Dialog: Off"), "{}", text);
+        assert!(!text.contains("<UUID>"), "{}", text);
     }
 
     /// Comment text (`<Comment value>`) and Set Variable name (`<Name value>`)

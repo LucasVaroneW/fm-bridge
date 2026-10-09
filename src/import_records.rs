@@ -188,7 +188,13 @@ pub fn dsl_to_xml(dsl: &str) -> Option<String> {
         let (key, value) = line.split_once(':')?;
         let value = value.trim();
         match key.trim() {
-            "Dialog" => dialog = Some(if value == "Off" { "True" } else { "False" }),
+            "Dialog" | "With dialog" => {
+                dialog = Some(if value.eq_ignore_ascii_case("Off") {
+                    "True"
+                } else {
+                    "False"
+                })
+            }
             "Restore" => restore = Some(value.to_string()),
             "VerifySSL" => verify = Some(value.to_string()),
             "Source" => source = Some(value.to_string()),

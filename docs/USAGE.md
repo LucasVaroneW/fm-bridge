@@ -455,6 +455,40 @@ Set Variable [$resultado = Let([
 )]
 ```
 
+### Perform Script a otro archivo, Wait for completion, diálogo y búsquedas
+
+Opciones que antes se perdían al pegar (había que corregirlas a mano en FM):
+
+```
+# Guion de OTRO archivo: `from file: "Archivo"` (lo que FM muestra como
+# "desde el archivo:"). Sin esto el paso apunta al archivo actual → error 104.
+Perform Script ["Sto_Web_Entrada_Embalaje" from file: "By_20_Stock"; $sto]
+
+# PSoS esperando el resultado: `; Wait for completion` al final.
+Perform Script on Server ["Fab_Web_Escribir_Caja" from file: "By_22_Fabricacion"; $param; Wait for completion]
+
+# Diálogo: `Dialog: Off` (canónico) o `With dialog: Off` (como lo escribe FM).
+Commit Records/Requests [With dialog: Off; Skip data entry validation; Force commit]
+Delete Record/Request [Dialog: Off]
+Delete All Records [Dialog: Off]
+Revert Record/Request [Dialog: Off]
+Sort Records [Dialog: Off]
+
+# Búsquedas: sin peticiones guardadas, "Restaurar" queda DESMARCADO.
+Enter Find Mode [Pause: Off]
+Perform Find []
+```
+
+- Al leer (`read`) un PSoS cruzado sale con los ids: `["Api" #1201 from file:
+  "By_22_Fabricacion" #48; $p; Wait for completion]`. Los `#id` son opcionales:
+  al pegar, FileMaker resuelve el archivo (origen de datos externo) y el guion por
+  nombre. El archivo tiene que existir como origen de datos en el archivo donde
+  pegás.
+- `Wait for completion` también acepta `Wait for completion: On/Off` y `Wait: On/Off`;
+  sin el flag se pega desmarcado.
+- `Enter Find Mode` / `Perform Find` sin peticiones se pegan con Restaurar apagado;
+  con peticiones (`Perform Find [Find: T::F => valor]`) se pega encendido.
+
 ---
 
 ## 6. Troubleshooting

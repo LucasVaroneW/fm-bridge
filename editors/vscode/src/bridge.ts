@@ -263,12 +263,22 @@ export async function writeTableFields(
   });
 }
 
-/** Encode the given text and write it to the FileMaker clipboard. */
+/**
+ * Encode the given text and write it to the FileMaker clipboard.
+ * `docPath` (the file being written) lets the engine find the project's
+ * `.fm-bridge.toml`, whose exports resolve cross-file Perform Script ids.
+ */
 export async function writeClipboard(
   scriptText: string,
   kind: TextKind = "script",
+  docPath?: string,
 ): Promise<BridgeResponse> {
-  return runJson({ command: "write", script_text: scriptText, kind });
+  return runJson({
+    command: "write",
+    script_text: scriptText,
+    kind,
+    ...(docPath ? { config_path: docPath } : {}),
+  });
 }
 
 /**

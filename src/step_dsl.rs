@@ -26,8 +26,20 @@ pub fn to_dsl(step_name: &str, xml: &str) -> Option<String> {
             // round-trip — see import_fmsavexml_summary.
             return import_fmsavexml_summary(xml);
         }
-        "Commit Records/Requests" => commit_to_dsl(xml)?,
+        "Commit Records/Requests" => match strip_fmsavexml_envelope(xml) {
+            // inspect form: read-only, not gated (see strip_fmsavexml_envelope).
+            Some(clean) => return commit_to_dsl(&clean).filter(|_| only_known(&clean)),
+            None => commit_to_dsl(xml)?,
+        },
         "Go to Related Record" => gtrr_to_dsl(xml)?,
+        TRUNCATE => match strip_fmsavexml_envelope(xml) {
+            Some(clean) => return truncate_to_dsl(&clean, true),
+            None => truncate_to_dsl(xml, false)?,
+        },
+        n if is_flag_step(n) => match strip_fmsavexml_envelope(xml) {
+            Some(clean) => return flags_to_dsl(n, &clean, true).filter(|_| only_known(&clean)),
+            None => flags_to_dsl(n, xml, false)?,
+        },
         _ => return None,
     };
     // Lossless gate: only offer the DSL if it rebuilds the exact XML.
@@ -48,8 +60,25 @@ pub fn from_dsl(step_name: &str, dsl: &str) -> Option<String> {
         "Import Records" | "Export Records" => crate::import_records::dsl_to_xml(dsl),
         "Commit Records/Requests" => commit_from_dsl(dsl),
         "Go to Related Record" => gtrr_from_dsl(dsl),
+        TRUNCATE => truncate_from_dsl(dsl),
+        n if is_flag_step(n) => flags_from_dsl(n, dsl),
         _ => None,
     }
+}
+
+/// True when every element left in a (cleaned) inspect payload is one of the
+/// option tags we render — anything else (a Query, a SortList…) keeps it raw.
+fn only_known(xml: &str) -> bool {
+    const KNOWN: &[&str] = &["NoInteract", "Pause", "Restore", "Option", "ESSForceCommit"];
+    xml.split('<')
+        .filter(|p| !p.is_empty() && !p.starts_with('/'))
+        .all(|p| {
+            let tag = p
+                .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+                .next()
+                .unwrap_or("");
+            KNOWN.contains(&tag)
+        })
 }
 
 // ─── Import Records (FMSaveAsXML form — inspect only) ──────────────────────────
@@ -139,37 +168,342 @@ fn commit_from_dsl(dsl: &str) -> Option<String> {
     let mut dialog = None;
     let mut skip = None;
     let mut force = None;
-    for raw in dsl.lines() {
-        let line = raw.trim();
-        if line.is_empty() {
+    // Lines (indented form) or `;`-separated on one line, the way FileMaker
+    // shows the step: `[With dialog: Off; Skip data entry validation]`.
+    for line in split_flag_tokens(dsl) {
+        if let Some(off) = dialog_flag(line) {
+            dialog = Some(if off { "True" } else { "False" });
             continue;
         }
-        let (key, value) = line.split_once(':')?;
-        let value = value.trim();
-        match key.trim() {
-            "Dialog" => dialog = Some(if value == "Off" { "True" } else { "False" }),
-            "SkipDataEntryValidation" => skip = Some(value.to_string()),
-            "ForceCommit" => force = Some(value.to_string()),
+        let (key, value) = match line.split_once(':') {
+            Some((k, v)) => (k.trim(), Some(v.trim())),
+            None => (line, None), // bare flag = on
+        };
+        let key = normalize_key(key);
+        let state = match value {
+            None => "True".to_string(),
+            Some(v) => on_off_state(v)?.to_string(),
+        };
+        match key.as_str() {
+            "skipdataentryvalidation" => skip = Some(state),
+            "forcecommit" | "overrideesslockingconflicts" => force = Some(state),
+            _ => return None,
+        }
+    }
+    // FileMaker always writes the three options; so do we, unstated ones at
+    // their default (dialog shown, validate, no force) instead of leaving them
+    // to whatever the paste assumes.
+    if dialog.is_none() && skip.is_none() && force.is_none() {
+        return None;
+    }
+    Some(format!(
+        "<NoInteract state=\"{}\"></NoInteract><Option state=\"{}\"></Option>\
+         <ESSForceCommit state=\"{}\"></ESSForceCommit>",
+        dialog.unwrap_or("False"),
+        skip.as_deref().unwrap_or("False"),
+        force.as_deref().unwrap_or("False")
+    ))
+}
+
+// ─── Shared option helpers ─────────────────────────────────────────────────────
+
+/// `Some(true)` = dialog suppressed, `Some(false)` = dialog shown, for the
+/// dialog option in any of its accepted spellings (case-insensitive):
+/// `Dialog: Off|On` (fm-bridge's canonical form) or `With dialog: Off|On`
+/// (FileMaker's own step text). `None` if `seg` isn't a dialog option.
+pub fn dialog_flag(seg: &str) -> Option<bool> {
+    let (key, value) = seg.trim().split_once(':')?;
+    let key = normalize_key(key);
+    if key != "dialog" && key != "withdialog" {
+        return None;
+    }
+    match value.trim().to_ascii_lowercase().as_str() {
+        "off" | "false" => Some(true),
+        "on" | "true" => Some(false),
+        _ => None,
+    }
+}
+
+/// Lower-case a key and drop spaces/underscores: `Skip data entry validation`
+/// and `SkipDataEntryValidation` compare equal.
+fn normalize_key(key: &str) -> String {
+    key.chars()
+        .filter(|c| !c.is_whitespace() && *c != '_')
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+/// `On`/`True` → "True", `Off`/`False` → "False" (case-insensitive).
+fn on_off_state(v: &str) -> Option<&'static str> {
+    match v.trim().to_ascii_lowercase().as_str() {
+        "on" | "true" => Some("True"),
+        "off" | "false" => Some("False"),
+        _ => None,
+    }
+}
+
+/// Split a flag DSL into its options: one per line, or `;`-separated.
+fn split_flag_tokens(dsl: &str) -> impl Iterator<Item = &str> {
+    dsl.split(['\n', ';'])
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+}
+
+// ─── Flag-only steps (dialog / pause / restore) ────────────────────────────────
+// Steps whose whole payload is a fixed sequence of `<Tag state="True|False">`
+// options. Before, they were "plain": read dropped the options and write
+// emitted none, so FileMaker pasted its defaults — dialog ON for the deletes,
+// Restore ON for Enter Find Mode. Element order verified against a FileMaker 22
+// DDR (Database Design Report, same step XML as the clipboard).
+//
+// Text (one line, `; `-separated, FileMaker's own wording):
+//   Delete Record/Request [Dialog: Off]          (also `With dialog: Off`)
+//   Enter Find Mode [Pause: Off]                 (`Restore` when it stores requests)
+//   Sort Records [Dialog: Off]                   (a stored sort order stays raw XML)
+
+#[derive(Clone, Copy, PartialEq)]
+enum Flag {
+    Dialog,
+    Pause,
+    Restore,
+}
+
+/// The ordered options of a flag-only step, or `None` if `step_name` isn't one.
+fn flag_spec(step_name: &str) -> Option<&'static [(&'static str, Flag)]> {
+    const DIALOG: &[(&str, Flag)] = &[("NoInteract", Flag::Dialog)];
+    const FIND_MODE: &[(&str, Flag)] = &[("Pause", Flag::Pause), ("Restore", Flag::Restore)];
+    const SORT: &[(&str, Flag)] = &[("NoInteract", Flag::Dialog), ("Restore", Flag::Restore)];
+    match step_name {
+        "Delete Record/Request"
+        | "Delete Portal Row"
+        | "Delete All Records"
+        | "Revert Record/Request" => Some(DIALOG),
+        "Enter Find Mode" => Some(FIND_MODE),
+        "Sort Records" => Some(SORT),
+        _ => None,
+    }
+}
+
+/// True for the steps whose options this module models as flags. Used by the
+/// parser so a bare step (no brackets) still gets explicit defaults.
+pub fn is_flag_step(step_name: &str) -> bool {
+    flag_spec(step_name).is_some()
+}
+
+/// The XML a flag step gets when written bare (no brackets): every option at
+/// its default — dialog shown, pause off, restore off. Emitting them is what
+/// keeps FileMaker from pasting its own defaults (Restore ON on Enter Find Mode).
+pub fn default_flag_xml(step_name: &str) -> Option<String> {
+    if step_name == TRUNCATE {
+        return truncate_from_dsl("");
+    }
+    flags_from_dsl(step_name, "")
+}
+
+/// `lenient`: a missing option reads as its default (inspect form, where
+/// FMSaveAsXML omits some); strict otherwise (the gate needs every element).
+fn flags_to_dsl(step_name: &str, xml: &str, lenient: bool) -> Option<String> {
+    let spec = flag_spec(step_name)?;
+    let mut parts = Vec::new();
+    for (tag, flag) in spec {
+        let state = match element_attr(xml, tag, "state") {
+            Some(s) => s,
+            None if lenient => "False",
+            None => return None,
+        };
+        match flag {
+            Flag::Dialog => parts.push(format!(
+                "Dialog: {}",
+                if state == "True" { "Off" } else { "On" }
+            )),
+            Flag::Pause => parts.push(format!(
+                "Pause: {}",
+                if state == "True" { "On" } else { "Off" }
+            )),
+            Flag::Restore => {
+                if state == "True" {
+                    parts.push("Restore".to_string());
+                }
+            }
+        }
+    }
+    Some(parts.join("; "))
+}
+
+fn flags_from_dsl(step_name: &str, dsl: &str) -> Option<String> {
+    let spec = flag_spec(step_name)?;
+    let mut dialog = "False"; // NoInteract: dialog shown
+    let mut pause = "False";
+    let mut restore = "False";
+    let has = |f: Flag| spec.iter().any(|(_, g)| *g == f);
+    for tok in split_flag_tokens(dsl) {
+        if let Some(off) = dialog_flag(tok) {
+            if !has(Flag::Dialog) {
+                return None;
+            }
+            dialog = if off { "True" } else { "False" };
+            continue;
+        }
+        let (key, value) = match tok.split_once(':') {
+            Some((k, v)) => (normalize_key(k), Some(v)),
+            None => (normalize_key(tok), None),
+        };
+        let state = match value {
+            None => "True",
+            Some(v) => on_off_state(v)?,
+        };
+        match key.as_str() {
+            "pause" if has(Flag::Pause) => pause = state,
+            "restore" if has(Flag::Restore) => restore = state,
             _ => return None,
         }
     }
     let mut xml = String::new();
-    if let Some(d) = dialog {
-        xml.push_str(&format!("<NoInteract state=\"{}\"></NoInteract>", d));
-    }
-    if let Some(s) = skip {
-        xml.push_str(&format!("<Option state=\"{}\"></Option>", s));
-    }
-    if let Some(f) = force {
-        xml.push_str(&format!(
-            "<ESSForceCommit state=\"{}\"></ESSForceCommit>",
-            f
-        ));
-    }
-    if xml.is_empty() {
-        return None;
+    for (tag, flag) in spec {
+        let state = match flag {
+            Flag::Dialog => dialog,
+            Flag::Pause => pause,
+            Flag::Restore => restore,
+        };
+        xml.push_str(&format!("<{tag} state=\"{state}\"></{tag}>"));
     }
     Some(xml)
+}
+
+// ─── Truncate Table ────────────────────────────────────────────────────────────
+// Text: `Truncate Table [Dialog: Off; Table: <Current Table>]` or
+// `[Dialog: Off; Table: Inventario_MT #136]` (`With dialog:` accepted too).
+// Verified (FMSaveAsXML, FM 22): a "With dialog" Boolean plus a List that is
+// either `<Current Table>` (value 0) or a named base table
+// (`<BaseTableReference id name>`, value 1). INFERRED (no clipboard/DDR sample
+// in reach): the clipboard form `<NoInteract state>` + `<BaseTable id name>`
+// for a named table and no table element for the current one — read keeps the
+// raw XML whenever the real payload doesn't match that (lossless gate).
+
+pub const TRUNCATE: &str = "Truncate Table";
+const CURRENT_TABLE: &str = "<Current Table>";
+
+/// Steps with an option DSL that the parser/linter must know about: the flag
+/// steps plus Truncate Table.
+pub fn is_option_step(step_name: &str) -> bool {
+    is_flag_step(step_name) || step_name == TRUNCATE
+}
+
+/// (id, name) of the first `<Tag id name>`.
+fn id_name(xml: &str, tag: &str) -> Option<(String, String)> {
+    Some((
+        element_attr(xml, tag, "id")?.to_string(),
+        element_attr(xml, tag, "name")?.to_string(),
+    ))
+}
+
+/// `lenient` = inspect form (FMSaveAsXML, cleaned): read-only, not gated.
+fn truncate_to_dsl(xml: &str, lenient: bool) -> Option<String> {
+    let dialog = match element_attr(xml, "NoInteract", "state") {
+        Some(s) => s,
+        None if lenient => "False",
+        None => return None,
+    };
+    let table = if lenient {
+        id_name(xml, "BaseTableReference")
+    } else {
+        id_name(xml, "BaseTable")
+    };
+    if lenient
+        && !xml
+            .split('<')
+            .filter(|p| !p.is_empty() && !p.starts_with('/'))
+            .all(|p| p.starts_with("NoInteract") || p.starts_with("BaseTableReference"))
+    {
+        return None;
+    }
+    let table = match table {
+        Some((id, name)) => format!("{} #{}", name, id),
+        None => CURRENT_TABLE.to_string(),
+    };
+    Some(format!(
+        "Dialog: {}; Table: {}",
+        if dialog == "True" { "Off" } else { "On" },
+        table
+    ))
+}
+
+fn truncate_from_dsl(dsl: &str) -> Option<String> {
+    let mut dialog = "False";
+    let mut table: Option<(Option<String>, String)> = None;
+    for tok in split_flag_tokens(dsl) {
+        if let Some(off) = dialog_flag(tok) {
+            dialog = if off { "True" } else { "False" };
+            continue;
+        }
+        let (key, value) = tok.split_once(':')?;
+        if normalize_key(key) != "table" {
+            return None;
+        }
+        let v = value.trim();
+        if v.eq_ignore_ascii_case(CURRENT_TABLE) || v.is_empty() {
+            table = None;
+            continue;
+        }
+        let (name, id) = match v.rfind(" #") {
+            Some(h) if v[h + 2..].chars().all(|c| c.is_ascii_digit()) && h + 2 < v.len() => {
+                (v[..h].trim(), Some(v[h + 2..].to_string()))
+            }
+            _ => (v, None),
+        };
+        let name = name.trim_matches('"').to_string();
+        table = Some((id, name));
+    }
+    let mut xml = format!("<NoInteract state=\"{}\"></NoInteract>", dialog);
+    if let Some((id, name)) = table {
+        xml.push_str("<BaseTable");
+        if let Some(id) = id {
+            xml.push_str(&format!(" id=\"{}\"", id));
+        }
+        xml.push_str(&format!(
+            " name=\"{}\"></BaseTable>",
+            crate::xmss::xml_escape(&name)
+        ));
+    }
+    Some(xml)
+}
+
+// ─── FMSaveAsXML form (inspect / get-script) ───────────────────────────────────
+// A whole-database export carries `<UUID>`/`<OwnerID>`/`<Options>` around the
+// step's options, and is pretty-printed, so the byte-exact gate never passes and
+// the step showed as a raw blob. Strip that envelope and, when what's left is
+// only options we model, render the same DSL (read-only context, like the
+// Import Records summary).
+fn strip_fmsavexml_envelope(xml: &str) -> Option<String> {
+    if !xml.contains("<UUID>") {
+        return None;
+    }
+    let mut s = xml.to_string();
+    for tag in ["UUID", "OwnerID", "Options"] {
+        if let Some(p) = s.find(&format!("<{}", tag)) {
+            let close = format!("</{}>", tag);
+            if let Some(e) = s[p..].find(&close) {
+                s.replace_range(p..p + e + close.len(), "");
+            } else if let Some(e) = s[p..].find("/>") {
+                s.replace_range(p..p + e + 2, "");
+            }
+        }
+    }
+    // Self-closing → paired, and drop inter-element whitespace, so the flag
+    // readers see the clipboard shape.
+    let mut out = String::new();
+    for piece in s.split('<').filter(|p| !p.trim().is_empty()) {
+        let piece = piece.trim_end();
+        if let Some(body) = piece.strip_suffix("/>") {
+            let body = body.trim_end();
+            let tag = body.split_whitespace().next().unwrap_or("");
+            out.push_str(&format!("<{}></{}>", body, tag));
+        } else {
+            out.push('<');
+            out.push_str(piece);
+        }
+    }
+    Some(out)
 }
 
 // ─── Go to Related Record ──────────────────────────────────────────────────────

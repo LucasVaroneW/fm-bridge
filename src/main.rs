@@ -20,6 +20,7 @@ mod snippet;
 mod step_dsl;
 mod steps;
 mod text_format;
+mod xfile;
 mod xmss;
 mod xref;
 
@@ -92,6 +93,10 @@ struct Command {
     /// Where to start looking for `.fm-bridge.toml` (default: cwd).
     #[serde(default)]
     config_path: Option<String>,
+    /// write / resolve_cross_file: extra FMSaveAsXML exports to look up the ids
+    /// of cross-file Perform Script targets in (besides `.fm-bridge.toml`).
+    #[serde(default)]
+    xml_paths: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -327,28 +332,67 @@ fn handle_command(cmd: &Command) -> Response {
                 };
             }
             // Lint first: surface every format/structure error to the editor and
-            // refuse to write a broken script to the clipboard.
-            let errors = text_format::lint(&script_text);
-            if !errors.is_empty() {
-                return Response::errors(errors);
+            // refuse to write a broken script to the clipboard. Warnings don't
+            // block: they ride along on the ok response (before, any warning
+            // returned "ok" WITHOUT writing the clipboard).
+            let mut notes = text_format::lint(&script_text);
+            if notes.iter().any(|e| e.severity == "error") {
+                return Response::errors(notes);
             }
-            // Run post_validate for warnings
-            match text_format::parse_text_to_script(&script_text) {
-                Ok(script) => {
-                    let warnings = text_format::post_validate(&script);
-                    if !warnings.is_empty() {
-                        return Response::errors(warnings);
-                    }
-                }
+            let mut script = match text_format::parse_text_to_script(&script_text) {
+                Ok(s) => s,
                 Err(pe) => return Response::errors(vec![pe]),
-            }
-            match xmss::encode_xmss(&script_text) {
-                Ok(xmss_data) => match clipboard::write_fm_clipboard(&xmss_data) {
-                    Ok(()) => Response::ok(),
-                    Err(e) => Response::error(e),
-                },
+            };
+            // Cross-file Perform Script without #id: look the id up in the
+            // exports, or warn — FileMaker can't resolve it by name on paste.
+            let resolved = resolve_cross_file(&mut script, cmd);
+            notes.extend(cross_file_warnings(&resolved));
+            notes.extend(text_format::post_validate(&script));
+            let xml = match xmss::build_xml_from_script(&script) {
+                Ok(x) => x,
+                Err(e) => return Response::error(e),
+            };
+            match clipboard::write_fm_clipboard(xml.as_bytes()) {
+                Ok(()) => {
+                    let mut r = if notes.is_empty() {
+                        Response::ok()
+                    } else {
+                        Response::errors(notes)
+                    };
+                    if !resolved.resolved.is_empty() {
+                        r.data = Some(serde_json::json!({ "resolved": resolved.resolved }));
+                    }
+                    r
+                }
                 Err(e) => Response::error(e),
             }
+        }
+        // Fill in the ids of cross-file Perform Script targets from FMSaveAsXML
+        // exports and return the updated script text (+ warnings for what could
+        // not be resolved). Read-only: never touches the clipboard.
+        "resolve_cross_file" => {
+            let script_text = match &cmd.script_text {
+                Some(t) => t,
+                None => return Response::error("No script_text provided".to_string()),
+            };
+            let mut script = match text_format::parse_text_to_script(script_text) {
+                Ok(s) => s,
+                Err(pe) => return Response::errors(vec![pe]),
+            };
+            let resolved = resolve_cross_file(&mut script, cmd);
+            let warnings = cross_file_warnings(&resolved);
+            let mut r = if warnings.is_empty() {
+                Response::ok()
+            } else {
+                Response::errors(warnings)
+            };
+            r.script_text = Some(if resolved.resolved.is_empty() {
+                script_text.clone()
+            } else {
+                text_format::format_script(&script)
+            });
+            r.data = Some(serde_json::json!({ "resolved": resolved.resolved }));
+            r
         }
         // Parse a FMSaveAsXML export into a navigable inspection directory and
         // return the counts + output paths so an AI/agent can drive it headless.
@@ -733,6 +777,22 @@ fn extract_xml_attrib<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
     Some(&tag[val_start..val_start + end])
 }
 
+/// JSON path: resolve cross-file script ids with `xml_paths` + the
+/// `.fm-bridge.toml` found from `config_path` (or FMBRIDGE_CONFIG / cwd).
+fn resolve_cross_file(script: &mut xmss::FmScript, cmd: &Command) -> xfile::Outcome {
+    let explicit = cmd.xml_paths.clone().unwrap_or_default();
+    let sources = xfile::Sources::discover(&explicit, cmd.config_path.as_deref(), None);
+    xfile::resolve(script, &sources)
+}
+
+fn cross_file_warnings(outcome: &xfile::Outcome) -> Vec<text_format::ParseError> {
+    outcome
+        .warnings
+        .iter()
+        .map(|(_, msg)| text_format::ParseError::warning_at(0, msg.clone()))
+        .collect()
+}
+
 fn resolve_layout_ids_in_script(script_text: &str, xml_path: &str) -> Result<String, String> {
     let catalog = scan_layout_catalog(xml_path)?;
     if catalog.is_empty() {
@@ -775,28 +835,14 @@ fn run_cli_mode() -> Result<(), String> {
         "decode-table" => run_decode_table_cli(&args[1..]),
         "encode-table" => run_encode_table_cli(&args[1..]),
         "validate-table" => run_validate_table_cli(&args[1..]),
-        "write" => {
-            if args.len() < 2 {
-                return Err("Usage: fm-bridge write <file.fmscript>".to_string());
-            }
-            run_write_cli(&args[1])
-        }
+        "write" => run_write_cli(&args[1..]),
         "json" => run_json_mode(),
         "debug" => run_debug_cli(),
         "test" => run_test_cli(),
         "passthrough" => run_passthrough_cli(),
         "dump-ids" => run_dump_ids_cli(),
         "steps" => run_steps_cli(),
-        "encode-text" => {
-            if args.len() < 3 {
-                return Err("Usage: fm-bridge encode-text <in.fmscript> <out.xml>".to_string());
-            }
-            let text = read_file_to_string(&args[1])?;
-            let xml_bytes = xmss::encode_xmss(&text)?;
-            std::fs::write(&args[2], &xml_bytes).map_err(|e| e.to_string())?;
-            println!("Wrote {} ({} bytes)", args[2], xml_bytes.len());
-            Ok(())
-        }
+        "encode-text" => run_encode_text_cli(&args[1..]),
         "decode-xml" => {
             if args.len() < 2 {
                 return Err("Usage: fm-bridge decode-xml <file.xml>".to_string());
@@ -1765,11 +1811,88 @@ fn write_script_catalog_tree(
     Ok((scripts, folders))
 }
 
-fn run_write_cli(file_path: &str) -> Result<(), String> {
-    let text = read_file_to_string(file_path)?;
-    let xmss_data = xmss::encode_xmss(&text)?;
-    clipboard::write_fm_clipboard(&xmss_data)?;
+/// Options shared by `write` and `encode-text`: positional files plus
+/// `--xml <export>` (repeatable) and `--config <.fm-bridge.toml or dir>`.
+struct WriteOpts {
+    files: Vec<String>,
+    xmls: Vec<String>,
+    config: Option<String>,
+}
+
+fn parse_write_opts(args: &[String]) -> Result<WriteOpts, String> {
+    let mut o = WriteOpts {
+        files: Vec::new(),
+        xmls: Vec::new(),
+        config: None,
+    };
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--xml" => {
+                i += 1;
+                o.xmls
+                    .push(args.get(i).ok_or("--xml needs a path")?.to_string());
+            }
+            "--config" => {
+                i += 1;
+                o.config = Some(args.get(i).ok_or("--config needs a path")?.to_string());
+            }
+            a => o.files.push(a.to_string()),
+        }
+        i += 1;
+    }
+    Ok(o)
+}
+
+/// Parse a `.fmscript` file and build its clipboard XML, resolving cross-file
+/// Perform Script ids. Resolutions go to stdout, warnings to stderr.
+fn build_script_xml_from_file(file: &str, opts: &WriteOpts) -> Result<String, String> {
+    let text = read_file_to_string(file)?;
+    let mut script = text_format::parse_text_to_script(&text).map_err(|e| e.to_string())?;
+    let start = std::path::Path::new(file)
+        .canonicalize()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let sources = xfile::Sources::discover(&opts.xmls, opts.config.as_deref(), start.as_deref());
+    let outcome = xfile::resolve(&mut script, &sources);
+    for r in &outcome.resolved {
+        println!("#id resuelto — {}", r);
+    }
+    for (_, w) in &outcome.warnings {
+        eprintln!("WARNING: {}", w);
+    }
+    for w in text_format::lint(&text)
+        .into_iter()
+        .chain(text_format::post_validate(&script))
+        .filter(|e| e.severity == "warning")
+    {
+        eprintln!("WARNING: {}", w.message);
+    }
+    xmss::build_xml_from_script(&script)
+}
+
+fn run_write_cli(args: &[String]) -> Result<(), String> {
+    let opts = parse_write_opts(args)?;
+    let file_path = opts.files.first().ok_or(
+        "Usage: fm-bridge write <file.fmscript> [--xml <FMSaveAsXML>]... [--config <.fm-bridge.toml>]",
+    )?;
+    let xml = build_script_xml_from_file(file_path, &opts)?;
+    clipboard::write_fm_clipboard(xml.as_bytes())?;
     println!("Script written to clipboard from {}", file_path);
+    Ok(())
+}
+
+fn run_encode_text_cli(args: &[String]) -> Result<(), String> {
+    let opts = parse_write_opts(args)?;
+    if opts.files.len() < 2 {
+        return Err(
+            "Usage: fm-bridge encode-text <in.fmscript> <out.xml> [--xml <FMSaveAsXML>]... [--config <path>]"
+                .to_string(),
+        );
+    }
+    let xml = build_script_xml_from_file(&opts.files[0], &opts)?;
+    std::fs::write(&opts.files[1], xml.as_bytes()).map_err(|e| e.to_string())?;
+    println!("Wrote {} ({} bytes)", opts.files[1], xml.len());
     Ok(())
 }
 

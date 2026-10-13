@@ -455,6 +455,56 @@ Set Variable [$resultado = Let([
 )]
 ```
 
+### Perform Script a otro archivo, Wait for completion, diálogo y búsquedas
+
+Opciones que antes se perdían al pegar (había que corregirlas a mano en FM):
+
+```
+# Guion de OTRO archivo: `from file: "Archivo"` (lo que FM muestra como
+# "desde el archivo:"). Sin esto el paso apunta al archivo actual → error 104.
+Perform Script ["Sto_Web_Entrada_Embalaje" from file: "By_20_Stock"; $sto]
+
+# PSoS esperando el resultado: `; Wait for completion` al final.
+Perform Script on Server ["Fab_Web_Escribir_Caja" from file: "By_22_Fabricacion"; $param; Wait for completion]
+
+# Diálogo: `Dialog: Off` (canónico) o `With dialog: Off` (como lo escribe FM).
+Commit Records/Requests [With dialog: Off; Skip data entry validation; Force commit]
+Delete Record/Request [Dialog: Off]
+Delete All Records [Dialog: Off]
+Revert Record/Request [Dialog: Off]
+Sort Records [Dialog: Off]
+# Truncate Table: tabla actual o una tabla base (con #id opcional).
+# OJO: su XML de portapapeles no está verificado; write avisa con un WARNING.
+Truncate Table [With dialog: Off; Table: <Current Table>]
+Truncate Table [Dialog: Off; Table: Inventario_MT #136]
+
+# Búsquedas: sin peticiones guardadas, "Restaurar" queda DESMARCADO.
+Enter Find Mode [Pause: Off]
+Perform Find []
+```
+
+- Al leer (`read`) un PSoS cruzado sale con los ids: `["Api" #1201 from file:
+  "By_22_Fabricacion" #48; $p; Wait for completion]`. Al pegar, FileMaker
+  resuelve el **archivo** (origen de datos externo) por nombre, pero el **guion** de
+  ese otro archivo solo por **id** (probado en FM 22: sin `#id` queda
+  `<desconocido>`). El id es el del guion en el catálogo del archivo destino.
+- Si escribís `"Guion" from file: "Archivo"` sin `#id`, `write` lo busca en los
+  exports FMSaveAsXML: el del archivo destino (las `[[database]]` del
+  `.fm-bridge.toml`, buscado hacia arriba desde el `.fmscript`, o `FMBRIDGE_CONFIG`,
+  o `--config`, más los que pases con `--xml`) y si no, cualquier export que ya llame
+  a ese guion. Gana el export más nuevo. Si no lo encuentra, avisa con un
+  `WARNING` que nombra el paso (y escribe igual):
+  ```bash
+  fm-bridge write BE_Fab_T_Montar.fmscript --xml exports/By_22_Fabricacion.xml
+  ```
+  El `#id` del archivo (`from file: "X" #84`) no se completa: es el id del origen de
+  datos en el archivo donde pegás, y FileMaker lo resuelve por nombre. Si lo ponés a
+  mano, sacalo del export de **ese** archivo.
+- `Wait for completion` también acepta `Wait for completion: On/Off` y `Wait: On/Off`;
+  sin el flag se pega desmarcado.
+- `Enter Find Mode` / `Perform Find` sin peticiones se pegan con Restaurar apagado;
+  con peticiones (`Perform Find [Find: T::F => valor]`) se pega encendido.
+
 ---
 
 ## 6. Troubleshooting

@@ -315,8 +315,15 @@ async function writeToClipboard(): Promise<void> {
   }
   try {
     const kind = kindOf(editor.document);
-    const resp = await writeClipboard(editor.document.getText(), kind);
+    const docPath =
+      editor.document.uri.scheme === "file" ? editor.document.uri.fsPath : undefined;
+    const resp = await writeClipboard(editor.document.getText(), kind, docPath);
     if (resp.status === "ok") {
+      // Written, but with something FileMaker will get wrong on paste (e.g. a
+      // cross-file Perform Script whose script id could not be resolved).
+      for (const w of resp.errors ?? []) {
+        void vscode.window.showWarningMessage(`fm-bridge: ${w.message}`);
+      }
       void vscode.window.showInformationMessage(
         kind === "table"
           ? "fm-bridge: tabla copiada — pegala en FileMaker en Gestionar → Base de datos → Tablas."

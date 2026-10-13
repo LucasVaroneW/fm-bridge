@@ -774,6 +774,10 @@ impl std::fmt::Display for ParseError {
 }
 
 impl ParseError {
+    /// A warning built outside the parser (e.g. cross-file id resolution).
+    pub fn warning_at(line: usize, message: String) -> Self {
+        Self::warning(line, message)
+    }
     fn error(line: usize, message: String) -> Self {
         ParseError {
             line,
@@ -1207,7 +1211,7 @@ pub fn lint(text: &str) -> Vec<ParseError> {
             // Flag steps (Delete/Revert/Sort/Enter Find Mode): an option we don't
             // recognize would be pasted as junk and FileMaker would use its own
             // defaults (dialog ON, Restore ON) — say so instead of failing silently.
-            if terminated && i == step_line && crate::step_dsl::is_flag_step(&step_name) {
+            if terminated && i == step_line && crate::step_dsl::is_option_step(&step_name) {
                 let inner = content[idx + 2..].trim_end();
                 let inner = inner.strip_suffix(']').unwrap_or(inner).trim();
                 if !inner.starts_with('<') && crate::step_dsl::from_dsl(&step_name, inner).is_none()
@@ -1216,7 +1220,7 @@ pub fn lint(text: &str) -> Vec<ParseError> {
                         step_line + 1,
                         format!(
                             "Unrecognized options for '{}': `{}` — expected e.g. `Dialog: Off`, \
-                             `Pause: Off`, `Restore`",
+                             `Pause: Off`, `Restore`, `Table: <Current Table>`",
                             step_name, inner
                         ),
                     ));
@@ -1302,6 +1306,26 @@ pub fn post_validate(script: &crate::xmss::FmScript) -> Vec<ParseError> {
                         "{} references '{}' without a layout #id — FM may show it as \"Desconocido\"",
                         step.name,
                         step.layout_name.as_deref().unwrap_or("")
+                    ),
+                ));
+            }
+        }
+        // Truncate Table: the clipboard XML we build for it is inferred, not
+        // verified (no FileMaker clipboard/DDR sample), and a pasted one failed
+        // at runtime with error 106 even after fixing its options by hand. Raw
+        // XML read from FileMaker itself (a payload our DSL doesn't model) is
+        // FileMaker's own and gets no warning.
+        if step.name == crate::step_dsl::TRUNCATE {
+            let xml = step.calculation.as_deref().unwrap_or("");
+            if xml.is_empty() || crate::step_dsl::to_dsl(&step.name, xml).is_some() {
+                warnings.push(ParseError::warning(
+                    0,
+                    format!(
+                        "Truncate Table (paso {}): el XML que genera fm-bridge para este paso no \
+                         está verificado contra el portapapeles de FileMaker (un pegado anterior \
+                         falló con error 106). Si falla, recrealo a mano en FileMaker. Para \
+                         verificarlo: copiá un Truncate Table hecho a mano y corré `fm-bridge read`.",
+                        i + 1
                     ),
                 ));
             }
@@ -4580,6 +4604,52 @@ mod paste_fidelity_tests {
         // `Dialog: On` is the default, not part of the calculation.
         let on = write("Replace Field Contents [T::F; 1; Dialog: On]");
         assert!(on.contains("<NoInteract state=\"False\">") && on.contains("<![CDATA[1]]>"));
+    }
+
+    #[test]
+    fn truncate_table_dialog_and_table() {
+        let cur = write("Truncate Table [With dialog: Off; Table: <Current Table>]");
+        assert!(
+            cur.contains(
+                "<Step enable=\"True\" id=\"182\" name=\"Truncate Table\"><NoInteract state=\"True\"></NoInteract></Step>"
+            ),
+            "{cur}"
+        );
+        assert_eq!(
+            read(&cur),
+            "Truncate Table [Dialog: Off; Table: <Current Table>]"
+        );
+        assert_text_round_trips("Truncate Table [Dialog: Off; Table: <Current Table>]");
+        // Bare: options stated (dialog shown, current table), not left to the paste.
+        assert!(
+            write("Truncate Table").contains("<NoInteract state=\"False\"></NoInteract></Step>")
+        );
+        // Named base table, with and without id.
+        let named = write("Truncate Table [Dialog: Off; Table: Inventario_MT #136]");
+        assert!(
+            named.contains("<NoInteract state=\"True\"></NoInteract><BaseTable id=\"136\" name=\"Inventario_MT\"></BaseTable>"),
+            "{named}"
+        );
+        assert_text_round_trips("Truncate Table [Dialog: Off; Table: Inventario_MT #136]");
+        assert!(
+            write("Truncate Table [Table: \"StockMontador\"]")
+                .contains("<BaseTable name=\"StockMontador\">")
+        );
+        // Anything else in the payload stays raw XML (lossless).
+        let other = snippet(
+            "<Step enable=\"True\" id=\"182\" name=\"Truncate Table\"><NoInteract state=\"True\"></NoInteract><Table id=\"1\" name=\"X\"></Table></Step>",
+        );
+        assert_eq!(write(&read(&other)), other);
+        assert!(super::lint("Truncate Table [Tabla: X]").len() == 1);
+        // Built by us (inferred XML) → warn; FileMaker's own raw XML → no warning.
+        let ours =
+            super::parse_text_to_script("Truncate Table [Dialog: Off; Table: <Current Table>]")
+                .unwrap();
+        let w = super::post_validate(&ours);
+        assert_eq!(w.len(), 1);
+        assert!(w[0].message.contains("recrealo a mano"), "{}", w[0].message);
+        let raw = xmss::parse_fmxml_snippet(&other).unwrap();
+        assert!(super::post_validate(&raw).is_empty());
     }
 
     #[test]

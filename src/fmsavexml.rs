@@ -3243,6 +3243,36 @@ mod tests {
         assert!(!text.contains("<UUID>"), "{}", text);
     }
 
+    /// Truncate Table in inspect: real FM 22 FMSaveAsXML (By_22 current table,
+    /// By_95_Import_Stock named base table).
+    #[test]
+    fn truncate_table_survives_inspect() {
+        let raw = concat!(
+            "<fmxmlsnippet type=\"FMObjectList\">",
+            "<Step hash=\"H\" index=\"1\" id=\"182\" name=\"Truncate Table\" enable=\"True\">",
+            "<UUID>A</UUID><OwnerID></OwnerID><Options>128</Options><ParameterValues membercount=\"2\">",
+            "<Parameter type=\"Boolean\"><Boolean type=\"With dialog\" id=\"128\" value=\"False\"/></Parameter>",
+            "<Parameter type=\"List\"><List name=\"&lt;Current Table&gt;\" value=\"0\"/></Parameter>",
+            "</ParameterValues></Step>",
+            "<Step hash=\"H\" index=\"2\" id=\"182\" name=\"Truncate Table\" enable=\"True\">",
+            "<UUID>B</UUID><OwnerID></OwnerID><Options>128</Options><ParameterValues membercount=\"2\">",
+            "<Parameter type=\"Boolean\"><Boolean type=\"With dialog\" id=\"128\" value=\"False\"></Boolean></Parameter>",
+            "<Parameter type=\"List\"><List name=\"Inventario_MT\" value=\"1\">",
+            "<BaseTableReference id=\"136\" name=\"Inventario_MT\" UUID=\"C\"></BaseTableReference>",
+            "</List></Parameter></ParameterValues></Step></fmxmlsnippet>"
+        );
+        let xmss = fmsavexml_to_xmss(raw);
+        let script = crate::xmss::parse_fmxml_snippet(&xmss).unwrap();
+        let text = crate::text_format::format_script(&script);
+        assert_eq!(
+            text,
+            "Truncate Table [Dialog: Off; Table: <Current Table>]\n\
+             Truncate Table [Dialog: Off; Table: Inventario_MT #136]",
+            "xmss: {}",
+            xmss
+        );
+    }
+
     /// Comment text (`<Comment value>`) and Set Variable name (`<Name value>`)
     /// survive the FMSaveAsXML→XMSS transform (both use a `value` attribute where
     /// the clipboard form uses element text — without conversion they decode empty).

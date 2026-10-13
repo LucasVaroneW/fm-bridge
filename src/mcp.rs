@@ -94,6 +94,11 @@ fn tools_list_result() -> Value {
             "inputSchema": { "type": "object", "properties": { "script_text": { "type": "string", "description": "The .fmscript source to validate." } }, "required": ["script_text"] }
         },
         {
+            "name": "resolve_script_ids",
+            "description": "Before the user pastes a .fmscript into FileMaker: fill in the #id of every cross-file Perform Script / Perform Script on Server target (`\"Script\" from file: \"File\"`). FileMaker resolves the other FILE by name on paste but the SCRIPT only by id — without it the step pastes as <desconocido>. Looks the id up in the FMSaveAsXML exports of .fm-bridge.toml (and xml_paths): the target file's script catalog, else an existing cross-file call to it. Returns the updated script_text plus a warning for each call it could not resolve. Does not touch the clipboard.",
+            "inputSchema": { "type": "object", "properties": { "script_text": { "type": "string", "description": "The .fmscript source." }, "xml_paths": { "type": "array", "items": { "type": "string" }, "description": "Optional extra FMSaveAsXML exports (e.g. a fresh export of the target file)." }, "config_path": { "type": "string", "description": "Optional .fm-bridge.toml or project folder (default: FMBRIDGE_CONFIG / cwd)." } }, "required": ["script_text"] }
+        },
+        {
             "name": "script_to_json",
             "description": "Parse .fmscript text into a structured JSON tree of steps (name, calculation, fields, variables, block nesting) for precise reasoning.",
             "inputSchema": { "type": "object", "properties": { "script_text": { "type": "string", "description": "The .fmscript source to parse." } }, "required": ["script_text"] }
@@ -233,6 +238,16 @@ fn tools_call(params: Option<&Value>) -> Result<Value, RpcError> {
         "validate_script" => {
             cmd.command = "parse".to_string();
             cmd.script_text = Some(arg_str(&args, "script_text")?);
+        }
+        "resolve_script_ids" => {
+            cmd.command = "resolve_cross_file".to_string();
+            cmd.script_text = Some(arg_str(&args, "script_text")?);
+            cmd.config_path = opt_str(&args, "config_path");
+            cmd.xml_paths = args.get("xml_paths").and_then(|v| v.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            });
         }
         "script_to_json" => {
             cmd.command = "to_json".to_string();
@@ -412,6 +427,7 @@ mod tests {
             "read_clipboard_script",
             "validate_script",
             "script_to_json",
+            "resolve_script_ids",
             "describe_database",
             "get_table",
             "get_field",
@@ -470,6 +486,49 @@ mod tests {
                 .iter()
                 .any(|e| e["message"].as_str().unwrap().contains("never closed"))
         );
+    }
+
+    #[test]
+    fn call_resolve_script_ids_fills_cross_file_id() {
+        let dir = std::env::temp_dir().join(format!("fmb_mcp_xfile_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let xml = dir.join("By_22_Fabricacion.xml");
+        std::fs::write(
+            &xml,
+            "<FMSaveAsXML><ScriptCatalog><Script id=\"1219\" name=\"Fab_Web_Escribir_Caja\"></Script></ScriptCatalog></FMSaveAsXML>",
+        )
+        .unwrap();
+        let text = "Perform Script on Server [\"Fab_Web_Escribir_Caja\" from file: \"By_22_Fabricacion\"; $p; Wait for completion]\nPerform Script [\"Otro\" from file: \"Desconocido\"]";
+        let params = json!({
+            "name": "resolve_script_ids",
+            "arguments": {
+                "script_text": text,
+                "xml_paths": [xml.to_string_lossy()],
+                "config_path": dir.to_string_lossy()
+            }
+        });
+        let res = tools_call(Some(&params)).unwrap();
+        let parsed: Value =
+            serde_json::from_str(res["content"][0]["text"].as_str().unwrap()).unwrap();
+        // Warnings only → still ok, with the resolved text.
+        assert_eq!(parsed["status"], "ok", "{}", parsed);
+        assert!(
+            parsed["script_text"]
+                .as_str()
+                .unwrap()
+                .contains("\"Fab_Web_Escribir_Caja\" #1219 from file: \"By_22_Fabricacion\""),
+            "{}",
+            parsed
+        );
+        let warns = parsed["errors"].as_array().unwrap();
+        assert_eq!(warns.len(), 1, "{}", parsed);
+        assert!(
+            warns[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("<desconocido>")
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

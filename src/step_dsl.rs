@@ -32,6 +32,10 @@ pub fn to_dsl(step_name: &str, xml: &str) -> Option<String> {
             None => commit_to_dsl(xml)?,
         },
         "Go to Related Record" => gtrr_to_dsl(xml)?,
+        TRUNCATE => match strip_fmsavexml_envelope(xml) {
+            Some(clean) => return truncate_to_dsl(&clean, true),
+            None => truncate_to_dsl(xml, false)?,
+        },
         n if is_flag_step(n) => match strip_fmsavexml_envelope(xml) {
             Some(clean) => return flags_to_dsl(n, &clean, true).filter(|_| only_known(&clean)),
             None => flags_to_dsl(n, xml, false)?,
@@ -56,6 +60,7 @@ pub fn from_dsl(step_name: &str, dsl: &str) -> Option<String> {
         "Import Records" | "Export Records" => crate::import_records::dsl_to_xml(dsl),
         "Commit Records/Requests" => commit_from_dsl(dsl),
         "Go to Related Record" => gtrr_from_dsl(dsl),
+        TRUNCATE => truncate_from_dsl(dsl),
         n if is_flag_step(n) => flags_from_dsl(n, dsl),
         _ => None,
     }
@@ -289,6 +294,9 @@ pub fn is_flag_step(step_name: &str) -> bool {
 /// its default — dialog shown, pause off, restore off. Emitting them is what
 /// keeps FileMaker from pasting its own defaults (Restore ON on Enter Find Mode).
 pub fn default_flag_xml(step_name: &str) -> Option<String> {
+    if step_name == TRUNCATE {
+        return truncate_from_dsl("");
+    }
     flags_from_dsl(step_name, "")
 }
 
@@ -358,6 +366,104 @@ fn flags_from_dsl(step_name: &str, dsl: &str) -> Option<String> {
             Flag::Restore => restore,
         };
         xml.push_str(&format!("<{tag} state=\"{state}\"></{tag}>"));
+    }
+    Some(xml)
+}
+
+// ─── Truncate Table ────────────────────────────────────────────────────────────
+// Text: `Truncate Table [Dialog: Off; Table: <Current Table>]` or
+// `[Dialog: Off; Table: Inventario_MT #136]` (`With dialog:` accepted too).
+// Verified (FMSaveAsXML, FM 22): a "With dialog" Boolean plus a List that is
+// either `<Current Table>` (value 0) or a named base table
+// (`<BaseTableReference id name>`, value 1). INFERRED (no clipboard/DDR sample
+// in reach): the clipboard form `<NoInteract state>` + `<BaseTable id name>`
+// for a named table and no table element for the current one — read keeps the
+// raw XML whenever the real payload doesn't match that (lossless gate).
+
+pub const TRUNCATE: &str = "Truncate Table";
+const CURRENT_TABLE: &str = "<Current Table>";
+
+/// Steps with an option DSL that the parser/linter must know about: the flag
+/// steps plus Truncate Table.
+pub fn is_option_step(step_name: &str) -> bool {
+    is_flag_step(step_name) || step_name == TRUNCATE
+}
+
+/// (id, name) of the first `<Tag id name>`.
+fn id_name(xml: &str, tag: &str) -> Option<(String, String)> {
+    Some((
+        element_attr(xml, tag, "id")?.to_string(),
+        element_attr(xml, tag, "name")?.to_string(),
+    ))
+}
+
+/// `lenient` = inspect form (FMSaveAsXML, cleaned): read-only, not gated.
+fn truncate_to_dsl(xml: &str, lenient: bool) -> Option<String> {
+    let dialog = match element_attr(xml, "NoInteract", "state") {
+        Some(s) => s,
+        None if lenient => "False",
+        None => return None,
+    };
+    let table = if lenient {
+        id_name(xml, "BaseTableReference")
+    } else {
+        id_name(xml, "BaseTable")
+    };
+    if lenient
+        && !xml
+            .split('<')
+            .filter(|p| !p.is_empty() && !p.starts_with('/'))
+            .all(|p| p.starts_with("NoInteract") || p.starts_with("BaseTableReference"))
+    {
+        return None;
+    }
+    let table = match table {
+        Some((id, name)) => format!("{} #{}", name, id),
+        None => CURRENT_TABLE.to_string(),
+    };
+    Some(format!(
+        "Dialog: {}; Table: {}",
+        if dialog == "True" { "Off" } else { "On" },
+        table
+    ))
+}
+
+fn truncate_from_dsl(dsl: &str) -> Option<String> {
+    let mut dialog = "False";
+    let mut table: Option<(Option<String>, String)> = None;
+    for tok in split_flag_tokens(dsl) {
+        if let Some(off) = dialog_flag(tok) {
+            dialog = if off { "True" } else { "False" };
+            continue;
+        }
+        let (key, value) = tok.split_once(':')?;
+        if normalize_key(key) != "table" {
+            return None;
+        }
+        let v = value.trim();
+        if v.eq_ignore_ascii_case(CURRENT_TABLE) || v.is_empty() {
+            table = None;
+            continue;
+        }
+        let (name, id) = match v.rfind(" #") {
+            Some(h) if v[h + 2..].chars().all(|c| c.is_ascii_digit()) && h + 2 < v.len() => {
+                (v[..h].trim(), Some(v[h + 2..].to_string()))
+            }
+            _ => (v, None),
+        };
+        let name = name.trim_matches('"').to_string();
+        table = Some((id, name));
+    }
+    let mut xml = format!("<NoInteract state=\"{}\"></NoInteract>", dialog);
+    if let Some((id, name)) = table {
+        xml.push_str("<BaseTable");
+        if let Some(id) = id {
+            xml.push_str(&format!(" id=\"{}\"", id));
+        }
+        xml.push_str(&format!(
+            " name=\"{}\"></BaseTable>",
+            crate::xmss::xml_escape(&name)
+        ));
     }
     Some(xml)
 }

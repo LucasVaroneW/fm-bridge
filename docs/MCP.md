@@ -125,7 +125,7 @@ orden del resto del archivo.
 ### Dos cosas que evitan que se rompa
 
 **Apuntá a `~/.fm-bridge/bin/fm-bridge`, no al binario de la extensión.** El
-nombre de esa carpeta lleva la versión (`lucasvarone.fm-bridge-0.1.10`), así que
+nombre de esa carpeta lleva la versión (`lucasvarone.fm-bridge-0.1.11`), así que
 al actualizar VS Code la borra y el cliente falla con un "archivo no
 encontrado" que parece un bug de la herramienta. La extensión mantiene esa copia
 estable al día en cada arranque.
@@ -140,6 +140,7 @@ servidor desde su propio directorio, que nunca es tu proyecto. Ver
 |---|---|---|
 | `read_clipboard_script` | Lee el clipboard de FM → `.fmscript` | — |
 | `validate_script` | Linter: todos los errores de formato/estructura | `script_text` |
+| `resolve_script_ids` | Completa el `#id` de los Perform Script a otro archivo (`from file:`) desde los exports; avisa lo que no encuentra | `script_text`, `xml_paths?`, `config_path?` |
 | `script_to_json` | Árbol estructurado del script (steps, calcs, campos) | `script_text` |
 | `describe_database` | **Inline**: conteos + nombres de tablas/scripts/layouts/CFs/externos. Primera llamada para orientarse. No escribe a disco | `xml_path` |
 | `get_table` | **Inline**: campos de una tabla. Tablas grandes (>40 campos) se resumen a una línea por campo; `summary=true` fuerza el resumen y `fields=[…]` trae la definición completa sólo de esos campos. No escribe a disco | `xml_path`, `table`, `fields[]?`, `summary?` |

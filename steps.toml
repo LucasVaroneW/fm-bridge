@@ -317,7 +317,8 @@ kind = "TruncateTable"
 id = 182
 en = "Truncate Table"
 es = "Truncar tabla"
-shape = "plain"
+# Opaque + DSL (step_dsl): `[Dialog: Off; Table: <Current Table>]`.
+shape = "opaque"
 opens_block = false
 closes_block = false
 

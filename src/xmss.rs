@@ -253,6 +253,27 @@ pub fn cr_for_cdata(s: &str) -> String {
 /// Parse an FM XML snippet string into a structured script.
 /// Translates Spanish step names to English using the steps table.
 pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
+    let (result, xml_error) = parse_fmxml_snippet_report(xml);
+    if let Some(e) = xml_error {
+        eprintln!("Error parsing XML: {}", e);
+    }
+    result
+}
+
+/// Like [`parse_fmxml_snippet`], but an ill-formed document is reported to the
+/// caller instead of on stderr: the second value is the XML error, naming the
+/// step (1-based position and name) the reader was inside when it failed. The
+/// first value then holds only the steps read before it.
+pub fn parse_fmxml_snippet_report(xml: &str) -> (Result<FmScript, String>, Option<String>) {
+    let mut xml_error = None;
+    let result = parse_fmxml_snippet_inner(xml, &mut xml_error);
+    (result, xml_error)
+}
+
+fn parse_fmxml_snippet_inner(
+    xml: &str,
+    xml_error: &mut Option<String>,
+) -> Result<FmScript, String> {
     // Normalize to NFC once, here, so EVERY name, calculation, and comment shares
     // a single canonical Unicode form regardless of the source platform (macOS
     // emits NFD, Windows NFC). Doing it on the whole string — rather than per
@@ -874,7 +895,11 @@ pub fn parse_fmxml_snippet(xml: &str) -> Result<FmScript, String> {
             }
             Ok(Event::Eof) => break,
             Err(e) => {
-                eprintln!("Error parsing XML: {}", e);
+                *xml_error = Some(if parser.name.is_empty() {
+                    e.to_string()
+                } else {
+                    format!("step {} \"{}\": {}", steps.len() + 1, parser.name, e)
+                });
                 break;
             }
             _ => {}

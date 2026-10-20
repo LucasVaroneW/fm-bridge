@@ -10,7 +10,7 @@ use quick_xml::events::Event;
 use serde::Serialize;
 
 use crate::text_format::format_script;
-use crate::xmss::{ScriptStep, parse_fmxml_snippet};
+use crate::xmss::{ScriptStep, parse_fmxml_snippet_report};
 
 // ─── Data types ──────────────────────────────────────────────────────────────
 
@@ -415,6 +415,7 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
 
     // StepsForScripts state
     let mut cur_steps_script_id: Option<u32> = None;
+    let mut cur_steps_script_name = String::new();
     let mut object_list_inner_start: Option<usize> = None;
     let mut object_list_depth: u32 = 0;
 
@@ -586,9 +587,12 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                         let sec_depth = *sec_depth;
                         if local == b"ScriptReference" && depth == sec_depth + 2 {
                             let mut id = 0u32;
+                            cur_steps_script_name.clear();
                             for attr in e.attributes().flatten() {
                                 if attr.key.as_ref() == b"id" {
                                     id = String::from_utf8_lossy(&attr.value).parse().unwrap_or(0);
+                                } else if attr.key.as_ref() == b"name" {
+                                    cur_steps_script_name = attr_text(&attr);
                                 }
                             }
                             cur_steps_script_id = Some(id);
@@ -1171,11 +1175,14 @@ pub fn parse(xml_path: &str) -> Result<ParsedDatabase, String> {
                                 if !lays.is_empty() {
                                     script_layouts.insert(script_id, lays);
                                 }
-                                let normalized = fmsavexml_to_xmss(inner_xml);
-                                let wrapped =
-                                    format!("<FMScriptStep>{}</FMScriptStep>", normalized);
-                                if let Ok(parsed) = parse_fmxml_snippet(&wrapped) {
-                                    script_steps.insert(script_id, parsed.steps);
+                                let label = format!("\"{}\" #{}", cur_steps_script_name, script_id);
+                                let (steps, warnings) =
+                                    script_steps_from_object_list(inner_xml, &label);
+                                for w in warnings {
+                                    eprintln!("{}", w);
+                                }
+                                if let Some(steps) = steps {
+                                    script_steps.insert(script_id, steps);
                                 }
                             }
                         } else if local == b"Script" {
@@ -2477,11 +2484,26 @@ fn extract_xml_attr<'a>(tag: &'a str, attr_name: &str) -> Option<&'a str> {
 ///      - Drop the `<ParameterValues>`, `<Parameter type="…">`, `<List>`,
 ///        `<LayoutReferenceContainer>`, `<Animation/>` wrappers
 ///      - Lowercase `<value>` / `<repetition>` (Set Variable wrappers) → `<Value>` / `<Repetition>`
+///      - Show Custom Dialog: `<Parameter type="Title|Message">` → `<Title>` / `<Message>`,
+///        `<Parameter type="ButtonN" value="X">` → `<Button>"X"</Button>`, and
+///        `<Parameter type="FieldN">` → `<InputField>` (done up front, see
+///        `convert_dialog_input_fields`)
+///      - Plugin steps (MBS): the `<External><PluginStep>` declaration is dropped and
+///        the indexed calc parameters become one `a; b; c` calc (see
+///        `collapse_plugin_step_params`)
+///
+/// Every `<Parameter …>` open is paired with its own `</Parameter>` (a stack, not
+/// string prefixes), whatever its attributes: plugin steps (MBS) carry
+/// `<Parameter ID="0" Label="Function" …>` declarations under `<PluginStep>`, and
+/// dropping only the `type=` opens while dropping every close left the document
+/// unbalanced — the rest of the script was lost.
 ///
 /// Safe to run on a Script ObjectList: ScriptReference/LayoutReference inside there
 /// can only be step targets (the catalog-level <Script>/<Layout> references live outside).
 fn fmsavexml_to_xmss(xml: &str) -> String {
-    let step0 = collapse_field_target_params(xml);
+    let xml = collapse_plugin_step_params(xml);
+    let xml = convert_dialog_input_fields(&xml);
+    let step0 = collapse_field_target_params(&xml);
     let step1 = normalize_calculations(&step0);
     transform_step_tags(&step1)
 }
@@ -2543,6 +2565,8 @@ fn transform_step_tags(xml: &str) -> String {
     let bytes = xml.as_bytes();
     let mut out = String::with_capacity(bytes.len());
     let mut i = 0;
+    // What each open `<Parameter>` closes as ("" = dropped wrapper).
+    let mut param_closes: Vec<&'static str> = Vec::new();
 
     while i < bytes.len() {
         if bytes[i] != b'<' {
@@ -2558,15 +2582,61 @@ fn transform_step_tags(xml: &str) -> String {
         let tag_end = if j < bytes.len() { j + 1 } else { j };
         let tag = &xml[tag_start..tag_end];
 
+        // ── <Parameter>: a wrapper, or a dialog part ─────────────────────
+        if is_open_tag(tag, "Parameter") {
+            let kind = extract_xml_attr(tag, "type").unwrap_or("");
+            let close = match kind {
+                "Title" => {
+                    out.push_str("<Title>");
+                    "</Title>"
+                }
+                "Message" => {
+                    out.push_str("<Message>");
+                    "</Message>"
+                }
+                _ if is_numbered(kind, "Button") => {
+                    // The label is literal text in FMSaveAsXML; the clipboard
+                    // holds it as a calculation, i.e. a quoted string.
+                    let label = extract_xml_attr(tag, "value").unwrap_or("");
+                    if label.is_empty() {
+                        out.push_str("<Button>");
+                    } else {
+                        out.push_str(&format!(
+                            "<Button><Calculation>\"{}\"</Calculation>",
+                            label.replace('\\', "\\\\").replace("&quot;", "\\&quot;")
+                        ));
+                    }
+                    "</Button>"
+                }
+                _ => "",
+            };
+            if tag.ends_with("/>") {
+                out.push_str(close);
+            } else {
+                param_closes.push(close);
+            }
+            i = tag_end;
+            continue;
+        }
+        if tag == "</Parameter>" {
+            out.push_str(param_closes.pop().unwrap_or(""));
+            i = tag_end;
+            continue;
+        }
+        // A dialog button's "commit record" flag: nothing in the decoded step
+        // carries it, and left alone it would become a stray <Set state>.
+        if tag.starts_with("<Boolean type=\"Commit\"") && param_closes.last() == Some(&"</Button>")
+        {
+            i = tag_end;
+            continue;
+        }
+
         // ── Drop wrappers entirely (both open and close) ──────────────────
         // Note: </Boolean>, </ScriptReference>, </LayoutReference> end up here too
         // because we rewrite the corresponding opens to self-closing tags, so the
         // close tag must be consumed or the XML becomes unbalanced.
         if tag.starts_with("<ParameterValues")
             || tag == "</ParameterValues>"
-            || tag.starts_with("<Parameter type=")
-            || tag == "<Parameter>"
-            || tag == "</Parameter>"
             || tag.starts_with("<List ")
             || tag == "</List>"
             || tag.starts_with("<LayoutReferenceContainer")
@@ -2750,6 +2820,275 @@ fn transform_step_tags(xml: &str) -> String {
         i = tag_end;
     }
 
+    out
+}
+
+/// `tag` is an opening (or self-closing) tag of element `name` — not a close,
+/// and not a longer name sharing the prefix (`<ParameterValues>`).
+fn is_open_tag(tag: &str, name: &str) -> bool {
+    tag.strip_prefix('<')
+        .and_then(|t| t.strip_prefix(name))
+        .and_then(|t| t.chars().next())
+        .is_some_and(|c| c == '>' || c == '/' || c.is_whitespace())
+}
+
+/// `kind` is `prefix` followed by a number: `Button1`, `Field2`, …
+fn is_numbered(kind: &str, prefix: &str) -> bool {
+    kind.strip_prefix(prefix)
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Byte range of the next tag (`<…>`) at or after `from`.
+fn next_tag(xml: &str, from: usize) -> Option<(usize, usize)> {
+    let start = xml[from..].find('<')? + from;
+    let end = xml[start..].find('>')? + start + 1;
+    Some((start, end))
+}
+
+/// Range of the `</Parameter>` closing the `<Parameter>` whose start tag ends
+/// at `from` (nested Parameters counted).
+fn matching_param_close(xml: &str, from: usize) -> Option<(usize, usize)> {
+    let mut depth = 1;
+    let mut i = from;
+    while let Some((s, e)) = next_tag(xml, i) {
+        let tag = &xml[s..e];
+        if tag == "</Parameter>" {
+            depth -= 1;
+            if depth == 0 {
+                return Some((s, e));
+            }
+        } else if is_open_tag(tag, "Parameter") && !tag.ends_with("/>") {
+            depth += 1;
+        }
+        i = e;
+    }
+    None
+}
+
+/// Decode one script's `<ObjectList>` into steps.
+///
+/// A step the converter cannot turn into well-formed XML must not take the rest
+/// of the script with it (the reader stops at the first error), nor lose its
+/// parameters silently: each such step gets a warning naming the script
+/// (`label`) and the step, and is decoded with its name only.
+fn script_steps_from_object_list(
+    inner_xml: &str,
+    label: &str,
+) -> (Option<Vec<ScriptStep>>, Vec<String>) {
+    let normalized = fmsavexml_to_xmss(inner_xml);
+    let wrapped = format!("<FMScriptStep>{}</FMScriptStep>", normalized);
+    let (first, xml_error) = parse_fmxml_snippet_report(&wrapped);
+    let Some(error) = xml_error else {
+        return (first.ok().map(|s| s.steps), Vec::new());
+    };
+
+    // Find the culprits step by step, and blank their bodies. Steps are siblings
+    // in an ObjectList (blocks are flat If/End If steps), so `</Step>` ends one.
+    let mut warnings = Vec::new();
+    let mut repaired = String::with_capacity(normalized.len());
+    let mut i = 0;
+    let mut index = 0;
+    while let Some(rel) = normalized[i..].find("<Step ") {
+        let start = i + rel;
+        let Some(open_end) = normalized[start..].find('>').map(|r| start + r + 1) else {
+            break;
+        };
+        if normalized[start..open_end].ends_with("/>") {
+            index += 1;
+            repaired.push_str(&normalized[i..open_end]);
+            i = open_end;
+            continue;
+        }
+        let Some(end) = normalized[open_end..]
+            .find("</Step>")
+            .map(|r| open_end + r + "</Step>".len())
+        else {
+            break;
+        };
+        index += 1;
+        repaired.push_str(&normalized[i..start]);
+        let step_xml = &normalized[start..end];
+        if let Err(e) = check_well_formed(step_xml) {
+            let name = extract_xml_attr(&normalized[start..open_end], "name").unwrap_or("?");
+            warnings.push(format!(
+                "warning: script {}: step {} \"{}\" could not be decoded ({}); \
+                 shown without its parameters",
+                label, index, name, e
+            ));
+            repaired.push_str(&normalized[start..open_end]);
+            repaired.push_str("</Step>");
+        } else {
+            repaired.push_str(step_xml);
+        }
+        i = end;
+    }
+    repaired.push_str(&normalized[i..]);
+
+    let retry = format!("<FMScriptStep>{}</FMScriptStep>", repaired);
+    match parse_fmxml_snippet_report(&retry) {
+        (Ok(parsed), None) if !warnings.is_empty() => (Some(parsed.steps), warnings),
+        _ => {
+            // Not a single-step problem: keep what precedes the error, but say so.
+            let warning = format!(
+                "warning: script {}: could not be decoded past {}; later steps are missing",
+                label, error
+            );
+            (first.ok().map(|s| s.steps), vec![warning])
+        }
+    }
+}
+
+/// `xml` reads to the end without an XML error.
+fn check_well_formed(xml: &str) -> Result<(), String> {
+    let mut reader = quick_xml::Reader::from_str(xml);
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => return Ok(()),
+            Ok(_) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+}
+
+/// Plugin steps (MBS and other `External` steps) in FMSaveAsXML:
+///
+/// `<External Source="MBSP"><PluginStep><Parameter ID="0" Label="Function" …>…
+///  </PluginStep></External><ParameterValues><Parameter index="0" type="Calculation">
+///  calc</Parameter>…</ParameterValues>`
+///
+/// The `<PluginStep>` part only declares the plugin's parameter slots; the values
+/// are the indexed calcs. Those become a single `<Calculation>` joined by `; `,
+/// so the step reads `MBS ["Fn"; p1; p2]` as in FileMaker's script editor. When
+/// the values are not all plain calcs the block is left for the generic pass.
+fn collapse_plugin_step_params(xml: &str) -> String {
+    const EXT_CLOSE: &str = "</External>";
+    const PV_CLOSE: &str = "</ParameterValues>";
+    let mut out = String::with_capacity(xml.len());
+    let mut i = 0;
+    while let Some(rel) = xml[i..].find("<External ") {
+        let start = i + rel;
+        let Some(ext_end) = xml[start..]
+            .find(EXT_CLOSE)
+            .map(|r| start + r + EXT_CLOSE.len())
+        else {
+            break;
+        };
+        if !xml[start..ext_end].contains("<PluginStep") {
+            out.push_str(&xml[i..ext_end]);
+            i = ext_end;
+            continue;
+        }
+        out.push_str(&xml[i..start]);
+        i = ext_end;
+
+        let pv_start = i + (xml[i..].len() - xml[i..].trim_start().len());
+        if !xml[pv_start..].starts_with("<ParameterValues") {
+            continue;
+        }
+        let Some(pv_end) = xml[pv_start..]
+            .find(PV_CLOSE)
+            .map(|r| pv_start + r + PV_CLOSE.len())
+        else {
+            continue;
+        };
+        let Some(open_end) = xml[pv_start..].find('>').map(|r| pv_start + r + 1) else {
+            continue;
+        };
+        if let Some(calcs) = plugin_calc_values(&xml[open_end..pv_end - PV_CLOSE.len()]) {
+            out.push_str(&format!(
+                "<Calculation><![CDATA[{}]]></Calculation>",
+                calcs.join("; ")
+            ));
+            i = pv_end;
+        }
+    }
+    out.push_str(&xml[i..]);
+    out
+}
+
+/// The calc text of each `<Parameter index="N" type="Calculation">` in a plugin
+/// step's ParameterValues, in order; `None` if any parameter has another shape.
+fn plugin_calc_values(inner: &str) -> Option<Vec<String>> {
+    let mut values = Vec::new();
+    let mut i = 0;
+    while let Some((s, e)) = next_tag(inner, i) {
+        let tag = &inner[s..e];
+        if !is_open_tag(tag, "Parameter")
+            || extract_xml_attr(tag, "index").is_none()
+            || extract_xml_attr(tag, "type") != Some("Calculation")
+            || tag.ends_with("/>")
+        {
+            return None;
+        }
+        let (cs, ce) = matching_param_close(inner, e)?;
+        let body = &inner[e..cs];
+        let text = body
+            .find("<![CDATA[")
+            .and_then(|p| {
+                let from = p + "<![CDATA[".len();
+                body[from..].find("]]>").map(|q| &body[from..from + q])
+            })
+            .unwrap_or("");
+        values.push(text.to_string());
+        i = ce;
+    }
+    Some(values)
+}
+
+/// Rewrite Show Custom Dialog input fields to the clipboard shape:
+///
+/// `<Parameter type="Field1"><Parameter type="Target">(<Variable value="$v">… |
+///  <FieldReference id name>…<TableOccurrenceReference name/></FieldReference>)
+///  </Parameter><Boolean type="Password" value="X"/><Parameter type="Label">calc
+///  </Parameter></Parameter>`
+/// → `<InputField UsePasswordCharacter="X"><Field …/><Label>calc</Label></InputField>`
+///
+/// A pass of its own because the password flag comes after the target, and the
+/// target's `<repetition>` calc must not leak into the step.
+fn convert_dialog_input_fields(xml: &str) -> String {
+    let mut out = String::with_capacity(xml.len());
+    let mut i = 0;
+    while let Some((s, e)) = next_tag(xml, i) {
+        let tag = &xml[s..e];
+        let is_field = is_open_tag(tag, "Parameter")
+            && !tag.ends_with("/>")
+            && extract_xml_attr(tag, "type").is_some_and(|k| is_numbered(k, "Field"));
+        let Some((cs, ce)) = is_field.then(|| matching_param_close(xml, e)).flatten() else {
+            out.push_str(&xml[i..e]);
+            i = e;
+            continue;
+        };
+        out.push_str(&xml[i..s]);
+        let inner = &xml[e..cs];
+
+        let password =
+            first_tag_attr(inner, "<Boolean type=\"Password\"", "value").unwrap_or("False");
+        out.push_str(&format!(
+            "<InputField UsePasswordCharacter=\"{}\">",
+            password
+        ));
+        if let Some(var) = first_tag_attr(inner, "<Variable ", "value") {
+            out.push_str(&format!("<Field>{}</Field>", var));
+        } else if inner.contains("<FieldReference") {
+            let id = first_tag_attr(inner, "<FieldReference", "id").unwrap_or("");
+            let name = first_tag_attr(inner, "<FieldReference", "name").unwrap_or("");
+            let to = first_tag_attr(inner, "<TableOccurrenceReference", "name").unwrap_or("");
+            out.push_str(&format!(
+                "<Field table=\"{}\" id=\"{}\" name=\"{}\"/>",
+                to, id, name
+            ));
+        }
+        const LABEL: &str = "<Parameter type=\"Label\">";
+        if let Some(lp) = inner.find(LABEL) {
+            let body = lp + LABEL.len();
+            if let Some((ls, _)) = matching_param_close(inner, body) {
+                out.push_str(&format!("<Label>{}</Label>", &inner[body..ls]));
+            }
+        }
+        out.push_str("</InputField>");
+        i = ce;
+    }
+    out.push_str(&xml[i..]);
     out
 }
 
@@ -3206,6 +3545,76 @@ mod tests {
             "rendered: {}",
             text
         );
+    }
+
+    /// Regression: a plugin step (MBS) whose `<PluginStep>` declares its slots as
+    /// `<Parameter ID="0" Label=… Type="calc">` used to unbalance the converted
+    /// XML ("expected </Parameter>, but </PluginStep> was found"), cutting the
+    /// script short. And Show Custom Dialog came out bare in every script,
+    /// because its `<Parameter type="Title|Message|ButtonN|FieldN">` were dropped.
+    #[test]
+    fn plugin_step_and_dialogs_decode_from_fmsavexml() {
+        let dir = temp_dir("plugin");
+        let xml_path = dir.join("export.xml");
+        std::fs::write(
+            &xml_path,
+            include_str!("../tests/fixtures/plugin_step_dialogs.xml"),
+        )
+        .unwrap();
+        let db = parse(xml_path.to_str().unwrap()).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        let text = |name: &str| {
+            script_text_inline(&db, name).unwrap()["script_text"]
+                .as_str()
+                .unwrap()
+                .replace("\r\n", "\n")
+        };
+        assert_eq!(
+            text("Plugin_Then_Dialog"),
+            concat!(
+                "Show Custom Dialog [Title: \"Antes:\"; ",
+                "Message: \"Primer diálogo\" & ¶ & \"con cálculo\"; ",
+                "Buttons: \"Aceptar\", \"Cancelar\"]\n",
+                "If [1]\n",
+                "  MBS [\"SyntaxColoring.AddTag\"; \"ScriptStep\"; \"#007700\"]\n",
+                "  Show Custom Dialog [Title: \"Después:\"; Message: \"¿Cuántos bultos?\"; ",
+                "Buttons: \"Aceptar\"; Input: $$Bultos; Label: \"Bultos:\"]\n",
+                "End If",
+            )
+            .to_string()
+        );
+        // The script after the plugin step is untouched, and a quote in a
+        // button label becomes an escaped quote in the label calc.
+        assert_eq!(
+            text("Next_Script"),
+            "Show Custom Dialog [Title: \"Siguiente\"; Message: \"Otro guion\"; Buttons: \"Say \\\"OK\\\"\"]"
+        );
+    }
+
+    /// A step that still converts to ill-formed XML is named in a warning and
+    /// kept by name, and the steps after it survive (with their indentation).
+    #[test]
+    fn undecodable_step_is_reported_and_the_rest_survives() {
+        let object_list = concat!(
+            r#"<Step index="0" id="68" name="If" enable="True"><ParameterValues><Parameter type="Calculation"><Calculation datatype="1" position="0"><Calculation><Text><![CDATA[1]]></Text></Calculation></Calculation></Parameter></ParameterValues></Step>"#,
+            r#"<Step index="1" id="999" name="Weird Plugin" enable="True"><Bogus></Junk></Step>"#,
+            r##"<Step index="2" id="89" name="# (comment)" enable="True"><ParameterValues><Parameter type="Comment"><Comment value="after"></Comment></Parameter></ParameterValues></Step>"##,
+            r#"<Step index="3" id="70" name="End If" enable="True"></Step>"#,
+        );
+        let (steps, warnings) = script_steps_from_object_list(object_list, "\"S\" #7");
+        let steps = steps.unwrap();
+
+        assert_eq!(warnings.len(), 1, "{:?}", warnings);
+        assert!(
+            warnings[0].starts_with("warning: script \"S\" #7: step 2 \"Weird Plugin\""),
+            "{}",
+            warnings[0]
+        );
+        let names: Vec<&str> = steps.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["If", "Weird Plugin", "# (comment)", "End If"]);
+        let text = crate::text_format::format_script(&crate::xmss::FmScript { steps });
+        assert!(text.contains("\n  # after\n"), "{}", text);
     }
 
     /// Typed Booleans keep their meaning in inspect: PSoS "Wait for completion"

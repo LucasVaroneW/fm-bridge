@@ -1,0 +1,188 @@
+<?xml version="1.0"?>
+<!--
+  Minimal FMSaveAsXML: a plugin step (MBS, shaped like a real FileMaker 22
+  export) between Show Custom Dialog steps, and a second script after it.
+  Before the fix the <PluginStep> parameter declarations unbalanced the XML:
+  the first script lost every step after the plugin step and every dialog
+  lost its title, message and buttons.
+-->
+<FMSaveAsXML version="2.2.3.0" File="PluginDialogs.fmp12">
+	<Structure>
+		<AddAction>
+			<ScriptCatalog membercount="2">
+				<Script id="10" name="Plugin_Then_Dialog"></Script>
+				<Script id="11" name="Next_Script"></Script>
+			</ScriptCatalog>
+			<StepsForScripts membercount="2">
+				<Script>
+					<ScriptReference id="10" name="Plugin_Then_Dialog" UUID="A"></ScriptReference>
+					<ObjectList membercount="5">
+						<Step hash="1" index="0" id="87" name="Show Custom Dialog" enable="True">
+							<UUID>S0</UUID>
+							<OwnerID></OwnerID>
+							<Options>16388</Options>
+							<ParameterValues membercount="5">
+								<Parameter type="Title">
+									<Calculation datatype="1" position="0">
+										<Calculation>
+											<Text><![CDATA["Antes:"]]></Text>
+										</Calculation>
+									</Calculation>
+								</Parameter>
+								<Parameter type="Message">
+									<Calculation datatype="1" position="1">
+										<Calculation>
+											<Text><![CDATA["Primer diálogo" & ¶ & "con cálculo"]]></Text>
+										</Calculation>
+									</Calculation>
+								</Parameter>
+								<Parameter type="Button1" value="Aceptar">
+									<Boolean type="Commit" value="True"></Boolean>
+								</Parameter>
+								<Parameter type="Button2" value="Cancelar">
+									<Boolean type="Commit" value="False"></Boolean>
+								</Parameter>
+								<Parameter type="Button3">
+									<Boolean type="Commit" value="False"></Boolean>
+								</Parameter>
+							</ParameterValues>
+						</Step>
+						<Step hash="2" index="1" id="68" name="If" enable="True">
+							<UUID>S1</UUID>
+							<OwnerID></OwnerID>
+							<Options>16388</Options>
+							<ParameterValues membercount="2">
+								<Parameter type="Calculation">
+									<Calculation datatype="1" position="0">
+										<Calculation>
+											<Text><![CDATA[1]]></Text>
+										</Calculation>
+									</Calculation>
+								</Parameter>
+								<Parameter type="Boolean">
+									<Boolean type="Collapsed" value="False"></Boolean>
+								</Parameter>
+							</ParameterValues>
+						</Step>
+						<Step hash="3" index="2" id="186" name="MBS" enable="True">
+							<UUID>S2</UUID>
+							<OwnerID></OwnerID>
+							<Options>21248</Options>
+							<External index="2" Source="MBSP" selectAll="True">
+								<PluginStep>
+									<Parameter ShowInLine="true" Label="Destination" Type="target"></Parameter>
+									<Parameter ID="0" Label="Function" ShowInline="true" DataType="text" Type="calc"></Parameter>
+									<Parameter ID="1" Label="P1" ShowInline="true" DataType="text" Type="calc"></Parameter>
+									<Parameter ID="2" Label="P2" ShowInline="true" DataType="text" Type="calc"></Parameter>
+									<Parameter ID="3" Label="P3" ShowInline="false" DataType="text" Type="calc"></Parameter>
+								</PluginStep>
+							</External>
+							<ParameterValues membercount="3">
+								<Parameter index="0" type="Calculation">
+									<Calculation datatype="1" position="0">
+										<Calculation>
+											<Text><![CDATA["SyntaxColoring.AddTag"]]></Text>
+										</Calculation>
+									</Calculation>
+								</Parameter>
+								<Parameter index="1" type="Calculation">
+									<Calculation datatype="1" position="1">
+										<Calculation>
+											<Text><![CDATA["ScriptStep"]]></Text>
+										</Calculation>
+									</Calculation>
+								</Parameter>
+								<Parameter index="2" type="Calculation">
+									<Calculation datatype="1" position="2">
+										<Calculation>
+											<Text><![CDATA["#007700"]]></Text>
+										</Calculation>
+									</Calculation>
+								</Parameter>
+							</ParameterValues>
+						</Step>
+						<Step hash="4" index="3" id="87" name="Show Custom Dialog" enable="True">
+							<UUID>S3</UUID>
+							<OwnerID></OwnerID>
+							<Options>16388</Options>
+							<ParameterValues membercount="4">
+								<Parameter type="Title">
+									<Calculation datatype="1" position="0">
+										<Calculation>
+											<Text><![CDATA["Después:"]]></Text>
+										</Calculation>
+									</Calculation>
+								</Parameter>
+								<Parameter type="Message">
+									<Calculation datatype="1" position="1">
+										<Calculation>
+											<Text><![CDATA["¿Cuántos bultos?"]]></Text>
+										</Calculation>
+									</Calculation>
+								</Parameter>
+								<Parameter type="Button1" value="Aceptar">
+									<Boolean type="Commit" value="True"></Boolean>
+								</Parameter>
+								<Parameter type="Field1">
+									<Parameter type="Target">
+										<Variable value="$$Bultos">
+											<repetition>
+												<Calculation datatype="1" position="32">
+													<Calculation>
+														<Text><![CDATA[1]]></Text>
+													</Calculation>
+												</Calculation>
+											</repetition>
+										</Variable>
+									</Parameter>
+									<Boolean type="Password" value="False"></Boolean>
+									<Parameter type="Label">
+										<Calculation datatype="1" position="2">
+											<Calculation>
+												<Text><![CDATA["Bultos:"]]></Text>
+											</Calculation>
+										</Calculation>
+									</Parameter>
+								</Parameter>
+							</ParameterValues>
+						</Step>
+						<Step hash="5" index="4" id="70" name="End If" enable="True">
+							<UUID>S4</UUID>
+							<OwnerID></OwnerID>
+							<Options>0</Options>
+						</Step>
+					</ObjectList>
+				</Script>
+				<Script>
+					<ScriptReference id="11" name="Next_Script" UUID="B"></ScriptReference>
+					<ObjectList membercount="1">
+						<Step hash="6" index="0" id="87" name="Show Custom Dialog" enable="True">
+							<UUID>T0</UUID>
+							<OwnerID></OwnerID>
+							<Options>16388</Options>
+							<ParameterValues membercount="3">
+								<Parameter type="Title">
+									<Calculation datatype="1" position="0">
+										<Calculation>
+											<Text><![CDATA["Siguiente"]]></Text>
+										</Calculation>
+									</Calculation>
+								</Parameter>
+								<Parameter type="Message">
+									<Calculation datatype="1" position="1">
+										<Calculation>
+											<Text><![CDATA["Otro guion"]]></Text>
+										</Calculation>
+									</Calculation>
+								</Parameter>
+								<Parameter type="Button1" value="Say &quot;OK&quot;">
+									<Boolean type="Commit" value="True"></Boolean>
+								</Parameter>
+							</ParameterValues>
+						</Step>
+					</ObjectList>
+				</Script>
+			</StepsForScripts>
+		</AddAction>
+	</Structure>
+</FMSaveAsXML>

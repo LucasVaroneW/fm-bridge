@@ -1585,6 +1585,28 @@ mod real_world {
     /// but when it is, it is the one that matters: 385 fields through
     /// XML → text → XML → model, compared field by field.
     #[test]
+    #[ignore = "utilidad de inspección, no una comprobación"]
+    fn dump_sample() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("pruebas.xml");
+        let Ok(xml) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let (tables, ledger) = decode_xmtb(&xml).unwrap();
+        let text = format_tables(&tables);
+        for line in text.lines().take(60) {
+            println!("{}", line);
+        }
+        println!(
+            "
+--- descartes ({}) ---",
+            ledger.dropped.len()
+        );
+        for d in ledger.dropped.iter().take(3) {
+            println!("  {}", d);
+        }
+    }
+
+    #[test]
     fn a_real_two_table_snippet_survives_the_full_round_trip() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("pruebas.xml");
         let Ok(xml) = std::fs::read_to_string(&path) else {
